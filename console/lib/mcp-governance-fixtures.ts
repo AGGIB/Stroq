@@ -66,13 +66,16 @@ export const governanceCapture = (): McpGovernanceCapture => ({
 });
 export const governancePreview = (): McpGovernancePreview => {
   const capture = governanceCapture(),
-    choice = capture.choices[0]!;
+    choice = capture.choices[0]!,
+    // One reading of the clock: two would be a millisecond apart now and then, and a preview
+    // that lives a millisecond past its two minutes is refused.
+    now = Date.now();
   return {
     schema: 'stroq-mcp-governance-preview/1',
     id: governanceId(2),
     operationId: governanceId(3),
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 120000).toISOString(),
+    createdAt: new Date(now).toISOString(),
+    expiresAt: new Date(now + 120000).toISOString(),
     captureId: capture.captureId!,
     binding: capture.binding!,
     selected: [{ id: choice.id, expectedSha256: choice.expectedSha256 }],

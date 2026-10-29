@@ -150,133 +150,140 @@ function start(paginated = false) {
   };
 }
 
-describe('real opt-in proxy with the protected native approval store', () => {
-  it.each([false, true])(
-    'withholds discovery and requires fresh exact decisions (paginated=%s)',
-    async (paginated) => {
-      const refusals = vi.spyOn(toolApprovals, 'auditToolApprovalRefusal');
-      const r = start(paginated);
-      r.list(1);
-      expect((await r.answer(1)).error).toBeDefined();
-      expect(refusals).toHaveBeenCalledTimes(1);
-      expect(refusals.mock.calls[0]?.[1]).toBe('tools/list');
-      expect(r.audit()).toMatchObject([
-        {
-          phase: 'pre',
-          tool: 'mcp__server_raw__tool_contract',
-          decision: { effect: 'deny', ruleId: 'mcp-tool-contract-not-approved' },
-        },
-      ]);
-      r.call(2);
-      await r.answer(2);
-      expect(r.callLog()).toBe('');
-      const first = await r.snapshot();
-      const a = first.snapshot.capture!.tools[0]!;
-      await first.store.decide({
-        bindingId: first.snapshot.binding.id,
-        expectedRevision: first.snapshot.revision,
-        expectedCaptureSha256: first.snapshot.capture!.sha256,
-        toolId: a.id,
-        expectedContractSha256: a.sha256,
-        action: 'approve',
-      });
-      r.list(3);
-      expect((await r.answer(3)).result).toBeDefined();
-      r.call(4, 'look/up');
-      expect((await r.answer(4)).error).toBeDefined();
-      expect(r.callLog()).toBe('');
-      r.call(5);
-      expect((await r.answer(5)).result).toBeDefined();
-      expect(r.callLog()).toBe('look:up\n');
-      writeFileSync(
-        r.source,
-        JSON.stringify({
-          tools: [
-            {
-              name: 'look:up',
-              description: 'Changed local contract',
-              inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
-            },
-          ],
-        }),
-      );
-      r.send({ jsonrpc: '2.0', method: 'notifications/fixture/change' });
-      await vi.waitFor(() =>
-        expect(r.messages.some((m) => m.method === 'notifications/tools/list_changed')).toBe(true),
-      );
-      r.call(6);
-      expect((await r.answer(6)).error).toBeDefined();
-      expect(r.callLog()).toBe('look:up\n');
-      r.list(7);
-      expect((await r.answer(7)).error).toBeDefined();
-      await expect(
-        first.store.decide({
+// The tool-contract store is POSIX-only (private modes, one owner, no group or other write): on Windows
+// it refuses (`tool-contract-files.ts`), so there is nothing here to exercise.
+describe.skipIf(process.platform === 'win32')(
+  'real opt-in proxy with the protected native approval store',
+  () => {
+    it.each([false, true])(
+      'withholds discovery and requires fresh exact decisions (paginated=%s)',
+      async (paginated) => {
+        const refusals = vi.spyOn(toolApprovals, 'auditToolApprovalRefusal');
+        const r = start(paginated);
+        r.list(1);
+        expect((await r.answer(1)).error).toBeDefined();
+        expect(refusals).toHaveBeenCalledTimes(1);
+        expect(refusals.mock.calls[0]?.[1]).toBe('tools/list');
+        expect(r.audit()).toMatchObject([
+          {
+            phase: 'pre',
+            tool: 'mcp__server_raw__tool_contract',
+            decision: { effect: 'deny', ruleId: 'mcp-tool-contract-not-approved' },
+          },
+        ]);
+        r.call(2);
+        await r.answer(2);
+        expect(r.callLog()).toBe('');
+        const first = await r.snapshot();
+        const a = first.snapshot.capture!.tools[0]!;
+        await first.store.decide({
           bindingId: first.snapshot.binding.id,
           expectedRevision: first.snapshot.revision,
           expectedCaptureSha256: first.snapshot.capture!.sha256,
           toolId: a.id,
           expectedContractSha256: a.sha256,
           action: 'approve',
-        }),
-      ).rejects.toThrow('tool-contract-stale');
-      const next = await r.snapshot();
-      const b = next.snapshot.capture!.tools[0]!;
-      expect(b.sha256).not.toBe(a.sha256);
-      await next.store.decide({
-        bindingId: next.snapshot.binding.id,
-        expectedRevision: next.snapshot.revision,
-        expectedCaptureSha256: next.snapshot.capture!.sha256,
-        toolId: b.id,
-        expectedContractSha256: b.sha256,
+        });
+        r.list(3);
+        expect((await r.answer(3)).result).toBeDefined();
+        r.call(4, 'look/up');
+        expect((await r.answer(4)).error).toBeDefined();
+        expect(r.callLog()).toBe('');
+        r.call(5);
+        expect((await r.answer(5)).result).toBeDefined();
+        expect(r.callLog()).toBe('look:up\n');
+        writeFileSync(
+          r.source,
+          JSON.stringify({
+            tools: [
+              {
+                name: 'look:up',
+                description: 'Changed local contract',
+                inputSchema: { type: 'object', properties: { query: { type: 'string' } } },
+              },
+            ],
+          }),
+        );
+        r.send({ jsonrpc: '2.0', method: 'notifications/fixture/change' });
+        await vi.waitFor(() =>
+          expect(r.messages.some((m) => m.method === 'notifications/tools/list_changed')).toBe(
+            true,
+          ),
+        );
+        r.call(6);
+        expect((await r.answer(6)).error).toBeDefined();
+        expect(r.callLog()).toBe('look:up\n');
+        r.list(7);
+        expect((await r.answer(7)).error).toBeDefined();
+        await expect(
+          first.store.decide({
+            bindingId: first.snapshot.binding.id,
+            expectedRevision: first.snapshot.revision,
+            expectedCaptureSha256: first.snapshot.capture!.sha256,
+            toolId: a.id,
+            expectedContractSha256: a.sha256,
+            action: 'approve',
+          }),
+        ).rejects.toThrow('tool-contract-stale');
+        const next = await r.snapshot();
+        const b = next.snapshot.capture!.tools[0]!;
+        expect(b.sha256).not.toBe(a.sha256);
+        await next.store.decide({
+          bindingId: next.snapshot.binding.id,
+          expectedRevision: next.snapshot.revision,
+          expectedCaptureSha256: next.snapshot.capture!.sha256,
+          toolId: b.id,
+          expectedContractSha256: b.sha256,
+          action: 'approve',
+        });
+        expect(r.callLog()).toBe('look:up\n');
+        r.call(8);
+        expect((await r.answer(8)).result).toBeDefined();
+        expect(r.callLog()).toBe('look:up\nlook:up\n');
+        expect(
+          r.messages
+            .map((m) => JSON.stringify(m))
+            .filter((m) => m.includes('Changed local contract')),
+        ).toHaveLength(0);
+        expect(r.errors()).not.toContain('binding is unavailable');
+      },
+    );
+
+    it('keeps the session through a cancelled call, a 20-digit argument and a constructor key', async () => {
+      const r = start();
+      r.list(1);
+      await r.answer(1);
+      const first = await r.snapshot();
+      const tool = first.snapshot.capture!.tools[0]!;
+      await first.store.decide({
+        bindingId: first.snapshot.binding.id,
+        expectedRevision: first.snapshot.revision,
+        expectedCaptureSha256: first.snapshot.capture!.sha256,
+        toolId: tool.id,
+        expectedContractSha256: tool.sha256,
         action: 'approve',
       });
-      expect(r.callLog()).toBe('look:up\n');
-      r.call(8);
-      expect((await r.answer(8)).result).toBeDefined();
-      expect(r.callLog()).toBe('look:up\nlook:up\n');
-      expect(
-        r.messages
-          .map((m) => JSON.stringify(m))
-          .filter((m) => m.includes('Changed local contract')),
-      ).toHaveLength(0);
-      expect(r.errors()).not.toContain('binding is unavailable');
-    },
-  );
-
-  it('keeps the session through a cancelled call, a 20-digit argument and a constructor key', async () => {
-    const r = start();
-    r.list(1);
-    await r.answer(1);
-    const first = await r.snapshot();
-    const tool = first.snapshot.capture!.tools[0]!;
-    await first.store.decide({
-      bindingId: first.snapshot.binding.id,
-      expectedRevision: first.snapshot.revision,
-      expectedCaptureSha256: first.snapshot.capture!.sha256,
-      toolId: tool.id,
-      expectedContractSha256: tool.sha256,
-      action: 'approve',
+      r.list(2);
+      expect((await r.answer(2)).result).toBeDefined();
+      r.call(3);
+      r.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 3 } });
+      r.call(4);
+      expect((await r.answer(4)).result).toBeDefined();
+      r.send(
+        '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"look:up","arguments":{"n":12345678901234567890}}}',
+      );
+      const inexact = await r.answer(5);
+      expect(JSON.stringify(inexact.error)).toContain('cannot be represented exactly');
+      r.send(
+        '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"look:up","arguments":{"constructor":{"prototype":1},"__proto__":{"x":1}}}}',
+      );
+      expect((await r.answer(6)).result).toBeDefined();
+      r.call(7);
+      expect((await r.answer(7)).result).toBeDefined();
+      expect(r.callLog()).toBe('look:up\n'.repeat(4));
+      const after = await r.snapshot();
+      expect(after.snapshot.observation).toBe('complete');
+      expect(after.snapshot.capture!.sha256).toBe(first.snapshot.capture!.sha256);
     });
-    r.list(2);
-    expect((await r.answer(2)).result).toBeDefined();
-    r.call(3);
-    r.send({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: 3 } });
-    r.call(4);
-    expect((await r.answer(4)).result).toBeDefined();
-    r.send(
-      '{"jsonrpc":"2.0","id":5,"method":"tools/call","params":{"name":"look:up","arguments":{"n":12345678901234567890}}}',
-    );
-    const inexact = await r.answer(5);
-    expect(JSON.stringify(inexact.error)).toContain('cannot be represented exactly');
-    r.send(
-      '{"jsonrpc":"2.0","id":6,"method":"tools/call","params":{"name":"look:up","arguments":{"constructor":{"prototype":1},"__proto__":{"x":1}}}}',
-    );
-    expect((await r.answer(6)).result).toBeDefined();
-    r.call(7);
-    expect((await r.answer(7)).result).toBeDefined();
-    expect(r.callLog()).toBe('look:up\n'.repeat(4));
-    const after = await r.snapshot();
-    expect(after.snapshot.observation).toBe('complete');
-    expect(after.snapshot.capture!.sha256).toBe(first.snapshot.capture!.sha256);
-  });
-});
+  },
+);

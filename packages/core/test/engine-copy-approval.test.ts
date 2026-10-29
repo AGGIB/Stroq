@@ -8,7 +8,7 @@ import { StroqEngine } from '../src/engine.js';
 import { DEFAULT_POLICY } from '../src/policy/default-policy.js';
 import { FileProvenanceStore } from '../src/provenance/store.js';
 import { loadBundledRules } from '../src/rules/bundle.js';
-import { FileSessionStore } from '../src/taint/session-store.js';
+import { FileSessionStore, MAX_CALLS_RUNNING } from '../src/taint/session-store.js';
 
 // A question about a value copied from text the agent read is asked once: when the user lets the
 // call run (the host then reports its result), the same value is not asked about again in the
@@ -125,6 +125,38 @@ describe('a question about a copied value', () => {
     });
     const again = await pre(`npx ${NAME}`, 'c2');
     expect(again.decision.effect).not.toBe('allow');
+  });
+
+  it('takes no answer while another call that started during the question still runs', async () => {
+    const { read, pre, ran } = fixture();
+    await read(PAGE);
+    await pre(`npx ${NAME}`, 'c1');
+    // A call of the agent's that could be writing the report itself.
+    await pre('ls -la', 'c2');
+    await ran(`npx ${NAME}`, 'c1');
+    const again = await pre(`npx ${NAME}`, 'c3');
+    expect(again.decision.ruleId).toBe('ask-origin-untrusted');
+  });
+
+  it('forgets the question, rather than lose track of a call, when more calls start than are kept', async () => {
+    const { read, pre, ran } = fixture();
+    await read(PAGE);
+    await pre(`npx ${NAME}`, 'c1');
+    for (let i = 0; i <= MAX_CALLS_RUNNING; i += 1) await pre('ls -la', `busy-${i}`);
+    for (let i = 1; i <= MAX_CALLS_RUNNING; i += 1) await ran('ls -la', `busy-${i}`);
+    // The first of them never reported back, and fell off a list that kept the rest.
+    await ran(`npx ${NAME}`, 'c1');
+    const again = await pre(`npx ${NAME}`, 'c2');
+    expect(again.decision.ruleId).toBe('ask-origin-untrusted');
+  });
+
+  it('lets a value through only for calls of the kinds it ran in', async () => {
+    const { read, pre, ran } = fixture();
+    await read(PAGE);
+    await pre(`npx ${NAME}`, 'c1');
+    await ran(`npx ${NAME}`, 'c1');
+    const wider = await pre(`npx ${NAME} && cat ~/.aws/credentials`, 'c2');
+    expect(wider.classes).toContain('origin.untrusted');
   });
 
   it('is not answered by a hook command the agent runs itself', () => {

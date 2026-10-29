@@ -158,14 +158,25 @@ describe('a script a program runs is read as a typed one is', () => {
   const tool = (command: string): readonly string[] =>
     classifyShellTool('Bash', { command }, work).classes;
 
+  // On Windows the folder is `C:\\Users\\…`, and in a Python string `\\U` begins an escape: the two lines
+  // that name it are left to the platforms where a path is written as it is.
+  const named =
+    process.platform === 'win32'
+      ? []
+      : [
+          [
+            `python3 -c "import subprocess; subprocess.run(['sh', 'tidy.sh'], cwd='${other}')"`,
+            'shell.destructive',
+          ],
+          [
+            `python3 -c "import os; os.chdir('${other}'); os.system('sh tidy.sh')"`,
+            'shell.destructive',
+          ],
+        ];
   it.each([
     [`python3 -c "import subprocess; subprocess.run(['sh', 'cleanup.sh'])"`, 'shell.destructive'],
     [`python3 -c "import os; os.system('sh fetch.sh')"`, 'shell.exec_encoded'],
-    [
-      `python3 -c "import subprocess; subprocess.run(['sh', 'tidy.sh'], cwd='${other}')"`,
-      'shell.destructive',
-    ],
-    [`python3 -c "import os; os.chdir('${other}'); os.system('sh tidy.sh')"`, 'shell.destructive'],
+    ...named,
   ])('%s', (command, cls) => {
     expect(tool(command)).toContain(cls);
   });

@@ -75,7 +75,9 @@ interface RetainedFixture {
   }[];
 }
 
-describe('last explicitly approved MCP tool bodies', () => {
+// The tool-contract store is POSIX-only (private modes, one owner, no group or other write): on Windows
+// it refuses (`tool-contract-files.ts`), so there is nothing here to exercise.
+describe.skipIf(process.platform === 'win32')('last explicitly approved MCP tool bodies', () => {
   it('keeps the approved body through pending observations, invalidation and revocation', async () => {
     const f = await fixture();
     const a = await approved(f, 'Approved A');

@@ -137,7 +137,9 @@ function rig(
     send: (value: unknown) => pump.onClientLine(line(value)),
   };
 }
-describe('final native MCP call-control dispatch', () => {
+// The native call-control store is POSIX-only: on Windows it refuses with `mcp-call-control-unsupported`
+// (`call-control-files.ts`), so there is nothing here to exercise.
+describe.skipIf(process.platform === 'win32')('final native MCP call-control dispatch', () => {
   it.each([
     '{"jsonrpc":"2.0","id":1,"method":"tools/call","method":"ping","params":{"name":"lookup"}}',
     '{"jsonrpc":"2.0","id":1,"method":"tools/call","meth\\u006fd":"ping","params":{"name":"lookup"}}',

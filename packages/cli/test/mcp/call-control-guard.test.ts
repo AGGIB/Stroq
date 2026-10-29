@@ -32,7 +32,9 @@ async function decide(action: McpCallControlAction, invocationSha256 = sha) {
 const guard = () =>
   createMcpCallControlGuard({ home, controlId: id, invocationSha256: sha }, { lockTimeoutMs: 10 });
 const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
-describe('MCP physical dispatch call-control guard', () => {
+// The native call-control store is POSIX-only: on Windows it refuses with `mcp-call-control-unsupported`
+// (`call-control-files.ts`), so there is nothing here to exercise.
+describe.skipIf(process.platform === 'win32')('MCP physical dispatch call-control guard', () => {
   it('supports pause then resume on the same compatible connection and captures exact evidence', async () => {
     const configured = await decide('configure-paused');
     const g = guard();

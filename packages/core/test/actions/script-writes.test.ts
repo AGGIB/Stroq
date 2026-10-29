@@ -450,6 +450,7 @@ describe('the adversarial review of a114d37c', () => {
       "S=safe.sh; arr[S=1]=x; bash -c 'bash $S'",
       "S=safe.sh; echo $[ S = 1 ]; bash -c 'bash $S'",
       "S=safe.sh; (( S = (1 + (2 * (3))) )); bash -c 'bash $S'",
+      "S=safe.sh; echo ${X:S=1}; bash -c 'bash $S'",
     ])
       expect(stopped(command), command).toBe(true);
     // A name read in a test is not given a value there.
@@ -481,9 +482,11 @@ describe('the adversarial review of a114d37c', () => {
 
 describe('text that runs no file', () => {
   it('is a file a piece of a quoted pattern or a Python line names, which the line wrote as data', () => {
+    // Forward slashes: a Windows folder's backslashes are escapes to the shell and to Python.
+    const at = dir.replaceAll('\\', '/');
     for (const command of [
-      `OUT=${dir}/o; echo "start $(date)" >> $OUT/log.txt; echo "exit=$?" >> $OUT/log.txt; grep -E "a|b" $OUT/log.txt`,
-      `curl -fsSL -o ${dir}/x.tgz https://e.invalid/x.tgz\npython3 - <<'PY'\nfrom pathlib import Path\np=Path('${dir}/x.tgz')\nprint(p.stat().st_size)\nPY`,
+      `OUT=${at}/o; echo "start $(date)" >> $OUT/log.txt; echo "exit=$?" >> $OUT/log.txt; grep -E "a|b" $OUT/log.txt`,
+      `curl -fsSL -o ${at}/x.tgz https://e.invalid/x.tgz\npython3 - <<'PY'\nfrom pathlib import Path\np=Path('${at}/x.tgz')\nprint(p.stat().st_size)\nPY`,
     ])
       expect(classes(command), command).not.toContain('shell.unparsed');
   });
@@ -671,11 +674,18 @@ describe('what a segment writes', () => {
   });
 
   it('reads a long word in time that grows with its length', () => {
-    const start = process.cpuUsage();
-    segmentWrites(`tar -${'a'.repeat(60_000)}`);
-    segmentWrites(`printf '${'%0'.repeat(20_000)}' > t`);
-    segmentWrites(`echo ${'>'.repeat(30_000)}`);
-    const used = process.cpuUsage(start);
-    expect((used.user + used.system) / 1000).toBeLessThan(2_000);
+    // Measured against itself at a quarter of the length, not against a fixed budget: coverage on
+    // a busy runner made the full reading take 2.1 s (80 ms here), but it does not make words four
+    // times longer sixteen times slower, which is what a reading that went back over them would do.
+    const read = (times: number): number => {
+      const start = process.cpuUsage();
+      segmentWrites(`tar -${'a'.repeat(15_000 * times)}`);
+      segmentWrites(`printf '${'%0'.repeat(5_000 * times)}' > t`);
+      segmentWrites(`echo ${'>'.repeat(7_500 * times)}`);
+      const used = process.cpuUsage(start);
+      return (used.user + used.system) / 1000;
+    };
+    const quarter = read(1);
+    expect(read(4)).toBeLessThan(quarter * 8 + 100);
   });
 });

@@ -16,13 +16,17 @@ async function fixture() {
   return { dir, entry: join(dir, 'index.js') };
 }
 describe('MCP tool runtime identity', () => {
-  it('changes when a split chunk changes while the loader stays unchanged', async () => {
-    const f = await fixture(),
-      first = await hashToolContractRuntime(f.entry);
-    expect(await hashToolContractRuntime(f.entry)).toBe(first);
-    await writeFile(join(f.dir, 'chunk.js'), 'export const version=2;');
-    expect(await hashToolContractRuntime(f.entry)).not.toBe(first);
-  });
+  // A runtime is hashed only from files no group or other can write, which Windows modes cannot say.
+  it.skipIf(process.platform === 'win32')(
+    'changes when a split chunk changes while the loader stays unchanged',
+    async () => {
+      const f = await fixture(),
+        first = await hashToolContractRuntime(f.entry);
+      expect(await hashToolContractRuntime(f.entry)).toBe(first);
+      await writeFile(join(f.dir, 'chunk.js'), 'export const version=2;');
+      expect(await hashToolContractRuntime(f.entry)).not.toBe(first);
+    },
+  );
   it('refuses symlinked chunks and writable authority', async () => {
     const f = await fixture();
     await symlink('chunk.js', join(f.dir, 'linked.js'));

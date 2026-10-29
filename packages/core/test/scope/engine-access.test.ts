@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { AuditLog, redact } from '../../src/audit/audit-log.js';
 import { StroqEngine, type EngineOptions } from '../../src/engine.js';
@@ -50,7 +50,8 @@ describe('the engine records a signed complete fresh refusal without authorizing
       kind: 'read-target',
       input: event().toolInput,
       cwd: PROJECT,
-      target: { op: 'read', path: '/outside/a' },
+      // Resolved where Stroq runs: on Windows `/outside/a` is on the current drive.
+      target: { op: 'read', path: resolve('/outside/a') },
     });
     expect(
       verifyTaskAccessRequest(request, f.pair.publicKey, {

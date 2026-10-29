@@ -167,6 +167,8 @@ const GIVES_ANY: ReadonlySet<string> = new Set(['eval', 'source', '.']);
 const BRACKET = /\[([^\][]*)\]/g;
 /** A bare name, not one read with `$` or inside `${…}`. */
 const BARE_NAMES = /(?<![$\w{])[A-Za-z_]\w*/g;
+/** The offset and length of a substring expansion, which are arithmetic: `${X:S=1}`. */
+const SUBSTRING = /\$\{[A-Za-z_]\w*:(?![-=?+])([^}]*)\}/g;
 /** An expansion that gives a name a value when it has none: `${S:=x}`, `${S=x}`. */
 const DEFAULT_ASSIGNMENT = /\$\{([A-Za-z_]\w*):?=/g;
 /** Words that run the command after them, and its options, as it is: `builtin read x`, `command -p read x`. */
@@ -192,6 +194,7 @@ function namesGiven(segment: string): readonly string[] | null {
   const inExpressions = [
     ...(arithmetic === -1 ? [] : (segment.slice(arithmetic).match(BARE_NAMES) ?? [])),
     ...[...segment.matchAll(BRACKET)].flatMap((m) => (m[1] as string).match(BARE_NAMES) ?? []),
+    ...[...segment.matchAll(SUBSTRING)].flatMap((m) => (m[1] as string).match(BARE_NAMES) ?? []),
     ...[...segment.matchAll(DEFAULT_ASSIGNMENT)].map((m) => m[1] as string),
   ];
   return inExpressions.length === 0 ? front : [...front, ...inExpressions];

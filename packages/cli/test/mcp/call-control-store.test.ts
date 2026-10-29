@@ -56,7 +56,9 @@ afterEach(async () => {
   await rm(fixture, { recursive: true, force: true });
 });
 
-describe('native MCP call authority', () => {
+// The native call-control store is POSIX-only: on Windows it refuses with `mcp-call-control-unsupported`
+// (`call-control-files.ts`), so there is nothing here to exercise.
+describe.skipIf(process.platform === 'win32')('native MCP call authority', () => {
   it('reads absence without creating home or taking a lease', async () => {
     expect(await store().read()).toMatchObject({
       history: 'missing',

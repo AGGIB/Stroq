@@ -53,7 +53,9 @@ async function fixture() {
 const tools = async (store: FileSessionStore) =>
   (await store.get('one')).taint?.sources.map((s) => s.tool);
 const staged = async (dir: string) => (await readdir(dir)).filter((n) => n.endsWith('.tmp'));
-describe('guarded native taint-only clear', () => {
+// The guarded clear reads a session directory only when it is private (0700, one owner), which Windows
+// cannot express: there it refuses (`session-taint-source-unavailable`), so there is nothing to exercise.
+describe.skipIf(process.platform === 'win32')('guarded native taint-only clear', () => {
   it('reads and clears a session that also holds a note of flags on its own text, and keeps the note', async () => {
     const home = await realpath(await mkdtemp(join(tmpdir(), 'stroq-taint-clear-own-'))),
       dir = join(home, 'sessions');
@@ -303,243 +305,249 @@ describe('guarded native taint-only clear', () => {
   });
 });
 
-describe('a clear carries a person’s confirmation and an audit record', () => {
-  it('refuses a clear without an audit sink or a confirmation, before any callback or write', async () => {
-    const refused: Record<string, unknown>[] = [
-      { audit: undefined },
-      { audit: 'yes' },
-      { confirmation: undefined },
-      { confirmation: null },
-      { confirmation: { ...confirmation, weakensRestrictions: false } },
-      { confirmation: { ...confirmation, recoveryRetention: 'true' } },
-      { confirmation: { ...confirmation, previewId: 'not-a-preview' } },
-      { confirmation: { ...confirmation, previewId: confirmation.previewId.toUpperCase() } },
-      { confirmation: { weakensRestrictions: true, recoveryRetention: true } },
-      { confirmation: { ...confirmation, acknowledgedBy: 'agent' } },
-    ];
-    for (const over of refused) {
+describe.skipIf(process.platform === 'win32')(
+  'a clear carries a person’s confirmation and an audit record',
+  () => {
+    it('refuses a clear without an audit sink or a confirmation, before any callback or write', async () => {
+      const refused: Record<string, unknown>[] = [
+        { audit: undefined },
+        { audit: 'yes' },
+        { confirmation: undefined },
+        { confirmation: null },
+        { confirmation: { ...confirmation, weakensRestrictions: false } },
+        { confirmation: { ...confirmation, recoveryRetention: 'true' } },
+        { confirmation: { ...confirmation, previewId: 'not-a-preview' } },
+        { confirmation: { ...confirmation, previewId: confirmation.previewId.toUpperCase() } },
+        { confirmation: { weakensRestrictions: true, recoveryRetention: true } },
+        { confirmation: { ...confirmation, acknowledgedBy: 'agent' } },
+      ];
+      for (const over of refused) {
+        const f = await fixture();
+        try {
+          const called: string[] = [];
+          const before = await readdir(f.dir);
+          await expect(
+            clearStoredSessionTaint(f.snapshot, {
+              ...hooks({
+                guard: async () => {
+                  called.push('guard');
+                },
+                beforePublish: async () => {
+                  called.push('intent');
+                },
+              }),
+              ...over,
+            } as SessionTaintClearHooks),
+            JSON.stringify(over),
+          ).rejects.toThrow('session-taint-unconfirmed');
+          expect(called, JSON.stringify(over)).toEqual([]);
+          expect(await readdir(f.dir)).toEqual(before);
+          expect(await readFile(f.snapshot.path)).toEqual(f.snapshot.bytes);
+        } finally {
+          await rm(f.home, { recursive: true, force: true });
+        }
+      }
+    });
+    it('records the clear and its confirmation in the audit sink before the clear is published', async () => {
       const f = await fixture();
       try {
-        const called: string[] = [];
-        const before = await readdir(f.dir);
-        await expect(
-          clearStoredSessionTaint(f.snapshot, {
-            ...hooks({
-              guard: async () => {
-                called.push('guard');
-              },
-              beforePublish: async () => {
-                called.push('intent');
-              },
-            }),
-            ...over,
-          } as SessionTaintClearHooks),
-          JSON.stringify(over),
-        ).rejects.toThrow('session-taint-unconfirmed');
-        expect(called, JSON.stringify(over)).toEqual([]);
-        expect(await readdir(f.dir)).toEqual(before);
-        expect(await readFile(f.snapshot.path)).toEqual(f.snapshot.bytes);
+        const records: SessionTaintClearRecord[] = [],
+          order: string[] = [],
+          now = new Date('2026-10-27T12:00:00.000Z');
+        const cleared = await clearStoredSessionTaint(
+          f.snapshot,
+          hooks({
+            now: () => now,
+            beforePublish: async () => {
+              order.push('intent');
+            },
+            audit: async (record) => {
+              order.push('audit');
+              // The session is still tainted on disk while the clear is recorded.
+              expect((await f.store.get('one')).taint).not.toBeNull();
+              records.push(record);
+            },
+          }),
+        );
+        expect(order).toEqual(['intent', 'audit']);
+        expect(records).toEqual([
+          {
+            sessionId: 'one',
+            beforeSha256: f.snapshot.sha256,
+            afterSha256: cleared.sha256,
+            at: now.toISOString(),
+            confirmation,
+          },
+        ]);
+        expect(cleared.state).toEqual({
+          ...f.snapshot.state,
+          taint: null,
+          updatedAt: now.toISOString(),
+        });
       } finally {
         await rm(f.home, { recursive: true, force: true });
       }
-    }
-  });
-  it('records the clear and its confirmation in the audit sink before the clear is published', async () => {
-    const f = await fixture();
-    try {
-      const records: SessionTaintClearRecord[] = [],
-        order: string[] = [],
-        now = new Date('2026-10-27T12:00:00.000Z');
-      const cleared = await clearStoredSessionTaint(
-        f.snapshot,
-        hooks({
-          now: () => now,
-          beforePublish: async () => {
-            order.push('intent');
-          },
-          audit: async (record) => {
-            order.push('audit');
-            // The session is still tainted on disk while the clear is recorded.
-            expect((await f.store.get('one')).taint).not.toBeNull();
-            records.push(record);
-          },
-        }),
-      );
-      expect(order).toEqual(['intent', 'audit']);
-      expect(records).toEqual([
-        {
-          sessionId: 'one',
-          beforeSha256: f.snapshot.sha256,
-          afterSha256: cleared.sha256,
-          at: now.toISOString(),
-          confirmation,
-        },
-      ]);
-      expect(cleared.state).toEqual({
-        ...f.snapshot.state,
-        taint: null,
-        updatedAt: now.toISOString(),
-      });
-    } finally {
-      await rm(f.home, { recursive: true, force: true });
-    }
-  });
-  it('a failed audit record never publishes the clear and leaves no staged file', async () => {
-    const f = await fixture();
-    try {
-      await expect(
-        clearStoredSessionTaint(
-          f.snapshot,
-          hooks({
-            audit: async () => {
-              throw new Error('fixture-audit-failed');
-            },
-          }),
-        ),
-      ).rejects.toThrow('fixture-audit-failed');
-      expect(await readFile(f.snapshot.path)).toEqual(f.snapshot.bytes);
-      expect(await staged(f.dir)).toEqual([]);
-    } finally {
-      await rm(f.home, { recursive: true, force: true });
-    }
-  });
-  it('the confirmation the sink receives is a copy the caller cannot change after the fact', async () => {
-    const f = await fixture();
-    try {
-      const given = { ...confirmation },
-        records: SessionTaintClearRecord[] = [];
-      const pending = clearStoredSessionTaint(
-        f.snapshot,
-        hooks({
-          confirmation: given,
-          audit: async (record) => {
-            records.push(record);
-          },
-        }),
-      );
-      (given as { previewId: string }).previewId = '00000000-0000-4000-8000-000000000000';
-      await pending;
-      expect(records[0]?.confirmation).toEqual(confirmation);
-    } finally {
-      await rm(f.home, { recursive: true, force: true });
-    }
-  });
-});
-
-describe('the session lock is held only to read, publish and confirm', () => {
-  it('runs no callback while the session lock is held', async () => {
-    const f = await fixture();
-    try {
-      const lock = `${f.snapshot.path}.lock`,
-        seen: string[] = [];
-      const free = async (name: string) => {
-        await expect(lstat(lock), name).rejects.toMatchObject({ code: 'ENOENT' });
-        seen.push(name);
-      };
-      await clearStoredSessionTaint(
-        f.snapshot,
-        hooks({
-          guard: () => free('guard'),
-          beforePublish: () => free('intent'),
-          audit: () => free('audit'),
-          fault: (stage) => free(stage),
-        }),
-      );
-      expect(seen).toEqual([
-        'guard',
-        'guard',
-        'intent',
-        'audit',
-        'guard',
-        'before-rename',
-        'after-rename',
-        'guard',
-      ]);
-      expect((await f.store.get('one')).taint).toBeNull();
-    } finally {
-      await rm(f.home, { recursive: true, force: true });
-    }
-  });
-  // Reported 2026-10-27: a durable callback that took 4 s while the clear held the lock made a hook's
-  // concurrent mark time out at 3 s, and the clear then went through. Each callback here waits until a
-  // concurrent mark has settled, so the case is decided by the order of events and not by a clock: a lock
-  // held across the callback would make the mark wait out its timeout.
-  it.each(['beforePublish', 'audit', 'guard'] as const)(
-    'a slow %s does not hold back a concurrent mark, and the mark stands over the clear',
-    async (slow) => {
+    });
+    it('a failed audit record never publishes the clear and leaves no staged file', async () => {
       const f = await fixture();
       try {
-        let release!: () => void,
-          mark: Promise<unknown> | undefined,
-          guards = 0;
-        const settled = new Promise<void>((resolve) => {
-          release = resolve;
-        });
-        const wait = async () => {
-          mark ??= f.store
-            .markSuspect('one', { ...source, tool: 'concurrent' })
-            .finally(() => release());
-          await settled;
-        };
         await expect(
           clearStoredSessionTaint(
             f.snapshot,
             hooks({
-              beforePublish: slow === 'beforePublish' ? wait : async () => {},
-              audit: slow === 'audit' ? wait : async () => {},
-              // The first guard runs before anything is staged; the slow one is the next.
-              guard: async () => {
-                guards += 1;
-                if (slow === 'guard' && guards === 2) await wait();
+              audit: async () => {
+                throw new Error('fixture-audit-failed');
               },
             }),
           ),
-        ).rejects.toThrow('session-taint-stale');
-        await expect(mark).resolves.toBeDefined();
-        expect(await tools(f.store)).toEqual(['Read', 'concurrent']);
+        ).rejects.toThrow('fixture-audit-failed');
+        expect(await readFile(f.snapshot.path)).toEqual(f.snapshot.bytes);
         expect(await staged(f.dir)).toEqual([]);
       } finally {
         await rm(f.home, { recursive: true, force: true });
       }
-    },
-  );
-  it('publishes the clear of the session as read under the lock: a mark made just before it is taken stands', async () => {
-    const f = await fixture();
-    try {
-      await expect(
-        clearStoredSessionTaint(
+    });
+    it('the confirmation the sink receives is a copy the caller cannot change after the fact', async () => {
+      const f = await fixture();
+      try {
+        const given = { ...confirmation },
+          records: SessionTaintClearRecord[] = [];
+        const pending = clearStoredSessionTaint(
           f.snapshot,
           hooks({
-            // The last moment before the lock: every earlier check has passed.
-            fault: async (stage) => {
-              if (stage === 'before-rename')
-                await f.store.markSuspect('one', { ...source, tool: 'just-before-the-lock' });
+            confirmation: given,
+            audit: async (record) => {
+              records.push(record);
             },
           }),
-        ),
-      ).rejects.toThrow('session-taint-stale');
-      expect(await tools(f.store)).toEqual(['Read', 'just-before-the-lock']);
-      expect(await staged(f.dir)).toEqual([]);
-    } finally {
-      await rm(f.home, { recursive: true, force: true });
-    }
-  });
-  it('a mark made while the durable intent is written stands: the clear is refused, not laid over it', async () => {
-    const f = await fixture();
-    try {
-      await expect(
-        clearStoredSessionTaint(
+        );
+        (given as { previewId: string }).previewId = '00000000-0000-4000-8000-000000000000';
+        await pending;
+        expect(records[0]?.confirmation).toEqual(confirmation);
+      } finally {
+        await rm(f.home, { recursive: true, force: true });
+      }
+    });
+  },
+);
+
+describe.skipIf(process.platform === 'win32')(
+  'the session lock is held only to read, publish and confirm',
+  () => {
+    it('runs no callback while the session lock is held', async () => {
+      const f = await fixture();
+      try {
+        const lock = `${f.snapshot.path}.lock`,
+          seen: string[] = [];
+        const free = async (name: string) => {
+          await expect(lstat(lock), name).rejects.toMatchObject({ code: 'ENOENT' });
+          seen.push(name);
+        };
+        await clearStoredSessionTaint(
           f.snapshot,
           hooks({
-            beforePublish: async () => {
-              await f.store.markSuspect('one', { ...source, tool: 'after-preview' });
-            },
+            guard: () => free('guard'),
+            beforePublish: () => free('intent'),
+            audit: () => free('audit'),
+            fault: (stage) => free(stage),
           }),
-        ),
-      ).rejects.toThrow('session-taint-stale');
-      expect(await tools(f.store)).toEqual(['Read', 'after-preview']);
-    } finally {
-      await rm(f.home, { recursive: true, force: true });
-    }
-  });
-});
+        );
+        expect(seen).toEqual([
+          'guard',
+          'guard',
+          'intent',
+          'audit',
+          'guard',
+          'before-rename',
+          'after-rename',
+          'guard',
+        ]);
+        expect((await f.store.get('one')).taint).toBeNull();
+      } finally {
+        await rm(f.home, { recursive: true, force: true });
+      }
+    });
+    // Reported 2026-10-27: a durable callback that took 4 s while the clear held the lock made a hook's
+    // concurrent mark time out at 3 s, and the clear then went through. Each callback here waits until a
+    // concurrent mark has settled, so the case is decided by the order of events and not by a clock: a lock
+    // held across the callback would make the mark wait out its timeout.
+    it.each(['beforePublish', 'audit', 'guard'] as const)(
+      'a slow %s does not hold back a concurrent mark, and the mark stands over the clear',
+      async (slow) => {
+        const f = await fixture();
+        try {
+          let release!: () => void,
+            mark: Promise<unknown> | undefined,
+            guards = 0;
+          const settled = new Promise<void>((resolve) => {
+            release = resolve;
+          });
+          const wait = async () => {
+            mark ??= f.store
+              .markSuspect('one', { ...source, tool: 'concurrent' })
+              .finally(() => release());
+            await settled;
+          };
+          await expect(
+            clearStoredSessionTaint(
+              f.snapshot,
+              hooks({
+                beforePublish: slow === 'beforePublish' ? wait : async () => {},
+                audit: slow === 'audit' ? wait : async () => {},
+                // The first guard runs before anything is staged; the slow one is the next.
+                guard: async () => {
+                  guards += 1;
+                  if (slow === 'guard' && guards === 2) await wait();
+                },
+              }),
+            ),
+          ).rejects.toThrow('session-taint-stale');
+          await expect(mark).resolves.toBeDefined();
+          expect(await tools(f.store)).toEqual(['Read', 'concurrent']);
+          expect(await staged(f.dir)).toEqual([]);
+        } finally {
+          await rm(f.home, { recursive: true, force: true });
+        }
+      },
+    );
+    it('publishes the clear of the session as read under the lock: a mark made just before it is taken stands', async () => {
+      const f = await fixture();
+      try {
+        await expect(
+          clearStoredSessionTaint(
+            f.snapshot,
+            hooks({
+              // The last moment before the lock: every earlier check has passed.
+              fault: async (stage) => {
+                if (stage === 'before-rename')
+                  await f.store.markSuspect('one', { ...source, tool: 'just-before-the-lock' });
+              },
+            }),
+          ),
+        ).rejects.toThrow('session-taint-stale');
+        expect(await tools(f.store)).toEqual(['Read', 'just-before-the-lock']);
+        expect(await staged(f.dir)).toEqual([]);
+      } finally {
+        await rm(f.home, { recursive: true, force: true });
+      }
+    });
+    it('a mark made while the durable intent is written stands: the clear is refused, not laid over it', async () => {
+      const f = await fixture();
+      try {
+        await expect(
+          clearStoredSessionTaint(
+            f.snapshot,
+            hooks({
+              beforePublish: async () => {
+                await f.store.markSuspect('one', { ...source, tool: 'after-preview' });
+              },
+            }),
+          ),
+        ).rejects.toThrow('session-taint-stale');
+        expect(await tools(f.store)).toEqual(['Read', 'after-preview']);
+      } finally {
+        await rm(f.home, { recursive: true, force: true });
+      }
+    });
+  },
+);

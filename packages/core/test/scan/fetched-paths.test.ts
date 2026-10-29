@@ -1,5 +1,5 @@
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { fetchedPaths, inFetched } from '../../src/scan/fetched-paths.js';
 
@@ -27,7 +27,8 @@ describe('fetchedPaths', () => {
       [`${cwd}/p.zip`, `${cwd}/pkg`],
     ],
   ])('%s', (command, expected) => {
-    expect(fetchedPaths(command, cwd)).toEqual(expected);
+    // A path is resolved where Stroq runs: on Windows `/home/dev/project` is on the current drive.
+    expect(fetchedPaths(command, cwd)).toEqual(expected.map((path) => resolve(path)));
   });
 
   it('leaves out what a variable or a substitution names, and what fetches nothing', () => {

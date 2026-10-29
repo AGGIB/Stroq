@@ -146,7 +146,8 @@ describe('loadPolicyWithSource: the policy and where it came from', () => {
         process.env['STROQ_HOME'] = file;
       },
     ],
-    ...(process.getuid?.() === 0
+    // Root reads past the mode, and Windows has no mode that stops its owner reading.
+    ...(process.getuid?.() === 0 || process.platform === 'win32'
       ? []
       : ([
           [

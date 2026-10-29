@@ -1,5 +1,6 @@
-import { lstatSync, readFileSync } from 'node:fs';
+import { lstatSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { dirname } from 'node:path';
 import {
   AuditLog,
   DEFAULT_POLICY,
@@ -43,13 +44,23 @@ export interface LoadedPolicy {
 const errnoOf = (error: unknown): string =>
   (error as NodeJS.ErrnoException | undefined)?.code ?? 'error';
 
-/** True only when nothing at all is at `path`: a dangling link is something, and is not absent. */
+/**
+ * True only when nothing at all is at `path`: a dangling link is something, and is not absent, and
+ * so is a file where the folder holding it should be — which Windows reports as `ENOENT` where
+ * Linux and macOS say `ENOTDIR`.
+ */
 function nothingAt(path: string): boolean {
   try {
     lstatSync(path);
     return false;
   } catch (error) {
-    return errnoOf(error) === 'ENOENT';
+    if (errnoOf(error) !== 'ENOENT') return false;
+  }
+  try {
+    const parent = statSync(dirname(path), { throwIfNoEntry: false });
+    return parent === undefined || parent.isDirectory();
+  } catch {
+    return false;
   }
 }
 

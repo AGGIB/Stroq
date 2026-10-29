@@ -131,10 +131,28 @@ export interface SessionState {
    */
   readonly askedCopies?: readonly AskedCopy[];
   /**
-   * The values (`atomHash`) of questions whose call then ran: the user let them through, and they
-   * are not asked about again in the session. Any new flag, on anyone's text, forgets them.
+   * The values of questions whose call then ran: the user let them through, for calls of the same
+   * kinds, and they are not asked about again in the session. Any new flag, on anyone's text,
+   * forgets them.
    */
-  readonly allowedCopies?: readonly string[];
+  readonly allowedCopies?: readonly AllowedCopy[];
+  /**
+   * Calls that started while a question waited and have not reported back, with when they
+   * started: the host's report that the asked call ran is not taken while one of them runs, for a
+   * call of the agent's could be writing that report itself.
+   */
+  readonly callsRunning?: readonly RunningCall[];
+}
+
+/** A copied value the user let through, and the kinds of call (`ActionClass`) it was let through for. */
+export interface AllowedCopy {
+  readonly atom: string;
+  readonly classes: readonly string[];
+}
+
+export interface RunningCall {
+  readonly callId: string;
+  readonly at: string;
 }
 
 /** A question about copied values, waiting for its call: the call's id, tool and input, and the values. */
@@ -144,6 +162,8 @@ export interface AskedCopy {
   /** A hash of the call's input: a result of another call under the same id is not its answer. */
   readonly input: string;
   readonly atoms: readonly string[];
+  /** The kinds of the call (`ActionClass`): what its values are let through for. */
+  readonly classes: readonly string[];
 }
 
 export type VariantKind = 'raw' | 'normalized' | 'base64' | 'hex' | 'url';

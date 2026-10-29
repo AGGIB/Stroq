@@ -1,7 +1,14 @@
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import type { AskedCopy, OwnTextFlag, SessionState, TaintSource } from '../types.js';
+import type {
+  AllowedCopy,
+  AskedCopy,
+  OwnTextFlag,
+  RunningCall,
+  SessionState,
+  TaintSource,
+} from '../types.js';
 import { MAX_FETCHED } from '../scan/fetched-paths.js';
 import { withLock } from '../util/lock.js';
 
@@ -10,6 +17,9 @@ const PRIVATE_DIR_MODE = 0o700;
 /** The most questions about copied values kept waiting for their call, and values kept let through. */
 export const MAX_ASKED_COPIES = 32;
 export const MAX_ALLOWED_COPIES = 256;
+export const MAX_CALLS_RUNNING = 32;
+/** A call that has not reported back for this long is taken to have ended (a refused call never reports). */
+const CALL_RUNNING_MS = 15 * 60 * 1000;
 
 export interface SessionStore {
   get(sessionId: string): Promise<SessionState>;
@@ -23,6 +33,8 @@ export interface SessionStore {
   markFetched?(sessionId: string, paths: readonly string[]): Promise<SessionState>;
   /** Notes a question about copied values that waits for its call (`SessionState.askedCopies`). */
   noteAskedCopy?(sessionId: string, asked: AskedCopy): Promise<SessionState>;
+  /** Notes a call that starts while a question waits (`SessionState.callsRunning`). */
+  noteCallStarted?(sessionId: string, callId: string): Promise<SessionState>;
   /**
    * Lets through the values of the question a call that ran was asked about: the same id, tool and
    * input. A session with a flag noted after the question lets nothing through.
@@ -44,7 +56,7 @@ function emptyState(sessionId: string, now: string): SessionState {
 
 /** A state without the questions about copied values and what they let through: a new flag forgets them. */
 function withoutCopies(state: SessionState): SessionState {
-  const { askedCopies: _asked, allowedCopies: _allowed, ...rest } = state;
+  const { askedCopies: _asked, allowedCopies: _allowed, callsRunning: _running, ...rest } = state;
   return rest;
 }
 
@@ -67,24 +79,51 @@ function addAsked(state: SessionState, asked: AskedCopy, now: string): SessionSt
   return { ...state, askedCopies: [...kept, asked].slice(-MAX_ASKED_COPIES), updatedAt: now };
 }
 
+function addRunning(state: SessionState, callId: string, now: string): SessionState {
+  const kept = (state.callsRunning ?? []).filter((call) => call.callId !== callId);
+  // More calls than are kept: the questions that wait are forgotten, and asked again, rather than
+  // answered while a call that fell off the list may still run.
+  if (kept.length >= MAX_CALLS_RUNNING) {
+    const { askedCopies: _asked, callsRunning: _running, ...rest } = state;
+    return { ...rest, updatedAt: now };
+  }
+  const running: RunningCall = { callId, at: now };
+  return { ...state, callsRunning: [...kept, running], updatedAt: now };
+}
+
+/**
+ * The host reports that a call ran: it no longer runs, and when it is a call a question was asked
+ * about (the same id, tool and input), its values are let through for calls of its kinds, unless
+ * the session is tainted or another call that started while the question waited still runs.
+ */
 function allowAsked(
   state: SessionState,
   call: { readonly callId: string; readonly tool: string; readonly input: string },
   now: string,
 ): SessionState {
+  const since = Date.parse(now) - CALL_RUNNING_MS;
+  const running = (state.callsRunning ?? []).filter(
+    (item) => item.callId !== call.callId && Date.parse(item.at) >= since,
+  );
+  const ended =
+    running.length !== (state.callsRunning ?? []).length
+      ? { ...state, callsRunning: running, updatedAt: now }
+      : state;
   const asked = state.askedCopies ?? [];
   const answered = asked.find(
     (item) => item.callId === call.callId && item.tool === call.tool && item.input === call.input,
   );
-  if (answered === undefined || state.taint !== null) return state;
-  const allowed = [
-    ...(state.allowedCopies ?? []).filter((atom) => !answered.atoms.includes(atom)),
-    ...answered.atoms,
+  if (answered === undefined || state.taint !== null || running.length > 0) return ended;
+  const allowed: AllowedCopy[] = [
+    ...(state.allowedCopies ?? []).filter((item) => !answered.atoms.includes(item.atom)),
+    ...answered.atoms.map((atom) => ({ atom, classes: answered.classes })),
   ];
+  const left = asked.filter((item) => item !== answered);
   return {
-    ...state,
-    askedCopies: asked.filter((item) => item !== answered),
+    ...ended,
+    askedCopies: left,
     allowedCopies: allowed.slice(-MAX_ALLOWED_COPIES),
+    ...(left.length === 0 ? { callsRunning: [] } : {}),
     updatedAt: now,
   };
 }
@@ -103,9 +142,26 @@ function isAskedCopy(value: unknown): value is AskedCopy {
     isHash(value['input']) &&
     Array.isArray(value['atoms']) &&
     value['atoms'].length <= MAX_ALLOWED_COPIES &&
-    value['atoms'].every(isHash)
+    value['atoms'].every(isHash) &&
+    isClassList(value['classes'])
   );
 }
+
+const isClassList = (value: unknown): boolean =>
+  Array.isArray(value) &&
+  value.length <= 64 &&
+  value.every((item) => typeof item === 'string' && /^[a-z_.]{1,64}$/.test(item));
+
+const isAllowedCopy = (value: unknown): value is AllowedCopy =>
+  isRecord(value) && isHash(value['atom']) && isClassList(value['classes']);
+
+const isRunningCall = (value: unknown): value is RunningCall =>
+  isRecord(value) &&
+  typeof value['callId'] === 'string' &&
+  value['callId'].length > 0 &&
+  value['callId'].length <= 256 &&
+  typeof value['at'] === 'string' &&
+  !Number.isNaN(Date.parse(value['at']));
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -155,7 +211,17 @@ function isSessionState(value: unknown, sessionId: string): value is SessionStat
   const allowed = value['allowedCopies'];
   if (
     allowed !== undefined &&
-    !(Array.isArray(allowed) && allowed.length <= MAX_ALLOWED_COPIES && allowed.every(isHash))
+    !(
+      Array.isArray(allowed) &&
+      allowed.length <= MAX_ALLOWED_COPIES &&
+      allowed.every(isAllowedCopy)
+    )
+  )
+    return false;
+  const running = value['callsRunning'];
+  if (
+    running !== undefined &&
+    !(Array.isArray(running) && running.length <= MAX_CALLS_RUNNING && running.every(isRunningCall))
   )
     return false;
   if (value['taint'] === null) return true;
@@ -246,6 +312,15 @@ export class FileSessionStore implements SessionStore {
     await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     return withLock(`${this.file(sessionId)}.lock`, async () => {
       const next = addAsked(await this.read(sessionId), asked, this.now().toISOString());
+      await this.write(next);
+      return next;
+    });
+  }
+
+  async noteCallStarted(sessionId: string, callId: string): Promise<SessionState> {
+    await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
+    return withLock(`${this.file(sessionId)}.lock`, async () => {
+      const next = addRunning(await this.read(sessionId), callId, this.now().toISOString());
       await this.write(next);
       return next;
     });

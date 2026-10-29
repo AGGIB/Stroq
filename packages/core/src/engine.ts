@@ -655,6 +655,7 @@ export class StroqEngine {
     event: PreToolEvent,
     decision: Decision,
     counted: readonly ProvenanceHit[],
+    classes: readonly ActionClass[],
   ): Promise<void> {
     const sessions = this.opts.sessions;
     if (
@@ -672,6 +673,7 @@ export class StroqEngine {
         tool: event.toolName,
         input: inputHash(event.toolInput),
         atoms,
+        classes: [...classes],
       })
       .catch(() => undefined);
   }
@@ -705,7 +707,15 @@ export class StroqEngine {
     const lookup = await findActionProvenance(this.opts.provenance, event, state.taint !== null);
     // A value the user let run after a question about it is not asked about again in the session;
     // what was copied from somebody else's flagged text is still denied (see `allowedCopies`).
-    const allowed = state.taint === null ? new Set(state.allowedCopies ?? []) : NO_COPIES;
+    // Let through only for calls of the kinds the user let it run in (`npx pkg` is not `npx pkg && rm -rf …`).
+    const allowed =
+      state.taint === null
+        ? new Set(
+            (state.allowedCopies ?? [])
+              .filter((item) => classification.classes.every((cls) => item.classes.includes(cls)))
+              .map((item) => item.atom),
+          )
+        : NO_COPIES;
     const hits =
       allowed.size === 0
         ? lookup.hits
@@ -832,7 +842,19 @@ export class StroqEngine {
       ...(gaps.length > 0 ? { provenanceIncomplete: gaps } : {}),
       ...(secrets.length > 0 ? { secrets } : {}),
     });
-    await this.noteCopyQuestion(event, decision, origin.counted);
+    await this.noteCopyQuestion(event, decision, origin.counted, classification.classes);
+    // While a question waits, a call that starts is noted until it reports back: the report that the
+    // asked call ran is not taken while one runs, for it could be the one writing that report.
+    if (
+      state.askedCopies !== undefined &&
+      state.askedCopies.length > 0 &&
+      event.callId !== undefined &&
+      decision.effect !== 'deny' &&
+      this.opts.sessions.noteCallStarted !== undefined
+    )
+      await this.opts.sessions
+        .noteCallStarted(event.sessionId, event.callId)
+        .catch(() => undefined);
     // A canary value on its way out, or a decoy file opened: either way something the
     // session read is steering it, and every later call is judged as compromised.
     const tripped = [

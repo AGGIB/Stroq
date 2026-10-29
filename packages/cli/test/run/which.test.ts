@@ -16,13 +16,17 @@ function dirWith(...names: readonly string[]): string {
 }
 
 describe('binOnPath', () => {
-  it('returns the first entry on PATH that holds the program', () => {
-    const empty = dirWith();
-    const dir = dirWith('srt');
-    expect(binOnPath('srt', { PATH: [empty, dir].join(delimiter) }, 'linux')).toBe(
-      join(dir, 'srt'),
-    );
-  });
+  // A PATH of Windows folders is not absolute to the `linux` this simulates, and is skipped as relative.
+  it.skipIf(process.platform === 'win32')(
+    'returns the first entry on PATH that holds the program',
+    () => {
+      const empty = dirWith();
+      const dir = dirWith('srt');
+      expect(binOnPath('srt', { PATH: [empty, dir].join(delimiter) }, 'linux')).toBe(
+        join(dir, 'srt'),
+      );
+    },
+  );
 
   it('answers null when nothing on PATH holds it, and when there is no PATH at all', () => {
     expect(binOnPath('srt', { PATH: dirWith() }, 'linux')).toBeNull();

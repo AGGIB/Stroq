@@ -96,7 +96,9 @@ async function lets(f: Fixture, snapshot: ToolContractSnapshot): Promise<boolean
   }
 }
 
-describe('signed MCP tool-contract records', () => {
+// The tool-contract store is POSIX-only (private modes, one owner, no group or other write): on Windows
+// it refuses (`tool-contract-files.ts`), so there is nothing here to exercise.
+describe.skipIf(process.platform === 'win32')('signed MCP tool-contract records', () => {
   it('signs every record under a private home key and reads its own records back', async () => {
     const f = await fixture();
     const pending = await f.store.observe(f.binding, listing());

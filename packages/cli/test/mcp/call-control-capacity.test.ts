@@ -143,33 +143,37 @@ describe('MCP event capacity preserves stronger Pause', () => {
       'mcp-call-control-limit',
     );
   });
-  it('refuses reserve-consuming writes without changing disk and physically publishes both final Pauses', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'stroq-call-reserve-')),
-      home = join(root, 'home');
-    try {
-      const store = createMcpCallControlsStore({ home, now: () => now });
-      const initial = await store.read(),
-        id = randomUUID();
-      const configured = await store.decide(input(initial, id, 'configure-paused'));
-      const near = nearCapacity(2, 510, configured.state.homeBinding!, readStateMacKeySync(home));
-      const file = join(home, 'mcp-call-controls', 'history.json');
-      // The history is signed with the home's state key, as the store signs it.
-      const bytes = encodeCallControlState(
-        near.state.events,
-        near.state.homeBinding!,
-        readStateMacKeySync(home),
-      );
-      await writeFile(file, bytes, { mode: 0o600 });
-      await expect(
-        store.decide(input(near.state, randomUUID(), 'configure-paused')),
-      ).rejects.toThrow('mcp-call-control-limit');
-      expect(await readFile(file)).toEqual(bytes);
-      const first = await store.decide(input(near.state, near.ids[0]!, 'pause'));
-      const second = await store.decide(input(first.state, near.ids[1]!, 'pause'));
-      expect(second.state.events).toHaveLength(512);
-      expect((await store.read()).controls.every((c) => c.mode === 'paused')).toBe(true);
-    } finally {
-      await rm(root, { recursive: true, force: true });
-    }
-  });
+  // The native call-control store is POSIX-only and refuses on Windows (`mcp-call-control-unsupported`).
+  it.skipIf(process.platform === 'win32')(
+    'refuses reserve-consuming writes without changing disk and physically publishes both final Pauses',
+    async () => {
+      const root = await mkdtemp(join(tmpdir(), 'stroq-call-reserve-')),
+        home = join(root, 'home');
+      try {
+        const store = createMcpCallControlsStore({ home, now: () => now });
+        const initial = await store.read(),
+          id = randomUUID();
+        const configured = await store.decide(input(initial, id, 'configure-paused'));
+        const near = nearCapacity(2, 510, configured.state.homeBinding!, readStateMacKeySync(home));
+        const file = join(home, 'mcp-call-controls', 'history.json');
+        // The history is signed with the home's state key, as the store signs it.
+        const bytes = encodeCallControlState(
+          near.state.events,
+          near.state.homeBinding!,
+          readStateMacKeySync(home),
+        );
+        await writeFile(file, bytes, { mode: 0o600 });
+        await expect(
+          store.decide(input(near.state, randomUUID(), 'configure-paused')),
+        ).rejects.toThrow('mcp-call-control-limit');
+        expect(await readFile(file)).toEqual(bytes);
+        const first = await store.decide(input(near.state, near.ids[0]!, 'pause'));
+        const second = await store.decide(input(first.state, near.ids[1]!, 'pause'));
+        expect(second.state.events).toHaveLength(512);
+        expect((await store.read()).controls.every((c) => c.mode === 'paused')).toBe(true);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    },
+  );
 });

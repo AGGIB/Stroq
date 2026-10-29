@@ -348,8 +348,10 @@ describe('workspace capture', () => {
 
   it('does not follow Git includes or external custom hook directories', () => {
     const external = fixture({ credentials: 'private-config-must-not-be-read' });
+    // Forward slashes, as Git writes them on Windows too: a backslash in a config value is an escape.
+    const outside = external.replaceAll('\\', '/');
     const project = fixture({
-      '.git/config': `[include]\npath=${join(external, 'credentials')}\n[core]\nhooksPath=${external}\n`,
+      '.git/config': `[include]\npath=${outside}/credentials\n[core]\nhooksPath=${outside}\n`,
     });
     const capture = captureWorkspaceSurface({ project });
     expect(capture.complete).toBe(false);

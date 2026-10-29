@@ -53,24 +53,29 @@ const snapshotOf = (e: Engine, path: string) => ({
 });
 
 describe('the signed harden manifest', () => {
-  it('signs the manifest under a private home key, and reads and undoes its own record', async () => {
-    const e = engine();
-    const { real, path } = await applied(e, 'settings.json', BEFORE, [addDeny('a')]);
-    const doc = JSON.parse(readFileSync(manifestFileOf(e), 'utf8'));
-    expect(doc.version).toBe(2);
-    expect(doc.mac).toMatch(/^[a-f0-9]{64}$/);
-    if (!onWindows) {
-      expect(statSync(keyFileOf(e)).mode & 0o777).toBe(0o600);
-      expect(statSync(join(e.home, 'keys')).mode & 0o777).toBe(0o700);
-    }
-    const manifest = readManifest(e.env);
-    expect(manifest.version).toBe(2);
-    expect(manifest).not.toHaveProperty('mac');
-    expect(manifest.files[real]).toHaveLength(1);
-    expect(readManifestSnapshot(e.env).manifest).toEqual(manifest);
-    expect((await undo(e, real)).status).toBe('restored');
-    expect(readFileSync(path, 'utf8')).toBe(BEFORE);
-  });
+  // The prepared (console) read wants a 0600 manifest, which Windows modes cannot say; `harden apply`
+  // and `undo` themselves run there and are tested in their own files.
+  it.skipIf(process.platform === 'win32')(
+    'signs the manifest under a private home key, and reads and undoes its own record',
+    async () => {
+      const e = engine();
+      const { real, path } = await applied(e, 'settings.json', BEFORE, [addDeny('a')]);
+      const doc = JSON.parse(readFileSync(manifestFileOf(e), 'utf8'));
+      expect(doc.version).toBe(2);
+      expect(doc.mac).toMatch(/^[a-f0-9]{64}$/);
+      if (!onWindows) {
+        expect(statSync(keyFileOf(e)).mode & 0o777).toBe(0o600);
+        expect(statSync(join(e.home, 'keys')).mode & 0o777).toBe(0o700);
+      }
+      const manifest = readManifest(e.env);
+      expect(manifest.version).toBe(2);
+      expect(manifest).not.toHaveProperty('mac');
+      expect(manifest.files[real]).toHaveLength(1);
+      expect(readManifestSnapshot(e.env).manifest).toEqual(manifest);
+      expect((await undo(e, real)).status).toBe('restored');
+      expect(readFileSync(path, 'utf8')).toBe(BEFORE);
+    },
+  );
 
   it('refuses a manifest rewritten with a plain digest where the signature goes, and writes nothing', async () => {
     const e = engine();

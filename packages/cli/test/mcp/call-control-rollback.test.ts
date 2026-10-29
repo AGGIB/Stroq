@@ -50,41 +50,46 @@ async function call(g: ReturnType<typeof guard>): Promise<string> {
   return result.written ? 'sent' : (result.refusal?.reason ?? 'none');
 }
 
-describe('a running connection and an older, genuinely signed call-control history', () => {
-  it('accepts n, refuses a replayed n-1 and stays refused until restart', async () => {
-    await decide('configure-paused');
-    await decide('resume');
-    const resumed = await readFile(history());
-    const g = guard();
-    expect(await call(g)).toBe('sent');
-    await decide('pause');
-    expect(await call(g)).toBe('paused');
-    // The resume it kept, put back: signed by this home, and one event shorter than what was seen.
-    await writeFile(history(), resumed, { mode: 0o600 });
-    expect(await call(g)).toBe('unavailable');
-    // Later decisions on that history do not bring this connection back: only a restart does.
-    await decide('pause');
-    await decide('resume');
-    expect(await call(g)).toBe('unavailable');
-  });
+// The native call-control store is POSIX-only: on Windows it refuses with `mcp-call-control-unsupported`
+// (`call-control-files.ts`), so there is nothing here to exercise.
+describe.skipIf(process.platform === 'win32')(
+  'a running connection and an older, genuinely signed call-control history',
+  () => {
+    it('accepts n, refuses a replayed n-1 and stays refused until restart', async () => {
+      await decide('configure-paused');
+      await decide('resume');
+      const resumed = await readFile(history());
+      const g = guard();
+      expect(await call(g)).toBe('sent');
+      await decide('pause');
+      expect(await call(g)).toBe('paused');
+      // The resume it kept, put back: signed by this home, and one event shorter than what was seen.
+      await writeFile(history(), resumed, { mode: 0o600 });
+      expect(await call(g)).toBe('unavailable');
+      // Later decisions on that history do not bring this connection back: only a restart does.
+      await decide('pause');
+      await decide('resume');
+      expect(await call(g)).toBe('unavailable');
+    });
 
-  it('accepts n and then n+1 on the same connection', async () => {
-    await decide('configure-paused');
-    await decide('resume');
-    const g = guard();
-    expect(await call(g)).toBe('sent');
-    await decide('pause');
-    expect(await call(g)).toBe('paused');
-    await decide('resume');
-    expect(await call(g)).toBe('sent');
-  });
+    it('accepts n and then n+1 on the same connection', async () => {
+      await decide('configure-paused');
+      await decide('resume');
+      const g = guard();
+      expect(await call(g)).toBe('sent');
+      await decide('pause');
+      expect(await call(g)).toBe('paused');
+      await decide('resume');
+      expect(await call(g)).toBe('sent');
+    });
 
-  it('a new connection accepts whatever valid history it first reads, even an older one (the limit)', async () => {
-    await decide('configure-paused');
-    await decide('resume');
-    const resumed = await readFile(history());
-    await decide('pause');
-    await writeFile(history(), resumed, { mode: 0o600 });
-    expect(await call(guard())).toBe('sent');
-  });
-});
+    it('a new connection accepts whatever valid history it first reads, even an older one (the limit)', async () => {
+      await decide('configure-paused');
+      await decide('resume');
+      const resumed = await readFile(history());
+      await decide('pause');
+      await writeFile(history(), resumed, { mode: 0o600 });
+      expect(await call(guard())).toBe('sent');
+    });
+  },
+);

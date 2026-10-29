@@ -1,13 +1,18 @@
+import { resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { runConsole, consoleLauncherUrl } from '../src/commands/console.js';
 
+/** A file URL for an absolute path where the test runs: on Windows it needs a drive. */
+const fileUrl = (path: string): string => pathToFileURL(resolve(path)).href;
+
 describe('local platform CLI', () => {
   it('resolves the shipped platform beside the split CLI, never from cwd', () => {
-    expect(consoleLauncherUrl('file:///installed/dist/console-ABC.js').href).toBe(
-      'file:///installed/platform/scripts/launch.mjs',
+    expect(consoleLauncherUrl(fileUrl('/installed/dist/console-ABC.js')).href).toBe(
+      fileUrl('/installed/platform/scripts/launch.mjs'),
     );
-    expect(consoleLauncherUrl('file:///source/src/commands/console.ts').href).toBe(
-      'file:///source/platform/scripts/launch.mjs',
+    expect(consoleLauncherUrl(fileUrl('/source/src/commands/console.ts')).href).toBe(
+      fileUrl('/source/platform/scripts/launch.mjs'),
     );
   });
   it('loads the platform only on demand and binds cleanup for a running server', async () => {
