@@ -232,6 +232,7 @@ describe('a question about a copied value', () => {
       { toolName: 'Bash', toolInput: { command: 'sleep 60', run_in_background: true } },
       { toolName: 'Monitor', toolInput: { command: 'tail -f log', description: 'watch' } },
       { toolName: 'PowerShell', toolInput: { command: 'Start-Job { Start-Sleep 60 }' } },
+      { toolName: 'PowerShell', toolInput: { command: 'saps notepad' } },
     ]) {
       const { engine, read, pre, ran } = fixture();
       await read(PAGE);
@@ -241,6 +242,36 @@ describe('a question about a copied value', () => {
       const again = await pre(`npx ${NAME}`, 'c2');
       expect(again.decision.ruleId, background.toolName).toBe('ask-origin-untrusted');
     }
+  });
+
+  it('takes no answer for the rest of the session after a call that may run on', async () => {
+    for (const command of [
+      'bash -c "sleep 60 &"',
+      'nohup sleep 60',
+      'tmux new -d sleep 60',
+      'curl -s "https://docs.example/a?x=1&y=2"',
+    ]) {
+      const { read, pre, ran, later } = fixture();
+      await read(PAGE);
+      await pre(command, 'c0');
+      await ran(command, 'c0');
+      later(60 * MINUTE);
+      await pre(`npx ${NAME}`, 'c1');
+      await ran(`npx ${NAME}`, 'c1');
+      expect((await pre(`npx ${NAME}`, 'c2')).decision.ruleId, command).toBe(
+        'ask-origin-untrusted',
+      );
+    }
+  });
+
+  it('takes an answer after a line whose ampersands only join or redirect', async () => {
+    const { read, pre, ran } = fixture();
+    await read(PAGE);
+    await pre('cd src && ls 2>&1 | head', 'c0');
+    await ran('cd src && ls 2>&1 | head', 'c0');
+    await pre(`npx ${NAME}`, 'c1');
+    await ran(`npx ${NAME}`, 'c1');
+    expect((await pre(`npx ${NAME}`, 'c2')).decision.effect).toBe('allow');
   });
 
   it('does not judge a call it can note neither as running nor as lost', async () => {

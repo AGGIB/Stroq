@@ -147,6 +147,11 @@ export interface SessionState {
    * one could not be noted): no answer is taken for as long as such a call could still run.
    */
   readonly callsLostAt?: string;
+  /**
+   * When a call that goes on after it returns (a command in the background, `Monitor`) first ran in
+   * the session: from then on no answer is taken, for such a process may run as long as it likes.
+   */
+  readonly backgroundSince?: string;
 }
 
 /** A copied value the user let through, and the kinds of call (`ActionClass`) it was let through for. */

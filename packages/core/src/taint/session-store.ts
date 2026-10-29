@@ -40,6 +40,8 @@ export interface SessionStore {
   noteCallStarted?(sessionId: string, call: CallIdentity): Promise<SessionState>;
   /** Notes that a call could not be kept track of: questions are forgotten and none is answered for a while. */
   noteCallsLost?(sessionId: string): Promise<SessionState>;
+  /** Notes a call that goes on after it returns: no answer is taken for the rest of the session. */
+  noteBackground?(sessionId: string): Promise<SessionState>;
   /**
    * Lets through the values of the question a call that ran was asked about: the same id, tool and
    * input. A session with a flag noted after the question lets nothing through.
@@ -133,7 +135,9 @@ function allowAsked(state: SessionState, call: CallIdentity, now: string): Sessi
       : state;
   // A call that never reported back is let go of, but it may still run: what waits is forgotten.
   if (running.length !== others.length) ended = lostTrack(ended, now);
-  const lost = ended.callsLostAt !== undefined && Date.parse(ended.callsLostAt) >= since;
+  const lost =
+    ended.backgroundSince !== undefined ||
+    (ended.callsLostAt !== undefined && Date.parse(ended.callsLostAt) >= since);
   const asked = ended.askedCopies ?? [];
   const answered = asked.find(
     (item) => item.callId === call.callId && item.tool === call.tool && item.input === call.input,
@@ -250,9 +254,10 @@ function isSessionState(value: unknown, sessionId: string): value is SessionStat
     !(Array.isArray(running) && running.length <= MAX_CALLS_RUNNING && running.every(isRunningCall))
   )
     return false;
-  const lost = value['callsLostAt'];
-  if (lost !== undefined && (typeof lost !== 'string' || Number.isNaN(Date.parse(lost))))
-    return false;
+  for (const key of ['callsLostAt', 'backgroundSince']) {
+    const at = value[key];
+    if (at !== undefined && (typeof at !== 'string' || Number.isNaN(Date.parse(at)))) return false;
+  }
   if (value['taint'] === null) return true;
   if (!isRecord(value['taint'])) return false;
   const taint = value['taint'];
@@ -350,6 +355,20 @@ export class FileSessionStore implements SessionStore {
     await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     return withLock(`${this.file(sessionId)}.lock`, async () => {
       const next = addRunning(await this.read(sessionId), call, this.now().toISOString());
+      await this.write(next);
+      return next;
+    });
+  }
+
+  async noteBackground(sessionId: string): Promise<SessionState> {
+    await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
+    return withLock(`${this.file(sessionId)}.lock`, async () => {
+      const now = this.now().toISOString();
+      const current = await this.read(sessionId);
+      const next = lostTrack(
+        current.backgroundSince === undefined ? { ...current, backgroundSince: now } : current,
+        now,
+      );
       await this.write(next);
       return next;
     });
