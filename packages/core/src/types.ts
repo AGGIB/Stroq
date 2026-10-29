@@ -137,11 +137,16 @@ export interface SessionState {
    */
   readonly allowedCopies?: readonly AllowedCopy[];
   /**
-   * Calls that started while a question waited and have not reported back, with when they
-   * started: the host's report that the asked call ran is not taken while one of them runs, for a
-   * call of the agent's could be writing that report itself.
+   * Calls that started and have not reported back, with when they started: the host's report that
+   * an asked call ran is not taken while another runs, for a call of the agent's could be writing
+   * that report itself. A flag does not forget them.
    */
   readonly callsRunning?: readonly RunningCall[];
+  /**
+   * When a call was last lost track of (one did not report back in time, more ran than are kept, or
+   * one could not be noted): no answer is taken for as long as such a call could still run.
+   */
+  readonly callsLostAt?: string;
 }
 
 /** A copied value the user let through, and the kinds of call (`ActionClass`) it was let through for. */
@@ -150,8 +155,11 @@ export interface AllowedCopy {
   readonly classes: readonly string[];
 }
 
+/** A call that started: its id, tool and input (as `AskedCopy` has them), and when. */
 export interface RunningCall {
   readonly callId: string;
+  readonly tool: string;
+  readonly input: string;
   readonly at: string;
 }
 

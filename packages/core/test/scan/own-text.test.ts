@@ -185,4 +185,14 @@ describe('text somebody else wrote', () => {
   it('is a command that is not text', () => {
     expect(isOwnText('Bash', { command: 42 }, 'command_output')).toBe(false);
   });
+
+  it('reads a run of assignments in time that grows with its length', () => {
+    // As one repeated pattern, `A=A=…A= !` took twice as long with each `A=`: forty of them, hours.
+    const start = process.cpuUsage();
+    const command = `${'A='.repeat(20_000)} !`;
+    expect(isOwnText('Bash', { command }, 'command_output', '', '/tmp')).toBe(false);
+    expect(isOwnText('Bash', { command: 'A=1 B=x' }, 'command_output', '', '/tmp')).toBe(true);
+    const used = process.cpuUsage(start);
+    expect((used.user + used.system) / 1000).toBeLessThan(2_000);
+  });
 });

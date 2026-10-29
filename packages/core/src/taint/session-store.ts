@@ -18,7 +18,10 @@ const PRIVATE_DIR_MODE = 0o700;
 export const MAX_ASKED_COPIES = 32;
 export const MAX_ALLOWED_COPIES = 256;
 export const MAX_CALLS_RUNNING = 32;
-/** A call that has not reported back for this long is taken to have ended (a refused call never reports). */
+/**
+ * A call that has not reported back for this long is let go of, and no answer is taken for as long
+ * again (`callsLostAt`): a host's longest call is ten minutes, and a call the user refused never reports.
+ */
 const CALL_RUNNING_MS = 15 * 60 * 1000;
 
 export interface SessionStore {
@@ -33,8 +36,10 @@ export interface SessionStore {
   markFetched?(sessionId: string, paths: readonly string[]): Promise<SessionState>;
   /** Notes a question about copied values that waits for its call (`SessionState.askedCopies`). */
   noteAskedCopy?(sessionId: string, asked: AskedCopy): Promise<SessionState>;
-  /** Notes a call that starts while a question waits (`SessionState.callsRunning`). */
-  noteCallStarted?(sessionId: string, callId: string): Promise<SessionState>;
+  /** Notes a call that starts (`SessionState.callsRunning`). */
+  noteCallStarted?(sessionId: string, call: CallIdentity): Promise<SessionState>;
+  /** Notes that a call could not be kept track of: questions are forgotten and none is answered for a while. */
+  noteCallsLost?(sessionId: string): Promise<SessionState>;
   /**
    * Lets through the values of the question a call that ran was asked about: the same id, tool and
    * input. A session with a flag noted after the question lets nothing through.
@@ -54,10 +59,26 @@ function emptyState(sessionId: string, now: string): SessionState {
   return { sessionId, taint: null, updatedAt: now };
 }
 
-/** A state without the questions about copied values and what they let through: a new flag forgets them. */
+/** A call as its question and its report name it: its id, its tool and the hash of its input. */
+export interface CallIdentity {
+  readonly callId: string;
+  readonly tool: string;
+  readonly input: string;
+}
+
+/**
+ * A state without the questions about copied values and what they let through: a new flag forgets
+ * them. The calls still running are kept: one that started before the flag runs on after it.
+ */
 function withoutCopies(state: SessionState): SessionState {
-  const { askedCopies: _asked, allowedCopies: _allowed, callsRunning: _running, ...rest } = state;
+  const { askedCopies: _asked, allowedCopies: _allowed, ...rest } = state;
   return rest;
+}
+
+/** A state that lost track of a call: its questions are forgotten, and none is answered for a while. */
+function lostTrack(state: SessionState, now: string): SessionState {
+  const { askedCopies: _asked, ...rest } = state;
+  return { ...rest, callsLostAt: now, updatedAt: now };
 }
 
 function addSource(state: SessionState, source: TaintSource, now: string): SessionState {
@@ -79,16 +100,17 @@ function addAsked(state: SessionState, asked: AskedCopy, now: string): SessionSt
   return { ...state, askedCopies: [...kept, asked].slice(-MAX_ASKED_COPIES), updatedAt: now };
 }
 
-function addRunning(state: SessionState, callId: string, now: string): SessionState {
-  const kept = (state.callsRunning ?? []).filter((call) => call.callId !== callId);
-  // More calls than are kept: the questions that wait are forgotten, and asked again, rather than
-  // answered while a call that fell off the list may still run.
-  if (kept.length >= MAX_CALLS_RUNNING) {
-    const { askedCopies: _asked, callsRunning: _running, ...rest } = state;
-    return { ...rest, updatedAt: now };
-  }
-  const running: RunningCall = { callId, at: now };
-  return { ...state, callsRunning: [...kept, running], updatedAt: now };
+function addRunning(state: SessionState, call: CallIdentity, now: string): SessionState {
+  const kept = (state.callsRunning ?? []).filter((item) => item.callId !== call.callId);
+  const running: RunningCall = { callId: call.callId, tool: call.tool, input: call.input, at: now };
+  const next = {
+    ...state,
+    callsRunning: [...kept, running].slice(-MAX_CALLS_RUNNING),
+    updatedAt: now,
+  };
+  // More calls than are kept: the oldest falls off, and since it may still run, the questions that
+  // wait are forgotten and asked again rather than answered.
+  return kept.length >= MAX_CALLS_RUNNING ? lostTrack(next, now) : next;
 }
 
 /**
@@ -96,34 +118,35 @@ function addRunning(state: SessionState, callId: string, now: string): SessionSt
  * about (the same id, tool and input), its values are let through for calls of its kinds, unless
  * the session is tainted or another call that started while the question waited still runs.
  */
-function allowAsked(
-  state: SessionState,
-  call: { readonly callId: string; readonly tool: string; readonly input: string },
-  now: string,
-): SessionState {
+function allowAsked(state: SessionState, call: CallIdentity, now: string): SessionState {
   const since = Date.parse(now) - CALL_RUNNING_MS;
-  const running = (state.callsRunning ?? []).filter(
-    (item) => item.callId !== call.callId && Date.parse(item.at) >= since,
+  const list = state.callsRunning ?? [];
+  // A report ends only the call that started with its id, tool and input: one that names another
+  // tool or input does not end it.
+  const others = list.filter(
+    (item) => item.callId !== call.callId || item.tool !== call.tool || item.input !== call.input,
   );
-  const ended =
-    running.length !== (state.callsRunning ?? []).length
+  const running = others.filter((item) => Date.parse(item.at) >= since);
+  let ended: SessionState =
+    others.length !== list.length || running.length !== others.length
       ? { ...state, callsRunning: running, updatedAt: now }
       : state;
-  const asked = state.askedCopies ?? [];
+  // A call that never reported back is let go of, but it may still run: what waits is forgotten.
+  if (running.length !== others.length) ended = lostTrack(ended, now);
+  const lost = ended.callsLostAt !== undefined && Date.parse(ended.callsLostAt) >= since;
+  const asked = ended.askedCopies ?? [];
   const answered = asked.find(
     (item) => item.callId === call.callId && item.tool === call.tool && item.input === call.input,
   );
-  if (answered === undefined || state.taint !== null || running.length > 0) return ended;
+  if (answered === undefined || state.taint !== null || running.length > 0 || lost) return ended;
   const allowed: AllowedCopy[] = [
     ...(state.allowedCopies ?? []).filter((item) => !answered.atoms.includes(item.atom)),
     ...answered.atoms.map((atom) => ({ atom, classes: answered.classes })),
   ];
-  const left = asked.filter((item) => item !== answered);
   return {
     ...ended,
-    askedCopies: left,
+    askedCopies: asked.filter((item) => item !== answered),
     allowedCopies: allowed.slice(-MAX_ALLOWED_COPIES),
-    ...(left.length === 0 ? { callsRunning: [] } : {}),
     updatedAt: now,
   };
 }
@@ -160,6 +183,9 @@ const isRunningCall = (value: unknown): value is RunningCall =>
   typeof value['callId'] === 'string' &&
   value['callId'].length > 0 &&
   value['callId'].length <= 256 &&
+  typeof value['tool'] === 'string' &&
+  value['tool'].length <= 256 &&
+  isHash(value['input']) &&
   typeof value['at'] === 'string' &&
   !Number.isNaN(Date.parse(value['at']));
 
@@ -223,6 +249,9 @@ function isSessionState(value: unknown, sessionId: string): value is SessionStat
     running !== undefined &&
     !(Array.isArray(running) && running.length <= MAX_CALLS_RUNNING && running.every(isRunningCall))
   )
+    return false;
+  const lost = value['callsLostAt'];
+  if (lost !== undefined && (typeof lost !== 'string' || Number.isNaN(Date.parse(lost))))
     return false;
   if (value['taint'] === null) return true;
   if (!isRecord(value['taint'])) return false;
@@ -317,10 +346,19 @@ export class FileSessionStore implements SessionStore {
     });
   }
 
-  async noteCallStarted(sessionId: string, callId: string): Promise<SessionState> {
+  async noteCallStarted(sessionId: string, call: CallIdentity): Promise<SessionState> {
     await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
     return withLock(`${this.file(sessionId)}.lock`, async () => {
-      const next = addRunning(await this.read(sessionId), callId, this.now().toISOString());
+      const next = addRunning(await this.read(sessionId), call, this.now().toISOString());
+      await this.write(next);
+      return next;
+    });
+  }
+
+  async noteCallsLost(sessionId: string): Promise<SessionState> {
+    await mkdir(this.dir, { recursive: true, mode: PRIVATE_DIR_MODE });
+    return withLock(`${this.file(sessionId)}.lock`, async () => {
+      const next = lostTrack(await this.read(sessionId), this.now().toISOString());
       await this.write(next);
       return next;
     });

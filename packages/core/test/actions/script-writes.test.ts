@@ -451,8 +451,30 @@ describe('the adversarial review of a114d37c', () => {
       "S=safe.sh; echo $[ S = 1 ]; bash -c 'bash $S'",
       "S=safe.sh; (( S = (1 + (2 * (3))) )); bash -c 'bash $S'",
       "S=safe.sh; echo ${X:S=1}; bash -c 'bash $S'",
+      "S=safe.sh; echo ${@:S=1}; bash -c 'bash $S'",
+      "S=safe.sh; echo ${a[0]:S=1}; bash -c 'bash $S'",
+      "S=safe.sh; N=S=1; echo ${X:$N}; bash -c 'bash $S'",
+      "S=safe.sh; echo ${X:${N}}; bash -c 'bash $S'",
+      "S=safe.sh; echo ${X:1:S=2}; bash -c 'bash $S'",
+      "S=safe.sh; echo ${a[${i}]:S=1}; bash -c 'bash $S'",
+      "S=safe.sh; echo ${X:-${Y}} ${Z:${N}}; bash -c 'bash $S'",
+      "S=safe.sh; echo ${X:S=1|0}; bash -c 'bash $S'",
     ])
       expect(stopped(command), command).toBe(true);
+    // An offset of numbers gives no name a value, and nor does a default.
+    for (const command of [
+      "S=x.sh; echo ${X:1:2} ${X: -1}; bash -c 'bash $S'",
+      "S=x.sh; echo ${X:-d}; bash -c 'bash $S'",
+      "S=x.sh; echo ${X:-${Y}} ${a[${i}]}; bash -c 'bash $S'",
+    ])
+      expect(classes(command), command).not.toContain('shell.unparsed');
+    // A heredoc's data line cut at a `|` inside an expansion before any colon: the line's own `S` is kept.
+    const at = dir.replaceAll('\\', '/');
+    expect(
+      classes(
+        `S=${at}; cat > $S/m.sh <<'EOF'\nname=\${spec%%|*}; json=\${spec#*|}\nEOF\nbash $S/m.sh`,
+      ),
+    ).not.toContain('shell.unparsed');
     // A name read in a test is not given a value there.
     expect(classes(`S=x.sh; if [[ -f $S ]]; then bash -c "bash $S"; fi`)).not.toContain(
       'shell.unparsed',

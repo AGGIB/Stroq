@@ -1,6 +1,6 @@
 /* Stroq landing page. Tokens, header, buttons, code panels and footer come from
    /styles.css. Order: shared patterns, hero, incident, how, proof, compare,
-   install, about, responsive, motion.
+   console, install, about, responsive, motion.
 
    The one idea is a thread: the line from the text an agent read to the action it
    took. It is drawn in the signal colour, and it is the only motion on the page.
@@ -19,16 +19,16 @@
 /* Disclosure rows: <details> everywhere something long is folded away. */
 summary { cursor: pointer; list-style: none; }
 summary::-webkit-details-marker { display: none; }
-.policy > summary, .all > summary, .more > summary, .grp > summary {
+.policy > summary, .all > summary, .more > summary, .grp > summary, .also > summary {
   display: flex; align-items: center; gap: .8rem; padding-block: 1rem;
   font: 700 1.05rem/1.2 var(--font-body); font-stretch: 94%;
 }
-.policy > summary::before, .all > summary::before, .more > summary::before, .grp > summary::before {
+.policy > summary::before, .all > summary::before, .more > summary::before, .grp > summary::before, .also > summary::before {
   content: ""; flex: none; width: 9px; height: 9px;
   border-right: 2px solid currentColor; border-bottom: 2px solid currentColor;
   transform: rotate(-45deg); transition: transform var(--dur) var(--ease-out);
 }
-.policy[open] > summary::before, .all[open] > summary::before, .more[open] > summary::before, .grp[open] > summary::before { transform: rotate(45deg); }
+.policy[open] > summary::before, .all[open] > summary::before, .more[open] > summary::before, .grp[open] > summary::before, .also[open] > summary::before { transform: rotate(45deg); }
 .summary-meta { margin-left: auto; color: var(--ink-2); font: 500 .78rem/1 var(--font-mono); font-stretch: 80%; text-align: right; }
 summary:hover .summary-meta { color: var(--ink); }
 
@@ -193,8 +193,8 @@ summary:hover .summary-meta { color: var(--ink); }
 .sc-bar { display: flex; min-height: 5.25rem; border: 2px solid var(--ink); }
 .sc-seg { display: flex; align-items: baseline; gap: .6rem; min-width: 0; padding: 1rem clamp(1rem, .6rem + 1.4vw, 1.6rem); font: 600 1rem/1 var(--font-body); }
 .sc-seg b { font: 800 clamp(2.4rem, 1.6rem + 3vw, 4rem)/1 var(--font-display); font-stretch: 78%; font-variant-numeric: tabular-nums; }
-.sc-seg-deny { flex-grow: 17; flex-basis: 0; background: var(--ink); color: var(--paper); }
-.sc-seg-ask { flex-grow: 19; flex-basis: 0; background: repeating-linear-gradient(135deg, transparent 0 7px, var(--line-2) 7px 8px); }
+.sc-seg-deny { flex-grow: 15; flex-basis: 0; background: var(--ink); color: var(--paper); }
+.sc-seg-ask { flex-grow: 21; flex-basis: 0; background: repeating-linear-gradient(135deg, transparent 0 7px, var(--line-2) 7px 8px); }
 
 /* The wall and its viewer need a script (the list below is the whole truth
    without one), so they are hidden until main.js has said it is running. */
@@ -291,7 +291,33 @@ summary:hover .summary-meta { color: var(--ink); }
 .deltas .ic { margin-top: .2em; }
 .vs-prompt .deltas { color: var(--ink-2); }
 
-/* 7. Install: the page's one field of signal colour ------------------------ */
+/* 7. The console: what the hooks record, read on one local page ------------- */
+/* The right column of the head carries the command, the way the hero does. */
+.console-intro { display: grid; justify-items: start; gap: 1.1rem; min-width: 0; }
+.console-meta { color: var(--ink-2); font-size: .9rem; }
+.console-meta span { white-space: nowrap; }
+/* A real capture keeps the console's own palette, as the code panel keeps the
+   CLI's; the frame is the film's: a 1.5px ink edge, no shadow. */
+.screen { margin: 0; border: 1.5px solid var(--ink); background: var(--paper-2); }
+.screen img { display: block; width: 100%; height: auto; }
+.screen figcaption { padding: .8rem 1.1rem .85rem; border-top: 1.5px solid var(--ink); color: var(--ink-2); font-size: .86rem; line-height: 1.45; }
+/* The console's own three groups, in its own words. */
+.console-index { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 2.25rem clamp(1.5rem, 1rem + 2.5vw, 3rem); margin-top: clamp(2.25rem, 1.75rem + 2vw, 3.5rem); }
+.console-group { min-width: 0; }
+.console-group h3 { padding-bottom: .7rem; border-bottom: 2px solid var(--ink); }
+.console-group dl { margin: 0; }
+.console-group dt { margin-top: 1.1rem; font: 700 1.02rem/1.3 var(--font-body); font-stretch: 94%; }
+.console-group dd { max-width: 40ch; margin: .3rem 0 0; color: var(--ink-2); font-size: .95rem; line-height: 1.5; text-wrap: pretty; }
+.also { margin-top: clamp(2.25rem, 1.75rem + 2vw, 3.5rem); border-top: 1px solid var(--line-2); border-bottom: 1px solid var(--line-2); }
+.also-body { display: grid; gap: .9rem; padding-bottom: 1.4rem; }
+.also-list { display: grid; gap: .45rem; margin: 0; padding: 0 0 0 1.15rem; }
+.also-list li { padding-left: .2rem; line-height: 1.5; text-wrap: pretty; }
+.also-list li::marker { color: var(--ink-2); }
+.also-note { color: var(--ink-2); font-size: .95rem; line-height: 1.5; }
+.also-note b { color: var(--ink); }
+.also-note a { display: inline-flex; align-items: center; gap: .3rem; color: var(--ink); font-weight: 600; }
+
+/* 8. Install: the page's one field of signal colour ------------------------ */
 .install {
   /* A fixed light-on-black scheme in both themes: black ink on the orange field. */
   --ink: #0d0e10; --ink-2: #17181b; --paper: #f1f2f0;
@@ -312,7 +338,7 @@ summary:hover .summary-meta { color: var(--ink); }
 .install .cta-pair { margin-top: 0; }
 .plans-line { font-size: .95rem; line-height: 1.5; }
 
-/* 8. About ------------------------------------------------------------------ */
+/* 9. About ------------------------------------------------------------------ */
 .about { padding-block: var(--space-section); }
 .about-grid { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 1.5rem clamp(2rem, 1.5rem + 3vw, 4.5rem); align-items: start; }
 .about h2 { font-size: clamp(1.9rem, 1.3rem + 2vw, 3rem); }
@@ -328,7 +354,7 @@ summary:hover .summary-meta { color: var(--ink); }
 .about-links { display: flex; flex-wrap: wrap; gap: .5rem 1.75rem; color: var(--ink); font-weight: 600; }
 .about-links a { display: inline-flex; align-items: center; gap: .3rem; }
 
-/* 9. Responsive ------------------------------------------------------------ */
+/* 10. Responsive ----------------------------------------------------------- */
 @media (max-width: 1000px) {
   .hero-grid, .incident-grid, .chapter-head, .wall-grid, .policy-body, .install-grid, .about-grid, .versus { grid-template-columns: minmax(0, 1fr); }
   .chapter-head { align-items: start; }
@@ -340,6 +366,13 @@ summary:hover .summary-meta { color: var(--ink); }
   .bar-row { grid-template-columns: auto minmax(0, 1fr); }
   .bar-text { grid-column: 2; }
   .scale { grid-column: 1 / -1; }
+  .console-index { grid-template-columns: minmax(0, 1fr); gap: 1.75rem; }
+}
+/* One column of groups is tall on a tablet; there each page and its line share a row. */
+@media (min-width: 541px) and (max-width: 1000px) {
+  .console-group dl { display: grid; grid-template-columns: minmax(0, 12rem) minmax(0, 1fr); align-items: baseline; gap: .85rem 1.5rem; padding-top: 1.1rem; }
+  .console-group dt, .console-group dd { margin: 0; }
+  .console-group dd { max-width: 56ch; }
 }
 @media (max-width: 700px) {
   .score-charts { grid-template-columns: minmax(0, 1fr); }
@@ -361,7 +394,7 @@ summary:hover .summary-meta { color: var(--ink); }
   .sc-seg { flex-direction: column; gap: .3rem; }
 }
 
-/* 10. Motion: the thread draws, the wall fills in, once ---------------------- */
+/* 11. Motion: the thread draws, the wall fills in, once ---------------------- */
 @keyframes tile-in { from { opacity: 0; transform: scale(.6); } to { opacity: 1; transform: none; } }
 @media (prefers-reduced-motion: no-preference) {
   /* Armed by main.js only once it has an observer on the element. */

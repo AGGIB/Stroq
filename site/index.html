@@ -101,6 +101,7 @@
         <li><a href="#incident">The incident</a></li>
         <li><a href="#how">How it works</a></li>
         <li><a href="#attacks">36 attacks</a></li>
+        <li><a href="#console">Console</a></li>
         <li><a href="#install">Install</a></li>
         <li><a href="/docs/">Docs</a></li>
         <li><a href="https://github.com/AGGIB/Stroq">GitHub <svg class="ic ic-ext" width="14" height="14" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a></li>
@@ -428,9 +429,9 @@
         <p class="chapter-lead">Each incident is replayed through <em>your</em> policy on every commit. This tests the policy, not a live agent. <code>stroq attack</code> exits 1 if a scenario gets through.</p>
       </div>
 
-      <div class="sc-bar" role="img" aria-label="Of 36 replayed attacks, 17 were blocked outright, 19 were turned into a prompt, and none passed through.">
-        <span class="sc-seg sc-seg-deny"><b>17</b> blocked</span>
-        <span class="sc-seg sc-seg-ask"><b>19</b> asked</span>
+      <div class="sc-bar" role="img" aria-label="Of 36 replayed attacks, 15 were blocked outright, 21 were turned into a prompt, and none passed through.">
+        <span class="sc-seg sc-seg-deny"><b>15</b> blocked</span>
+        <span class="sc-seg sc-seg-ask"><b>21</b> asked</span>
       </div>
 
       <div class="wall-grid">
@@ -810,7 +811,88 @@ Executing decoded or remotely fetched code is blocked
     </div>
   </section>
 
-  <!-- 6. Install: the command you would actually type, on the page's one full field
+  <!-- 6. The console: what the hooks record, read on one local page. The picture is a
+       real frame of the console's Protection page (captured with the 0.28 build, whose
+       top of the page 0.29 prints the same way) on a staged session: a throwaway home, a
+       made-up project, agent calls fed to the real hook. The caption says so. Light and
+       dark are separate captures of the same session; under 1000px a crop of its left
+       side keeps the text at a readable size. -->
+  <section class="chapter console" id="console" aria-labelledby="console-title">
+    <div class="container">
+      <div class="chapter-head">
+        <h2 id="console-title">Every decision, in a console at 127.0.0.1.</h2>
+        <div class="console-intro">
+          <p class="chapter-lead">It opens in your browser on a private link whose key changes every start.</p>
+          <div class="install-pill">
+            <code class="install-cmd" id="console-cmd"><span class="prompt-mark" aria-hidden="true">$ </span>npx @stroq/cli console</code>
+            <button class="copy-btn" type="button" data-copy="npx @stroq/cli console" data-select="console-cmd" aria-describedby="console-cmd">
+              <svg class="ic" width="16" height="16" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg>
+              <span class="copy-label">Copy</span>
+            </button>
+          </div>
+          <p class="console-meta"><span>Loopback only</span> · <span>no account</span> · <span>no telemetry</span></p>
+        </div>
+      </div>
+
+      <figure class="screen">
+        <picture>
+          <source media="(max-width: 1000px) and (prefers-color-scheme: dark)" type="image/avif" srcset="/assets/console/protection-dark-narrow.avif" width="2264" height="1212">
+          <source media="(max-width: 1000px)" type="image/avif" srcset="/assets/console/protection-light-narrow.avif" width="2264" height="1212">
+          <source media="(prefers-color-scheme: dark)" type="image/avif" srcset="/assets/console/protection-dark.avif" width="2320" height="732">
+          <source media="(prefers-color-scheme: dark)" type="image/jpeg" srcset="/assets/console/protection-dark.jpg" width="1600" height="506">
+          <source type="image/avif" srcset="/assets/console/protection-light.avif" width="2320" height="732">
+          <img src="/assets/console/protection-light.jpg" width="1600" height="506" loading="lazy" decoding="async" alt="The Protection page of the Stroq console. It reads: Stroq is being asked by Claude Code, Cursor and Codex CLI. Each of the three is Connected: hooks are in place, and Stroq was last asked about an action just now or 2 minutes ago. In the newest 11 recorded actions: 2 denied, 1 asked you, 0 flagged and 8 allowed. Below: 1 critical and 2 high settings found in your agents' files.">
+        </picture>
+        <figcaption>A staged session: made-up project, scripted agent calls. The states and counts are the console's own.</figcaption>
+      </figure>
+
+      <div class="console-index">
+        <div class="console-group">
+          <h3>Every day</h3>
+          <dl>
+            <dt>Protection</dt>
+            <dd>Whether each agent asks Stroq before it acts. Connected means a call was seen, not that every action is covered.</dd>
+            <dt>Live and Activity</dt>
+            <dd>The audit journal as it happens, each call with its decision.</dd>
+            <dt>The event card</dt>
+            <dd>Source, action, decision, outcome, as far as recorded.</dd>
+          </dl>
+        </div>
+        <div class="console-group">
+          <h3>Set up</h3>
+          <dl>
+            <dt>Try an action</dt>
+            <dd>Test the policy on a command before the agent runs it.</dd>
+            <dt>Settings check</dt>
+            <dd>Agent settings that weaken protection.</dd>
+          </dl>
+        </div>
+        <div class="console-group">
+          <h3>When you need it</h3>
+          <dl>
+            <dt>Secret exposure</dt>
+            <dd>Where a known secret went.</dd>
+            <dt>MCP call control</dt>
+            <dd>Pause one server's new calls; hold a tool until you approve it.</dd>
+          </dl>
+        </div>
+      </div>
+
+      <details class="also">
+        <summary>Also new in 0.29</summary>
+        <div class="also-body">
+          <ul class="also-list">
+            <li>A question about a copied value is asked once.</li>
+            <li>A flag on your own file no longer locks the session.</li>
+            <li>A script that the same line downloads and runs is judged by where its text came from.</li>
+          </ul>
+          <p class="also-note">Replayed on 500 public agent sessions, 28,347 tool calls: <b>21 stops (0.07%)</b>. <a href="https://github.com/AGGIB/Stroq/blob/main/CHANGELOG.md">Changelog <svg class="ic ic-ext" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a></p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- 7. Install: the command you would actually type, on the page's one full field
        of the signal colour. -->
   <section class="install" id="install" aria-labelledby="install-title">
     <div class="container install-grid">
@@ -863,7 +945,7 @@ npx @stroq/cli init --agent mcp --client claude-desktop</code></pre>
     </div>
   </section>
 
-  <!-- 7. Who, and where it stops. -->
+  <!-- 8. Who, and where it stops. -->
   <section class="about" id="about" aria-labelledby="about-title">
     <div class="container about-grid">
       <h2 id="about-title">Built in the open, by one developer.</h2>

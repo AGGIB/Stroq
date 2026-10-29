@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import { writtenText } from './actions/written-text.js';
+import { lex } from './actions/shell-lex.js';
 import { classifyTool, type ToolClassification } from './actions/classify-tool.js';
 import { INSTRUCTION_SCAN_CLOCK_SIGNAL } from './actions/limit-signals.js';
 import { canaryFileTouched, type CanaryFiles } from './secrets/canary-files.js';
@@ -62,6 +63,34 @@ import type {
 
 /** The rule a question about a copied value is asked by (see `policies/default.yaml`). */
 const COPY_QUESTION_RULE = 'ask-origin-untrusted';
+/**
+ * The calls that run a program and that the host reports back on: a command, a tool of an MCP server.
+ * A write or an edit runs nothing.
+ */
+const REPORTS_RUN = (event: PreToolEvent): boolean =>
+  event.toolName === 'Bash' ||
+  event.toolName === 'PowerShell' ||
+  event.toolName.startsWith('mcp__') ||
+  event.mcpIdentity !== undefined;
+/** The longest command read for a part that runs on in the background; a longer one is taken to. */
+const MAX_BACKGROUND_READ = 64 * 1024;
+const POWERSHELL_BACKGROUND = /&\s*$|\bStart-(?:Job|ThreadJob|Process)\b|-AsJob\b/im;
+
+/**
+ * Whether a call goes on running after it returns: `Monitor`, a command run in the background, one
+ * whose line sends a part to the background (`… &`) or that cannot be read for one. Its report does
+ * not say it ended. A process a program starts on its own is past what is read here.
+ */
+function runsOn(event: PreToolEvent): boolean {
+  if (event.toolName === 'Monitor' || event.toolInput['run_in_background'] === true) return true;
+  const command = event.toolInput['command'];
+  if (typeof command !== 'string') return false;
+  if (event.toolName === 'PowerShell') return POWERSHELL_BACKGROUND.test(command);
+  if (event.toolName !== 'Bash' || !command.includes('&')) return false;
+  if (command.length > MAX_BACKGROUND_READ) return true;
+  const lexed = lex(command);
+  return lexed.uncertain || lexed.ampersands.size > 0;
+}
 const NO_COPIES: ReadonlySet<string> = new Set();
 /** A hash of a call's input, keys in a stable order: the input a question was about. */
 const inputHash = (input: unknown): string =>
@@ -678,6 +707,29 @@ export class StroqEngine {
       .catch(() => undefined);
   }
 
+  /**
+   * A call that may run is noted until it reports back: the report that an asked call ran is not
+   * taken while another runs, for that one could be writing the report. One that cannot be noted is
+   * a call lost track of, and what waits is forgotten (`noteCallsLost`).
+   */
+  private async noteCallStarted(event: PreToolEvent, decision: Decision): Promise<void> {
+    const sessions = this.opts.sessions;
+    if (sessions.noteCallStarted === undefined || sessions.noteCallsLost === undefined) return;
+    if (decision.effect === 'deny') return;
+    // A call that runs on is lost track of from the start: nothing waits for its report.
+    if (runsOn(event)) {
+      await sessions.noteCallsLost(event.sessionId);
+      return;
+    }
+    if (event.callId === undefined || !REPORTS_RUN(event)) return;
+    const call = { callId: event.callId, tool: event.toolName, input: inputHash(event.toolInput) };
+    // One that cannot be noted is lost track of; when not even that is written, the call is not
+    // judged at all, and the hook's failure answers for it (a deny where the tool can do harm).
+    await sessions
+      .noteCallStarted(event.sessionId, call)
+      .catch(() => sessions.noteCallsLost?.(event.sessionId));
+  }
+
   /** The host reports a call ran: a question about copied values it was asked about is answered yes. */
   private async allowCopyQuestion(event: PostToolEvent): Promise<void> {
     const sessions = this.opts.sessions;
@@ -825,6 +877,7 @@ export class StroqEngine {
       approval.approvalReview === undefined
         ? operation
         : JSON.stringify(parseTaskAccessReview(approval.approvalReview)?.input);
+    await this.noteCallStarted(event, decision);
     await this.opts.audit.append({
       sessionId: event.sessionId,
       phase: 'pre',
@@ -843,18 +896,6 @@ export class StroqEngine {
       ...(secrets.length > 0 ? { secrets } : {}),
     });
     await this.noteCopyQuestion(event, decision, origin.counted, classification.classes);
-    // While a question waits, a call that starts is noted until it reports back: the report that the
-    // asked call ran is not taken while one runs, for it could be the one writing that report.
-    if (
-      state.askedCopies !== undefined &&
-      state.askedCopies.length > 0 &&
-      event.callId !== undefined &&
-      decision.effect !== 'deny' &&
-      this.opts.sessions.noteCallStarted !== undefined
-    )
-      await this.opts.sessions
-        .noteCallStarted(event.sessionId, event.callId)
-        .catch(() => undefined);
     // A canary value on its way out, or a decoy file opened: either way something the
     // session read is steering it, and every later call is judged as compromised.
     const tripped = [

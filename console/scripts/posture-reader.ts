@@ -1,5 +1,5 @@
 import { constants } from 'node:fs';
-import { lstat, open, realpath } from 'node:fs/promises';
+import { lstat, open, readlink, realpath } from 'node:fs/promises';
 import { join, relative } from 'node:path';
 import { parse as parseToml } from 'smol-toml';
 import type { SourceState } from '../lib/posture';
@@ -43,6 +43,12 @@ const samePath = (a: string, b: string): boolean =>
     ? a.toLowerCase() === b.toLowerCase()
     : a === b;
 
+/** The file a descriptor holds, as the system names it: Linux only, null elsewhere. */
+async function openedPath(fd: number): Promise<string | null> {
+  if (process.platform !== 'linux') return null;
+  return readlink(`/proc/self/fd/${fd}`);
+}
+
 async function readText(
   target: Pick<SettingsTarget, 'path' | 'confineTo'>,
 ): Promise<SettingsRead | string> {
@@ -74,14 +80,22 @@ async function readText(
   if (target.confineTo !== null) {
     // NOFOLLOW covers only the last part of the path. A folder swapped for a link between the check
     // above and the open would send the open elsewhere, so confirm that the name still leads to the
-    // file that is open.
+    // file that is open. Where the system says which file a descriptor holds (Linux), that answer
+    // decides: checks by name, made one after another, can each be passed by a folder that is
+    // swapped back and forth between them.
     try {
+      const held = await openedPath(handle.fd);
       const [again, now, opened] = await Promise.all([
         realpath(target.path),
         lstat(path),
         handle.stat(),
       ]);
-      if (!samePath(again, path) || now.dev !== opened.dev || now.ino !== opened.ino) {
+      if (
+        (held !== null && !samePath(held, path)) ||
+        !samePath(again, path) ||
+        now.dev !== opened.dev ||
+        now.ino !== opened.ino
+      ) {
         await handle.close().catch(() => {});
         return { state: 'unsafe' };
       }

@@ -637,6 +637,15 @@ function localProgram(name: string, args: readonly string[], cwd: string, depth:
   return args.length === 1 && (args[0] === '--version' || args[0] === '-v');
 }
 
+/**
+ * Whether every word of a segment is an assignment (`A=1 B=x`). Read word by word: as one pattern of
+ * repeated `NAME=value` it went back over `A=A=A=…` in time that doubled with each, a hook that hung.
+ */
+function onlyAssignments(segment: string): boolean {
+  const words = segment.trim().split(/\s+/);
+  return words[0] !== '' && words.every((word) => /^[A-Za-z_]\w*=/.test(word));
+}
+
 export function printsOwnText(command: string, cwd: string, depth = 0): boolean {
   if (command.length > MAX_COMMAND_CHARS) return false;
   const split = splitCommand(command);
@@ -647,8 +656,7 @@ export function printsOwnText(command: string, cwd: string, depth = 0): boolean 
     const found = resolve(segment);
     if (found === null) {
       // Only assignments, or nothing a shell runs.
-      if (/^\s*(?:[A-Za-z_]\w*=\S*\s*)+$/.test(segment) || /^[\s(){};&|!]*$/.test(segment))
-        continue;
+      if (onlyAssignments(segment) || /^[\s(){};&|!]*$/.test(segment)) continue;
       return false;
     }
     if (found.deep || found.searchChanged === true || found.evalProgram !== null) return false;

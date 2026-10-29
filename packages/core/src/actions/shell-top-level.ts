@@ -167,8 +167,6 @@ const GIVES_ANY: ReadonlySet<string> = new Set(['eval', 'source', '.']);
 const BRACKET = /\[([^\][]*)\]/g;
 /** A bare name, not one read with `$` or inside `${…}`. */
 const BARE_NAMES = /(?<![$\w{])[A-Za-z_]\w*/g;
-/** The offset and length of a substring expansion, which are arithmetic: `${X:S=1}`. */
-const SUBSTRING = /\$\{[A-Za-z_]\w*:(?![-=?+])([^}]*)\}/g;
 /** An expansion that gives a name a value when it has none: `${S:=x}`, `${S=x}`. */
 const DEFAULT_ASSIGNMENT = /\$\{([A-Za-z_]\w*):?=/g;
 /** Words that run the command after them, and its options, as it is: `builtin read x`, `command -p read x`. */
@@ -187,17 +185,52 @@ const NONE: ReadonlySet<string> = new Set();
  */
 function namesGiven(segment: string): readonly string[] | null {
   const front = namesGivenByCommand(segment);
-  if (front === null) return null;
+  if (front === null || computesSubstring(segment)) return null;
   // Anywhere in the segment, not only at its front: arithmetic from its `((` on, however deep it nests
   // (`(( S = 1 ))`, `$((S++))`), a bracket of arithmetic or a subscript, and a default assignment.
   const arithmetic = segment.indexOf('((');
   const inExpressions = [
     ...(arithmetic === -1 ? [] : (segment.slice(arithmetic).match(BARE_NAMES) ?? [])),
     ...[...segment.matchAll(BRACKET)].flatMap((m) => (m[1] as string).match(BARE_NAMES) ?? []),
-    ...[...segment.matchAll(SUBSTRING)].flatMap((m) => (m[1] as string).match(BARE_NAMES) ?? []),
     ...[...segment.matchAll(DEFAULT_ASSIGNMENT)].map((m) => m[1] as string),
   ];
   return inExpressions.length === 0 ? front : [...front, ...inExpressions];
+}
+
+/** A character an offset or a length made of numbers may hold: digits, a sign, a colon, blanks. */
+const numeric = (c: string): boolean =>
+  (c >= '0' && c <= '9') || c === '-' || c === ':' || c === ' ' || c === '\t' || c === '\n';
+
+/**
+ * Whether a substring expansion's offset or length is more than numbers (`${X:S=1}`, `${@:$Y}`,
+ * `${a[${i}]:S=1}`): it is arithmetic, which can give any name a value. Read once, keeping one frame
+ * per `${` that is open, so an expansion nested in another is read in its turn and the outer one goes
+ * on after it closes. One left open past a substring's colon is taken to be such an expansion: the
+ * line was cut inside it (`${X:S=1|0}` at its `|`). One left open before any colon is not (a heredoc's
+ * `${spec%%|*}`, cut the same way).
+ */
+function computesSubstring(segment: string): boolean {
+  const frames: { colon: boolean; substring: boolean; computed: boolean }[] = [];
+  for (let i = 0; i < segment.length; i += 1) {
+    const c = segment[i] as string;
+    const top = frames[frames.length - 1];
+    if (c === '$' && segment[i + 1] === '{') {
+      if (top?.substring === true) top.computed = true;
+      frames.push({ colon: false, substring: false, computed: false });
+      i += 1;
+      continue;
+    }
+    if (top === undefined) continue;
+    if (c === '}') {
+      frames.pop();
+      if (top.substring && top.computed) return true;
+    } else if (!top.colon && c === ':') {
+      // `:-`, `:=`, `:?` and `:+` are not a substring; a default assignment is read on its own.
+      top.colon = true;
+      top.substring = !'-=?+'.includes(segment[i + 1] ?? '-');
+    } else if (top.substring && !numeric(c)) top.computed = true;
+  }
+  return frames.some((frame) => frame.substring);
 }
 
 /** The names the command of a segment gives a value, at its front or by what it is (`read`, `export`). */

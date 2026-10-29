@@ -1,3 +1,8 @@
+/** A two-minute window from one reading of the clock: two readings are now and then a millisecond apart. */
+const twoMinutes = () => {
+  const at = Date.now();
+  return { createdAt: new Date(at).toISOString(), expiresAt: new Date(at + 120000).toISOString() };
+};
 export const context = 'codex-context-' + 'a'.repeat(64),
   workspace = 'workspace-' + 'b'.repeat(24);
 export const id = (n) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
@@ -71,8 +76,7 @@ export const preview = (restore = false, kind = 'profile-network-off') => ({
   kind,
   recordId: id(1),
   recordRevision: restore ? '2'.repeat(64) : null,
-  createdAt: now(),
-  expiresAt: new Date(Date.now() + 120000).toISOString(),
+  ...twoMinutes(),
   binding: restore ? null : binding(),
   beforeSha256: restore ? '3'.repeat(64) : 'd'.repeat(64),
   afterSha256: restore ? 'd'.repeat(64) : '3'.repeat(64),
@@ -109,8 +113,7 @@ export const checkPreview = () => ({
   id: id(3),
   operationId: id(3),
   jobId: id(4),
-  createdAt: now(),
-  expiresAt: new Date(Date.now() + 120000).toISOString(),
+  ...twoMinutes(),
   binding: checkBinding(),
   scope: 'isolated-permission-copy',
   changesConfiguration: false,

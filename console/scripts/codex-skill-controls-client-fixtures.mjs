@@ -1,4 +1,9 @@
 import { codexSourcesFixture } from './codex-skill-sources-fixtures.mjs';
+/** A two-minute window from one reading of the clock: two readings are now and then a millisecond apart. */
+const twoMinutes = () => {
+  const at = Date.now();
+  return { createdAt: new Date(at).toISOString(), expiresAt: new Date(at + 120000).toISOString() };
+};
 export const contextId = 'codex-context-' + 'e'.repeat(64);
 export const otherContextId = 'codex-context-' + 'f'.repeat(64);
 export const recordId = '10000000-0000-4000-8000-000000000001';
@@ -51,8 +56,7 @@ export function controlPreview(operation = 'disable') {
     operation,
     recordId,
     recordRevision: operation === 'disable' ? null : '1'.repeat(64),
-    createdAt: new Date().toISOString(),
-    expiresAt: new Date(Date.now() + 120000).toISOString(),
+    ...twoMinutes(),
     name: report.items[0].name,
     location: report.items[0].location,
     beforeSha256: operation === 'disable' ? report.settings.sha256 : 'a'.repeat(64),

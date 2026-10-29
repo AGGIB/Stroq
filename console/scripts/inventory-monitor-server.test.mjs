@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { mkdir, mkdtemp, realpath, rm } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -14,6 +14,9 @@ test('production Skills and MCP watch calls only the baseline-independent observ
     home = join(userHome, '.stroq');
   await mkdir(project, { mode: 0o700 });
   await mkdir(userHome, { mode: 0o700 });
+  // The pages the server would serve: a stand-in, so the test does not need a built console.
+  await mkdir(join(root, 'out'));
+  await writeFile(join(root, 'out', 'index.html'), 'x');
   let server,
     observe = 0,
     read = 0;
@@ -24,6 +27,7 @@ test('production Skills and MCP watch calls only the baseline-independent observ
   const workspaceId =
     'workspace-' + createHash('sha256').update(project).digest('hex').slice(0, 24);
   server = await createConsoleServer({
+    root: join(root, 'out'),
     project,
     userHome,
     home,

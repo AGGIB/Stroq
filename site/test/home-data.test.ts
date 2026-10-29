@@ -59,6 +59,10 @@ describe('the 36 incidents', () => {
     expect(html).toMatch(/<h2 id="score-title">36 attacks replayed\./);
     expect(html).toContain('<span class="hi-deny">15 blocked</span>');
     expect(html).toContain('<span class="hi-ask">21 asked</span>');
+    // The bar under the headline once kept 17 and 19 after the headline moved on.
+    expect(html).toContain('<span class="sc-seg sc-seg-deny"><b>15</b> blocked</span>');
+    expect(html).toContain('<span class="sc-seg sc-seg-ask"><b>21</b> asked</span>');
+    expect(html).toMatch(/class="sc-bar"[^>]*aria-label="[^"]*15 were blocked[^"]*21 were/);
   });
 
   it('groups them by effect with the counts the chart claims', () => {
@@ -240,8 +244,10 @@ describe('the page stays short and readable', () => {
     return text.split(/\s+/).filter(Boolean).length;
   }
 
-  it('shows at most 1,000 words before anything is opened (it was 2,463)', () => {
-    expect(visibleWords()).toBeLessThanOrEqual(1000);
+  // The cap was 1,000 (from 2,463) until the console chapter, which needs about 150
+  // words to say what the console is, what it shows and how to open it.
+  it('shows at most 1,150 words before anything is opened (it was 2,463)', () => {
+    expect(visibleWords()).toBeLessThanOrEqual(1150);
   });
 
   it('ships every <details> closed', () => {
