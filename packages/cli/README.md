@@ -9,16 +9,21 @@
   <a href="https://github.com/AGGIB/Stroq/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache%202.0-blue.svg" alt="License: Apache 2.0"></a>
 </p>
 
-# Stroq — find known secrets in AI coding-agent sessions
+# Stroq — AI agent security platform
 
-**Did your AI agent pass your keys on?** `stroq sent` reads the Claude Code, Codex and Cursor sessions on your machine and looks for the exact values of your keys in them. For each key it finds, it says where the key went: sent to another company, maybe sent, seen by the AI, used with its own service, or blocked before it ran. It prints key names, never values, and writes nothing.
+Stroq is a local security platform for AI coding agents: Claude Code, Cursor, Codex CLI and others. Its hooks judge every tool call before it runs. They deny `curl | sh` and outbound calls that carry a known secret from your machine, and they ask you first when a command repeats text the agent read, naming that text. The console shows which agents actually ask Stroq, and every decision with its reason. Sessions you already had can be checked too, without installing anything.
 
 ```bash
-npx @stroq/cli sent              # every session on this machine
-npx @stroq/cli sent --here       # only the sessions of this project
+npx @stroq/cli console           # the console: a private page on 127.0.0.1
+npx @stroq/cli replay --all      # your Claude Code sessions of the last 30 days against the policy; no hooks needed
+npx @stroq/cli sent              # did your agent pass your keys on? key names, never values
 npx @stroq/cli sent --try        # a built-in sample with a made-up key; reads nothing
-npx @stroq/cli replay --last     # trace recorded content to later agent actions
+npx @stroq/cli init              # hook into your agent and guard the next session
 ```
+
+<img src="https://raw.githubusercontent.com/AGGIB/Stroq/main/docs/assets/readme/console-live.png" alt="Stroq console, Live page: the last 17 recorded actions, 11 allowed, 2 asked you, 3 denied, 1 flagged, each with its decision and rule" width="860">
+
+**Did your AI agent pass your keys on?** `stroq sent` reads the Claude Code, Codex and Cursor sessions on your machine and looks for the exact values of your keys in them. For each key it finds, it says where the key went: sent to another company, maybe sent, seen by the AI, used with its own service, or blocked before it ran. It prints key names, never values, and writes nothing.
 
 What a finding looks like (made-up keys, trimmed):
 
