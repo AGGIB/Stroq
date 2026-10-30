@@ -92,10 +92,18 @@ function findingOf(
  */
 export function droppedProtections(policy: Policy): readonly DroppedProtection[] {
   const found: DroppedProtection[] = [];
+  // Exercise the class rules for a representative permitted label, never credit the
+  // class-only missing-identity refusal as evidence that allowed-server checks remain.
+  // Every listed pair reaches the same class rules; an empty list denies all MCP calls.
+  const allowed = policy.version === 2 ? policy.mcpGovernance.allowed[0] : undefined;
+  const context =
+    allowed === undefined ? undefined : { mcpIdentity: { kind: 'server' as const, ...allowed } };
   for (const cls of ACTION_CLASSES) {
     const lost = STATES.flatMap((state) => {
       const protection = held(evaluatePolicy(DEFAULT_POLICY, [cls], state.taint));
-      const mine = held(evaluatePolicy(policy, [cls], state.taint));
+      const mine = held(
+        evaluatePolicy(policy, [cls], state.taint, cls.startsWith('mcp.') ? context : undefined),
+      );
       return STRICTNESS[mine.effect] < STRICTNESS[protection.effect]
         ? [{ name: state.name, protection, mine }]
         : [];

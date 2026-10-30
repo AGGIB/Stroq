@@ -231,21 +231,36 @@ describe('inline interpreter payload', () => {
     expect(flagged('node -e "console.log(Buffer.from(\'hi\').length)"')).toBe(false);
   });
 
+  const interp = /\b(python3?|node|perl|ruby)\s+(-c|-e)\b/;
+  const payloadByPattern =
+    /(exec\(|base64|__import__|atob\(|Buffer\.from\([^)]*base64|child_process|subprocess|os\.system)/;
+  const pieces = ['Buffer.from(', 'base64', 'base', '64', ')', "'", ',', 'x', ' ', 'exec('];
+  const byPattern = (cmd: string): boolean =>
+    splitSegments(cmd).some((seg) => interp.test(seg) && payloadByPattern.test(seg));
+
   it('flags exactly what the pattern with its own Buffer.from alternative flagged', () => {
-    const interp = /\b(python3?|node|perl|ruby)\s+(-c|-e)\b/;
-    const payloadByPattern =
-      /(exec\(|base64|__import__|atob\(|Buffer\.from\([^)]*base64|child_process|subprocess|os\.system)/;
-    const pieces = ['Buffer.from(', 'base64', 'base', '64', ')', "'", ',', 'x', ' ', 'exec('];
     fc.assert(
       fc.property(
-        fc.constantFrom('node -e ', 'python3 -c ', 'ruby -x '),
+        fc.constantFrom('node -e ', 'ruby -x '),
         fc.array(fc.constantFrom(...pieces, 'atob(', 'os.system', ';', '|'), { maxLength: 30 }),
         (head, body) => {
           const cmd = head + body.join('');
-          const expected = splitSegments(cmd).some(
-            (seg) => interp.test(seg) && payloadByPattern.test(seg),
-          );
-          expect(flagged(cmd)).toBe(expected);
+          expect(flagged(cmd)).toBe(byPattern(cmd));
+        },
+      ),
+      { numRuns: 3000 },
+    );
+  });
+
+  // A Python program is read for the processes it starts (`python-stages.ts`), and one read in full
+  // answers for itself: of these words, none starts one, so the reading only ever flags less.
+  it('flags no Python program of these words that the pattern did not', () => {
+    fc.assert(
+      fc.property(
+        fc.array(fc.constantFrom(...pieces, 'atob(', 'os.system', ';', '|'), { maxLength: 30 }),
+        (body) => {
+          const cmd = `python3 -c ${body.join('')}`;
+          if (flagged(cmd)) expect(byPattern(cmd)).toBe(true);
         },
       ),
       { numRuns: 3000 },

@@ -43,7 +43,8 @@ const PAYLOAD_COMMANDS: ReadonlyArray<readonly [string, string]> = [
     `perl -MCompress::Zlib -MMIME::Base64 -e 'eval uncompress(decode_base64("${PAYLOAD}"))'`,
   ],
   ['php', `php -r 'eval(gzinflate(base64_decode("${PAYLOAD}")));'`],
-  ['shell', `echo ${PAYLOAD} | base64 -d > f && chmod +x f && ./f`],
+  // Decoded and not run: run, the line is denied as encoded execution before provenance is asked.
+  ['shell', `echo ${PAYLOAD} | base64 -d > f && chmod +x f`],
 ];
 
 function fixture() {
@@ -57,11 +58,13 @@ function fixture() {
     audit: new AuditLog(join(home, 'audit.jsonl')),
     provenance,
   });
+  // A page fetched: text somebody else wrote, whose values a later call is asked about (a file of the
+  // project that nothing flagged gives none, see engine-own-text.test.ts).
   const post = (text: string) =>
     engine.post({
       sessionId: 's1',
-      toolName: 'Read',
-      toolInput: { file_path: 'README.md' },
+      toolName: 'WebFetch',
+      toolInput: { url: 'https://docs.example/readme', prompt: 'read it' },
       toolResultText: text,
       cwd,
     });
@@ -151,8 +154,11 @@ describe('a loss of hashes is narrow', () => {
   it('asks about a blob nothing accounts for once hashes were lost', async () => {
     const f = fixture();
     await f.post(lockfile(500, 'big'));
-    const r = await f.pre(`echo ${PAYLOAD} | base64 -d > f && chmod +x f && ./f`);
+    const r = await f.pre(`echo ${PAYLOAD} | base64 -d > f && chmod +x f`);
     expect(r.decision).toMatchObject({ effect: 'ask', ruleId: 'ask-origin-untrusted' });
+    // And run once decoded, it is denied as encoded execution whatever provenance says.
+    const run = await f.pre(`echo ${PAYLOAD} | base64 -d > f && chmod +x f && ./f`);
+    expect(run.decision).toMatchObject({ effect: 'deny', ruleId: 'deny-encoded-exec' });
   });
 
   it('does not ask about a blob when no hash was lost', async () => {

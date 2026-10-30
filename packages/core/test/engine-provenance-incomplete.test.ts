@@ -52,11 +52,12 @@ function fixture(
       ? {}
       : { secrets: new FileSecretIndex(join(home, 'secrets.json'), home, env) }),
   });
-  const post = (text: string, session = 's1', tool = 'Read', input: Record<string, unknown> = {}) =>
+  // What was read is a page: a flag on it taints, where one on the project's own files would not.
+  const post = (text: string, session = 's1') =>
     engine.post({
       sessionId: session,
-      toolName: tool,
-      toolInput: { file_path: 'README.md', ...input },
+      toolName: 'WebFetch',
+      toolInput: { url: 'https://docs.example/README.md', prompt: 'setup' },
       toolResultText: text,
       cwd,
     });
@@ -458,8 +459,8 @@ describe('a flagged result whose recording was cut short', () => {
       }));
       await f.engine.post({
         sessionId: 's1',
-        toolName: 'Read',
-        toolInput: { file_path: 'README.md' },
+        toolName: 'WebFetch',
+        toolInput: { url: 'https://docs.example/README.md', prompt: 'setup' },
         toolResultText: text,
         ...(failRecords ? {} : { resultUnread: true as const }),
         cwd,

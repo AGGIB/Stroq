@@ -10,10 +10,20 @@
  */
 
 export * from './types.js';
-export { applyPlan, type ApplyOptions, type ApplyResult } from './apply.js';
+export {
+  applyPlan,
+  prepareApply,
+  applyPreparedPlanUnderManifestLock,
+  type ApplyOptions,
+  type ApplyResult,
+  type PreparedApply,
+} from './apply.js';
 export {
   DIFF_OMITTED_NOTICE,
   undoFile,
+  prepareUndo,
+  applyPreparedUndoUnderManifestLock,
+  type PreparedUndo,
   type UndoOptions,
   type UndoResult,
   type UndoStatus,
@@ -72,10 +82,18 @@ export {
   emptyManifest,
   entriesFor,
   readManifest,
+  readManifestSnapshot,
+  type ManifestSnapshot,
   removeManifest,
   withManifestLock,
   writeManifest,
   type Manifest,
   type ManifestEntry,
 } from './manifest.js';
+export type {
+  HardenPreparedBinding,
+  HardenBoundFile,
+  PreparedOperationOptions,
+} from './prepared-state.js';
+export type { HardenFileIdentity, HardenFileSnapshot } from './read.js';
 export { blockMarkers, planTextBlock, undoTextBlock, type TextUndo } from './textblock.js';

@@ -1,0 +1,92 @@
+.hook-history-tabs a {
+  padding: 9px 14px;
+  border-radius: 7px;
+  color: var(--muted-foreground);
+  font-size: var(--text-secondary);
+  text-decoration: none;
+}
+.hook-history-tabs a:hover,
+.hook-history-tabs a.is-active {
+  background: var(--accent);
+  color: var(--foreground);
+}
+.hook-history-controls {
+  display: grid;
+  gap: 18px;
+}
+.hook-history-controls > .button {
+  justify-self: start;
+}
+.hook-history-selects {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+}
+.hook-history-selects > div {
+  display: grid;
+  gap: 8px;
+}
+.hook-history-selects label {
+  font-size: var(--text-secondary);
+  color: var(--muted-foreground);
+}
+.hook-history-status {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin: 20px 0;
+  font-size: var(--text-secondary);
+  color: var(--muted-foreground);
+}
+.hook-history-list {
+  display: grid;
+  gap: 10px;
+}
+.hook-history-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--foreground);
+  text-decoration: none;
+}
+.hook-history-row:hover,
+.hook-history-row.is-active {
+  border-color: var(--st-amber);
+  background: color-mix(in srgb, var(--st-amber) 5%, var(--card));
+}
+.hook-history-row > span {
+  display: grid;
+  gap: 7px;
+  min-width: 0;
+}
+.hook-history-row strong {
+  font-size: var(--text-ui);
+  font-weight: 500;
+}
+.hook-history-row small {
+  font-size: var(--text-secondary);
+  color: var(--muted-foreground);
+}
+@media (max-width: 640px) {
+  .hook-history-selects {
+    grid-template-columns: 1fr;
+  }
+  .hook-history-row {
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 12px;
+    padding: 14px;
+  }
+  .hook-history-row > .badge {
+    grid-column: 2;
+    justify-self: start;
+  }
+  .hook-history-row > svg:last-child {
+    grid-column: 3;
+    grid-row: 1;
+  }
+}

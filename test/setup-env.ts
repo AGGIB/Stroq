@@ -34,3 +34,14 @@ process.env['STROQ_HOME'] = mkdtempSync(join(tmpdir(), 'stroq-stroq-home-'));
  * reason the end-to-end hook tests are covered too.
  */
 process.env['STROQ_SCAN_BUDGET_MS'] = String(10 * 60 * 1000);
+
+/**
+ * One compile cache for every CLI the tests start, in the run's own temporary directory.
+ *
+ * The CLI keeps its compiled code under the Stroq home it runs with (`compile-cache.ts`), and the
+ * tests give almost every spawn a home of its own: each would compile the whole bundle cold and
+ * write a few megabytes that nothing reads again, hundreds of times in a run. With this variable
+ * set Node turns the cache on in this folder before the CLI starts, and the CLI keeps it, as it
+ * would for a user who set it. `compile-cache.test.ts` starts the CLI without it, to check its own.
+ */
+process.env['NODE_COMPILE_CACHE'] ??= join(tmpdir(), 'stroq-tests-compile-cache');

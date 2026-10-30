@@ -2,10 +2,16 @@ import type { KeyObject } from 'node:crypto';
 import type { Decision } from '../types.js';
 import { verifyEscalation } from './escalation.js';
 import { firstHardClass } from './hard-set.js';
-import type { PublicKeyRead } from './keys.js';
+import { keyIdOf, type PublicKeyRead } from './keys.js';
+import { digestOf } from './canonical.js';
 import { type PathOptions, defaultPathOptions } from './paths.js';
 import { type PermitRejection, verifyPermit } from './permit.js';
-import { type Refusal, checkScope, wholeCallFingerprint } from './scope-check.js';
+import {
+  type Refusal,
+  checkScope,
+  wholeCallFingerprint,
+  describeEscalationFingerprint,
+} from './scope-check.js';
 import type { PermitStore, StoreVoidReason } from './store.js';
 import {
   type ScopeEvidence,
@@ -13,6 +19,7 @@ import {
   type ScopeGateInput,
   type ScopeKind,
   type ScopeVerdict,
+  type TaskAccessBinding,
   isTaskId,
 } from './types.js';
 
@@ -59,6 +66,15 @@ export type TaskVoidReason =
 /** More operations in one call than this cannot all be escalated, and are not tried. */
 const MAX_LIFTED_OPERATIONS = 16;
 const INVALID_TASK = 'invalid';
+const accessSessions = new WeakMap<object, string>();
+
+/** Only the gate can create a verified binding; copying/deserializing metadata loses authority. */
+export function isVerifiedTaskAccessBinding(
+  value: unknown,
+  sessionId: string,
+): value is TaskAccessBinding {
+  return typeof value === 'object' && value !== null && accessSessions.get(value) === sessionId;
+}
 
 const safeTaskId = (taskId: string): string => (isTaskId(taskId) ? taskId : INVALID_TASK);
 
@@ -198,7 +214,30 @@ class Gate implements ScopeGate {
         needed[0],
       );
     }
-    return this.refused(id, refusal, policy, lifted);
+    const refused = this.refused(id, refusal, policy, lifted);
+    // Metadata must not turn an unliftable denial into an approval opportunity. A
+    // recorded signed session is required even though legacy permits may omit it.
+    if (
+      lifted === undefined ||
+      needed.length > MAX_LIFTED_OPERATIONS ||
+      checked.body.sessionId === undefined ||
+      checked.body.sessionId !== input.event.sessionId
+    )
+      return refused;
+    const described = describeEscalationFingerprint(input, lifted);
+    if (described === null) return refused;
+    const access: TaskAccessBinding = Object.freeze({
+      ...described,
+      ...(described.fingerprintKind === 'read-target'
+        ? { target: Object.freeze(described.target) }
+        : {}),
+      permitBodySha256: digestOf(checked.body),
+      keyId: keyIdOf(key.key),
+      permitExpiresAt: checked.body.expiresAt,
+      requiredFingerprints: Object.freeze([...needed]),
+    });
+    accessSessions.set(access, checked.body.sessionId);
+    return { ...refused, access };
   }
 
   private refused(

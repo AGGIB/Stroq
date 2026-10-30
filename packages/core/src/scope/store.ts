@@ -78,7 +78,8 @@ function lookup(path: string): { found: Found; isFile: boolean; isDirectory: boo
   }
 }
 
-function hashOf(text: string): string {
+/** Canonical identity suffix of the core's one-use marker; inspection does not consume it. */
+export function escalationIdentity(text: string): string {
   const parsed = parseStrictJson(text);
   // A valid signature covers canonical content, not JSON spacing or key order. Malformed text is
   // never accepted by the gate, but the store can still identify it without throwing.
@@ -176,7 +177,7 @@ export class FilePermitStore implements PermitStore {
   }
 
   private usedMarker(dir: string, fingerprint: string, text: string): string {
-    return join(dir, 'extensions', `${fingerprint}.${hashOf(text)}.used`);
+    return join(dir, 'extensions', `${fingerprint}.${escalationIdentity(text)}.used`);
   }
 
   // The writers below are for the commands that issue and end tasks. They throw on a bad

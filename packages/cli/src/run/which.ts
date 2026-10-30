@@ -1,5 +1,5 @@
 import { accessSync, constants } from 'node:fs';
-import { delimiter, join } from 'node:path';
+import { delimiter, join, posix, win32 } from 'node:path';
 
 /**
  * Finding a program without running it.
@@ -39,8 +39,11 @@ export function binOnPath(
           .filter((ext) => ext !== '')
           .map((ext) => `${bin}${ext.toLowerCase()}`)
       : [bin];
+  // A PATH entry that is not an absolute folder (`.`, `node_modules/.bin`) is the working folder in
+  // disguise, and the working folder is where a hostile repository puts its own `srt` or `node`.
+  const isAbsolute = plat === 'win32' ? win32.isAbsolute : posix.isAbsolute;
   for (const entry of (env['PATH'] ?? '').split(delimiter)) {
-    if (entry === '') continue;
+    if (entry === '' || !isAbsolute(entry)) continue;
     for (const name of names) {
       const candidate = join(entry, name);
       try {

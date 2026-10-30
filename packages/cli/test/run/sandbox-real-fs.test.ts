@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { cliDirIn, policyFileIn, secretsFileIn } from '../../src/paths.js';
 import { generateSandbox, type SandboxHost } from '../../src/run/sandbox.js';
-import { under } from './state-names.js';
+import { listedOffMac, under } from './state-names.js';
 
 /**
  * The generated config, made against the file system it runs on instead of one a test makes up:
@@ -49,7 +49,9 @@ describe.skipIf(process.platform === 'win32')('the config against the real file 
 
   it('lists a name where it is on disk, on a platform that is not macOS', () => {
     const dir = homeWithTwo();
-    expect(denyWriteFor(dir, { platform: 'linux' })).toEqual([secretsFileIn(dir), cliDirIn(dir)]);
+    expect(denyWriteFor(dir, { platform: 'linux' })).toEqual(
+      listedOffMac(dir, [secretsFileIn(dir), cliDirIn(dir)]),
+    );
   });
 
   // A link that points nowhere is something at that path, whatever it points to: `existsSync` says
@@ -57,11 +59,9 @@ describe.skipIf(process.platform === 'win32')('the config against the real file 
   it('counts a link that points nowhere as there', () => {
     const dir = homeWithTwo();
     symlinkSync(join(dir, 'nowhere'), policyFileIn(dir));
-    expect(denyWriteFor(dir, { platform: 'linux' })).toEqual([
-      policyFileIn(dir),
-      secretsFileIn(dir),
-      cliDirIn(dir),
-    ]);
+    expect(denyWriteFor(dir, { platform: 'linux' })).toEqual(
+      listedOffMac(dir, [policyFileIn(dir), secretsFileIn(dir), cliDirIn(dir)]),
+    );
   });
 
   it.skipIf(process.platform !== 'darwin')('lists every name on this macOS, found or not', () => {
@@ -73,7 +73,7 @@ describe.skipIf(process.platform === 'win32')('the config against the real file 
     'lists only what is there on this platform, which is not macOS',
     () => {
       const dir = homeWithTwo();
-      expect(denyWriteFor(dir)).toEqual([secretsFileIn(dir), cliDirIn(dir)]);
+      expect(denyWriteFor(dir)).toEqual(listedOffMac(dir, [secretsFileIn(dir), cliDirIn(dir)]));
     },
   );
 

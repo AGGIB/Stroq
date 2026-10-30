@@ -14,7 +14,7 @@ import {
   srtArgv,
   type SandboxHost,
 } from '../../src/run/sandbox.js';
-import { under } from './state-names.js';
+import { alwaysListed, ifThere, under } from './state-names.js';
 
 const inputs = (over: Partial<Parameters<typeof generateSandbox>[0]> = {}, host?: SandboxHost) =>
   generateSandbox(
@@ -245,6 +245,7 @@ describe.skipIf(process.platform === 'win32')(
             secretsFileIn(HOME),
             cliDirIn(HOME),
             openclawPluginDirIn(HOME),
+            alwaysListed(HOME),
           ]);
         },
       );
@@ -262,9 +263,10 @@ describe.skipIf(process.platform === 'win32')(
             },
           },
         );
-        expect(denied).toEqual(CREDENTIALS);
-        // It asked about every protected name, by its resolved path, and about nothing else.
-        expect(asked).toEqual(under(HOME));
+        // The compile cache's folder is listed anyway: the launch makes it first (`makeCompileCacheRoot`).
+        expect(denied).toEqual([...CREDENTIALS, alwaysListed(HOME)]);
+        // It asked about every other protected name, by its resolved path, and about nothing else.
+        expect(asked).toEqual(ifThere(HOME));
       });
 
       it('lists all of them when all exist, in the same order as on macOS', () => {
@@ -274,9 +276,10 @@ describe.skipIf(process.platform === 'win32')(
       });
 
       it('keeps the credential files whether or not they exist: they were found by reading them', () => {
-        expect(denyWriteOf({}, { ...PLAIN, platform: 'linux', exists: () => false })).toEqual(
-          CREDENTIALS,
-        );
+        expect(denyWriteOf({}, { ...PLAIN, platform: 'linux', exists: () => false })).toEqual([
+          ...CREDENTIALS,
+          alwaysListed(HOME),
+        ]);
       });
     });
 
@@ -327,8 +330,8 @@ describe.skipIf(process.platform === 'win32')(
 
       it('is, anywhere else, each name that is not there, as a path and in the order of the list', () => {
         const there = [secretsFileIn(HOME), cliDirIn(HOME)];
-        const left = under(HOME).filter((path) => !there.includes(path));
-        expect(left.length).toBe(under(HOME).length - 2);
+        const left = ifThere(HOME).filter((path) => !there.includes(path));
+        expect(left.length).toBe(under(HOME).length - 3);
         for (const platform of ['linux', 'freebsd', 'win32'] as const)
           expect(inputs({}, elsewhere(there, platform)).unprotected, platform).toEqual(left);
       });
@@ -338,7 +341,7 @@ describe.skipIf(process.platform === 'win32')(
       });
 
       it('is every name where none is there', () => {
-        expect(inputs({}, elsewhere([])).unprotected).toEqual(under(HOME));
+        expect(inputs({}, elsewhere([])).unprotected).toEqual(ifThere(HOME));
       });
 
       it('is nothing for an empty home, which names no state', () => {
@@ -365,7 +368,7 @@ describe.skipIf(process.platform === 'win32')(
               path.startsWith('/srv/link') ? path.replace('/srv/link', '/mnt/real') : path,
           },
         );
-        expect(made.unprotected).toEqual(under('/mnt/real/.stroq'));
+        expect(made.unprotected).toEqual(ifThere('/mnt/real/.stroq'));
       });
 
       it('finds the names under a root that is above the home, reached through a link', () => {
@@ -378,7 +381,7 @@ describe.skipIf(process.platform === 'win32')(
               path.startsWith('/srv/link') ? path.replace('/srv/link', '/mnt/real') : path,
           },
         );
-        expect(made.unprotected).toEqual(under('/mnt/real/deep/.stroq'));
+        expect(made.unprotected).toEqual(ifThere('/mnt/real/deep/.stroq'));
       });
 
       it('is a list of paths that the config does not deny', () => {

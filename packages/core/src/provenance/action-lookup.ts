@@ -43,13 +43,17 @@ function hitsOf(
     if (atom === undefined) continue;
     const key = atomKey(atom);
     const current = chosen.get(key);
-    if (current === undefined || (!current.record.suspect && record.suspect))
+    if (current === undefined || weight(record) > weight(current.record))
       chosen.set(key, { atom, record });
   }
   return [...chosen.values()];
 }
 
 const atomKey = (atom: Atom): string => `${atom.kind}\n${atom.value}`;
+
+/** Which record of an atom speaks for it: a flagged one over a clean one, one that taints over both. */
+const weight = (record: ProvenanceRecord): number =>
+  record.suspect ? 2 : record.flaggedOwn === true ? 1 : 0;
 
 /**
  * The hashes under which the records of an atom may be kept. A blob in a command is looked up as

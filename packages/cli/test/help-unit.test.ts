@@ -86,7 +86,18 @@ describe('usageAll: stroq help --all', () => {
     const groups = at.map((start, i) => listed(text.slice(start, at[i + 1] ?? text.length)));
     expect(groups).toEqual([
       ['sent', 'replay'],
-      ['init', 'doctor', 'why', 'uninstall', 'untaint', 'trust', 'log', 'verify', 'policy'],
+      [
+        'console',
+        'init',
+        'doctor',
+        'why',
+        'uninstall',
+        'untaint',
+        'trust',
+        'log',
+        'verify',
+        'policy',
+      ],
       ['inspect', 'vet', 'add', 'remove', 'exposure', 'run'],
       ['attack', 'bench', 'coverage', 'prove', 'canary'],
       ['task', 'permit', 'harden'],
@@ -125,6 +136,13 @@ describe('tierOf', () => {
 });
 
 describe('commandHelp', () => {
+  it('explains the strict tool-approval opt-in and its environment requirement', () => {
+    const help = commandHelp('mcp') ?? '';
+    expect(help).toContain('--tool-approval');
+    expect(help).toContain('explicit --pass-env');
+    expect(help).toContain('not with --cloak');
+  });
+
   it('prints the synopsis, what the command does, and its options', () => {
     const text = commandHelp('log') ?? '';
     expect(text.startsWith('stroq log [--count 20] [--json]\n')).toBe(true);

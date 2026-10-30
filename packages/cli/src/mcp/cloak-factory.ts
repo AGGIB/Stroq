@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 import { AuditLog, FileCloakStore, FileSecretIndex, createCloakDetector } from '@stroq/core';
-import { auditFile, cloakDir, secretsFile } from '../paths.js';
+import { auditFileIn, cloakDirIn, secretsFileIn, stroqHome } from '../paths.js';
 import { McpCloak } from './cloak.js';
 import type { McpContext } from './judge.js';
 
@@ -28,14 +28,16 @@ import type { McpContext } from './judge.js';
 export const cloakKey = (sessionId: string, server: string): string =>
   createHash('sha256').update(`${sessionId}\n${server}`).digest('hex').slice(0, 16);
 
-export function createMcpCloak(ctx: McpContext): McpCloak {
+export function createMcpCloak(ctx: McpContext, home = stroqHome()): McpCloak {
   return new McpCloak({
     detector: createCloakDetector({
-      secrets: new FileSecretIndex(secretsFile(), homedir(), process.env),
+      secrets: new FileSecretIndex(secretsFileIn(home), homedir(), process.env),
       cwd: ctx.cwd,
     }),
-    store: new FileCloakStore(join(cloakDir(), `${cloakKey(ctx.sessionId, ctx.server)}.json`)),
-    audit: new AuditLog(auditFile()),
+    store: new FileCloakStore(
+      join(cloakDirIn(home), `${cloakKey(ctx.sessionId, ctx.server)}.json`),
+    ),
+    audit: new AuditLog(auditFileIn(home)),
     sessionId: ctx.sessionId,
   });
 }

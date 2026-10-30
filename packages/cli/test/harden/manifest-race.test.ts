@@ -3,7 +3,7 @@ import { mkdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { MAX_MANIFEST_BYTES, readManifest } from '../../src/harden/manifest.js';
-import { entry, setup, thrownBy } from './manifest-fixtures.js';
+import { entry, setup, signedText, thrownBy } from './manifest-fixtures.js';
 import { removeTempDirs, tempDir } from './helpers.js';
 
 /**
@@ -84,11 +84,12 @@ describe('a manifest replaced while it is being opened', () => {
   });
 
   it('reads whole the file that is there when it is opened, never a mixture of the two', () => {
-    const replacement = JSON.stringify({ version: 1, files: { '/a/b.json': [entry()] } });
-    const { env } = armed((file) => {
+    let replacement = '';
+    const { env, home } = armed((file) => {
       unlinkSync(file);
       writeFileSync(file, replacement);
     });
+    replacement = signedText(home, { '/a/b.json': [entry()] });
 
     const manifest = readManifest(env);
 

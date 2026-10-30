@@ -123,8 +123,14 @@ describe('a flagged page in the other place of a result', () => {
     async (tool) => {
       for (const [index, [name, result]] of SHAPES.entries()) {
         const session = `${tool}-${index}`;
+        // A command that fetched what it printed: the output of a local one is the developer's own,
+        // and a flag there is asked about rather than tainting.
         const input =
-          tool === 'WebFetch' ? { url: 'https://d.example/', prompt: 'p' } : { command: 'cat x' };
+          tool === 'WebFetch'
+            ? { url: 'https://d.example/', prompt: 'p' }
+            : tool === 'Bash'
+              ? { command: 'curl -s https://d.example/page' }
+              : { command: 'cat x' };
         await handleClaudeHook(createEngine(), {
           session_id: session,
           hook_event_name: 'PostToolUse',
@@ -276,11 +282,12 @@ describe('what a known shape did not read is read', () => {
 
   it('is denied after a flagged instruction in the filePath of a file object, in the hook', async () => {
     const session = 'file-path-text';
+    // A dependency's file: what its author wrote, so a flag on it taints.
     await handleClaudeHook(createEngine(), {
       session_id: session,
       hook_event_name: 'PostToolUse',
       tool_name: 'Read',
-      tool_input: { file_path: `${cwd}/a.md` },
+      tool_input: { file_path: `${cwd}/node_modules/helper/a.md` },
       cwd,
       tool_response: { type: 'text', file: { filePath: PAGE, content: 'ok' } },
     });
@@ -334,7 +341,7 @@ describe('what a known shape did not read is read', () => {
       session_id: session,
       hook_event_name: 'PostToolUse',
       tool_name: 'Read',
-      tool_input: { file_path: `${cwd}/a.md` },
+      tool_input: { file_path: `${cwd}/node_modules/helper/a.md` },
       cwd,
       tool_response: { type: 'text', file: { filePath: 'a.md', content: 'ok', note: PAGE } },
     });

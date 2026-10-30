@@ -1,0 +1,17 @@
+Codex light/dark icons: original, unmodified assets from the official OpenAI
+Codex desktop application (bundle com.openai.codex, version 26.1016.51333).
+Source files: Contents/Resources/icon-codex-light.png and icon-codex-dark-color.png.
+
+Claude: unmodified claude_app_icon.png from the official Anthropic Claude
+desktop application, version 3.1623.1, Contents/Resources/ion-dist/images/.
+
+Cursor: unmodified CUBE_2D_LIGHT.svg and CUBE_2D_DARK.svg, from General Logos/Cube/SVG/
+inside the official brand kit linked by https://cursor.com/brand.
+Archive: https://ptht05hbb1ssoooe.public.blob.vercel-storage.com/assets/brand/cursor-brand-assets.zip
+
+Windsurf: unmodified black and white symbols linked by https://windsurf.com/brand.
+https://exafunction.github.io/public/brand/windsurf-black-symbol.svg
+https://exafunction.github.io/public/brand/windsurf-white-symbol.svg
+
+Stroq's wordmark is in components/brand-mark.tsx and uses the exact paths from
+docs/assets/logo.svg. Logos remain their owners' trademarks.

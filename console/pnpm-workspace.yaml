@@ -1,0 +1,3 @@
+# The console is its own small project, kept out of the CLI's workspace so the CLI never
+# depends on Next.js. `stroq console` only ships the static files from `out/`.
+packages: []

@@ -1,4 +1,5 @@
 import type { Decision, ProvenanceHit, SecretHit, StroqEngine } from '@stroq/core';
+import { mcpIdentityFromEncodedTool } from '@stroq/core';
 import { z } from 'zod';
 import { NO_OUTPUT, withEvidence, type HookOutput } from './claude-code.js';
 import {
@@ -187,11 +188,13 @@ const handlePost = (engine: StroqEngine, event: EngineEvent, response: unknown) 
 export async function handleCodexHook(engine: StroqEngine, raw: unknown): Promise<HookOutput> {
   const input = CodexHookInputSchema.parse(raw);
   const toolInput = codexToolInput(input);
+  const mcpIdentity = mcpIdentityFromEncodedTool('codex', input.tool_name);
   const event: EngineEvent = {
     sessionId: input.session_id,
     toolName: codexToolName(input.tool_name),
     toolInput,
     cwd: input.cwd || process.cwd(),
+    ...(mcpIdentity === undefined ? {} : { mcpIdentity }),
   };
   if (input.hook_event_name === 'PostToolUse')
     return handlePost(engine, event, input.tool_response);

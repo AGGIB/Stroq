@@ -16,13 +16,17 @@ function dirWith(...names: readonly string[]): string {
 }
 
 describe('binOnPath', () => {
-  it('returns the first entry on PATH that holds the program', () => {
-    const empty = dirWith();
-    const dir = dirWith('srt');
-    expect(binOnPath('srt', { PATH: [empty, dir].join(delimiter) }, 'linux')).toBe(
-      join(dir, 'srt'),
-    );
-  });
+  // A PATH of Windows folders is not absolute to the `linux` this simulates, and is skipped as relative.
+  it.skipIf(process.platform === 'win32')(
+    'returns the first entry on PATH that holds the program',
+    () => {
+      const empty = dirWith();
+      const dir = dirWith('srt');
+      expect(binOnPath('srt', { PATH: [empty, dir].join(delimiter) }, 'linux')).toBe(
+        join(dir, 'srt'),
+      );
+    },
+  );
 
   it('answers null when nothing on PATH holds it, and when there is no PATH at all', () => {
     expect(binOnPath('srt', { PATH: dirWith() }, 'linux')).toBeNull();
@@ -51,4 +55,22 @@ describe('binOnPath', () => {
     const dir = dirWith('srt.cmd');
     expect(binOnPath('srt', { PATH: dir }, 'win32')).toBe(join(dir, 'srt.cmd'));
   });
+
+  it.skipIf(CANNOT_CHMOD)(
+    'ignores a PATH entry that is not an absolute folder, so a repository cannot stand in for a program',
+    () => {
+      const dir = dirWith('srt');
+      const previous = process.cwd();
+      process.chdir(dir);
+      try {
+        expect(binOnPath('srt', { PATH: ['.', delimiter].join('') }, 'linux')).toBeNull();
+        expect(binOnPath('srt', { PATH: 'node_modules/.bin' }, 'linux')).toBeNull();
+        expect(binOnPath('srt', { PATH: ['', '.', dir].join(delimiter) }, 'linux')).toBe(
+          join(dir, 'srt'),
+        );
+      } finally {
+        process.chdir(previous);
+      }
+    },
+  );
 });

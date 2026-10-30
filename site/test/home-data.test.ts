@@ -32,7 +32,7 @@ const incidents: Incident[] = [...html.matchAll(ROW)].map((m) => ({
 
 const EFFECTS: Record<string, [blocked: number, asked: number]> = {
   'code execution': [7, 3],
-  'credential theft': [7, 2],
+  'credential theft': [5, 4],
   'data loss': [0, 10],
   persistence: [1, 3],
   'guard removal': [2, 0],
@@ -53,12 +53,16 @@ describe('the 36 incidents', () => {
     );
   });
 
-  it('blocks 17 and asks 19, which is what the headline and the bar print', () => {
+  it('blocks 15 and asks 21, which is what the headline and the bar print', () => {
     const tally = countBy((i) => i.verdict);
-    expect(tally).toEqual({ deny: 17, ask: 19 });
+    expect(tally).toEqual({ deny: 15, ask: 21 });
     expect(html).toMatch(/<h2 id="score-title">36 attacks replayed\./);
-    expect(html).toContain('<span class="hi-deny">17 blocked</span>');
-    expect(html).toContain('<span class="hi-ask">19 asked</span>');
+    expect(html).toContain('<span class="hi-deny">15 blocked</span>');
+    expect(html).toContain('<span class="hi-ask">21 asked</span>');
+    // The bar under the headline once kept 17 and 19 after the headline moved on.
+    expect(html).toContain('<span class="sc-seg sc-seg-deny"><b>15</b> blocked</span>');
+    expect(html).toContain('<span class="sc-seg sc-seg-ask"><b>21</b> asked</span>');
+    expect(html).toMatch(/class="sc-bar"[^>]*aria-label="[^"]*15 were blocked[^"]*21 were/);
   });
 
   it('groups them by effect with the counts the chart claims', () => {
@@ -240,8 +244,10 @@ describe('the page stays short and readable', () => {
     return text.split(/\s+/).filter(Boolean).length;
   }
 
-  it('shows at most 1,000 words before anything is opened (it was 2,463)', () => {
-    expect(visibleWords()).toBeLessThanOrEqual(1000);
+  // The cap was 1,000 (from 2,463) until the console chapter, which needs about 150
+  // words to say what the console is, what it shows and how to open it.
+  it('shows at most 1,150 words before anything is opened (it was 2,463)', () => {
+    expect(visibleWords()).toBeLessThanOrEqual(1150);
   });
 
   it('ships every <details> closed', () => {

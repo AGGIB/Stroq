@@ -5,6 +5,7 @@ import {
   bindingsFileIn,
   canaryFilesFileIn,
   cliDirIn,
+  compileCacheDirIn,
   hardenDirIn,
   installRecordFileIn,
   keysDirIn,
@@ -19,6 +20,7 @@ import {
   runDirIn,
   secretsFileIn,
   storeDirIn,
+  mcpCallControlsDirIn,
   tasksDirIn,
   trustFileIn,
 } from '../paths.js';
@@ -227,8 +229,9 @@ const tooBroadToSandbox = (path: string, userHome: string): boolean =>
  * on any platform but macOS a name is listed only if it exists when the config is made. The cost
  * is stated and not hidden: a name that is absent then can be created by the agent during the run
  * (the self-tamper gate still refuses a write that names it, which is a check of spelling and not a
- * boundary), and `GeneratedSandbox.unprotected` names them, so that `stroq run` can say so. The Windows
- * model (ACLs, an alpha) was not looked at either.
+ * boundary), and `GeneratedSandbox.unprotected` names them, so that `stroq run` can say so. The one
+ * exception is the compile cache's folder, which a launch makes first and which is always listed (see
+ * `generateSandbox`). The Windows model (ACLs, an alpha) was not looked at either.
  *
  * And none of them is a deny that holds when the path of the home holds `* ? [ ]`: see `hasGlobSyntax`.
  */
@@ -243,11 +246,18 @@ const protectedState = (home: string): readonly string[] => [
   cliDirIn(home),
   pluginCliDirIn(home),
   openclawPluginDirIn(home),
+  // Compiled code that Node runs in place of those files' source (`compile-cache.ts`). A hook
+  // inside the sandbox then reads the cache and cannot add to it, which costs it speed and nothing else.
+  // Listed on every platform even when absent: see `generateSandbox`.
+  compileCacheDirIn(home),
   keysDirIn(home),
   liveDirIn(home),
   hardenDirIn(home),
   backupsDirIn(home),
   storeDirIn(home),
+  // The per-tool pause and approval state that the MCP proxy reads on every call. A writer to it can
+  // resume a paused tool, so an agent inside the sandbox must not be one.
+  mcpCallControlsDirIn(home),
   // The private copies in which a pinned MCP server runs. Node looks a package up in the folders above the
   // file that asks, so `run/node_modules` would be found by a server that asks for one by name. Expected, not
   // measured with a real srt: a pinned server that is started inside this sandbox cannot make its copy
@@ -269,7 +279,8 @@ export function generateSandbox(inputs: SandboxInputs, host: SandboxHost = {}): 
   // An empty home names no state: a path joined to '' would be relative to wherever the launcher
   // happens to run.
   const home = inputs.stroqHome === '' ? null : resolve(inputs.stroqHome);
-  const named = home === null ? [] : protectedState(withLinksResolved(home, real));
+  const resolvedHome = home === null ? null : withLinksResolved(home, real);
+  const named = resolvedHome === null ? [] : protectedState(resolvedHome);
   // A home that srt would read as a pattern, as written or once its links are resolved, cannot be denied
   // (see `hasGlobSyntax`): it is not given as a root, so that the agent cannot write the state in it.
   const patterned = home !== null && (hasGlobSyntax(home) || named.some(hasGlobSyntax));
@@ -282,7 +293,11 @@ export function generateSandbox(inputs: SandboxInputs, host: SandboxHost = {}): 
   // none can be.
   const exists = host.exists ?? somethingAt;
   const darwin = (host.platform ?? process.platform) === 'darwin';
-  const state = patterned ? [] : darwin ? named : named.filter(exists);
+  // The compile cache's folder is the one name listed everywhere whether or not it is there: it holds
+  // code the hooks run, and an agent that made it first could fill it. `stroq run` makes it before it
+  // writes this config (`makeCompileCacheRoot`), so srt finds a folder to deny and makes no stand-in.
+  const cache = resolvedHome === null ? null : compileCacheDirIn(resolvedHome);
+  const state = patterned ? [] : darwin ? named : named.filter((p) => p === cache || exists(p));
   // The names that no deny covers, and of those the ones that a write root lets the agent write. The names
   // are those of the home with its links resolved, so a root is compared by the path it has once its own are:
   // asked only when there is a name to ask about, which on macOS there is not.
@@ -349,9 +364,9 @@ export const SRT_NO_RAW_MODE = [
   '  Use the agent’s non-interactive mode under --sandbox, or drop --sandbox for an interactive session.',
 ].join('\n');
 
-/** Said when `--sandbox` was asked for and `srt` is not installed. */
+/** Refusal before preflight or launch preparation when required `srt` is absent. */
 export const SRT_MISSING = [
-  'stroq run: --sandbox asked for a sandbox and "srt" is not on PATH, so THERE IS NO SANDBOX on this run.',
-  '  The git hardening and the hook checks above still apply; the filesystem and network confinement does not.',
+  'stroq run: cannot start: --sandbox requires "srt", which is not on PATH.',
+  '  Nothing was started. --force does not bypass this requirement.',
   '  Install it with: npm install -g @anthropic-ai/sandbox-runtime',
 ].join('\n');

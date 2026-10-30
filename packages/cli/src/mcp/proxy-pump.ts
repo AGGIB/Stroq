@@ -5,9 +5,34 @@ import { isRecord } from '../adapters/tool-input.js';
 import { logError } from '../log.js';
 import { EMPTY_PLAN, cloakNotice, type McpCloak, type UncloakPlan } from './cloak.js';
 import { OrderedQueue, writeBackpressured } from './pump-stream.js';
-import { createStrictHandler, type StrictHandlerDeps } from './strict-handler.js';
+import {
+  createStrictHandler,
+  type StrictHandlerDeps,
+  type StrictServerHandler,
+} from './strict-handler.js';
 import { strictLine } from './strict-line.js';
 import { terminatedResponse, type TerminationKind } from './strict-reasons.js';
+import { createToolPagination, type ToolPagination } from './proxy-tool-pagination.js';
+import type { McpPolicyContinuity } from './policy-continuity.js';
+import type { McpCallControlGuard } from './call-control-types.js';
+import { dispatchControlledMcpCall } from './call-control-dispatch.js';
+import {
+  auditCallControlRefusal,
+  callControlDecision,
+  auditCallControlInvalidMessage,
+  callControlInvalidDecision,
+} from './call-control-refusal.js';
+import { unambiguousControlledClientLine } from './call-control-ingress.js';
+import {
+  auditPolicyContinuityRefusal,
+  policyContinuityDecision,
+  policyDispatchGate,
+} from './proxy-policy.js';
+import {
+  auditToolApprovalRefusal,
+  toolApprovalResponse,
+  type ToolApprovalConnection,
+} from './proxy-tool-approval.js';
 import {
   MAX_LINE_CHARS,
   asJsonRpcId,
@@ -141,6 +166,13 @@ export interface PumpDeps {
    * lines this pump handles also record each request in `strict.ledger`; see that module.
    */
   readonly strict?: StrictPumpDeps | null;
+  readonly toolApproval?: ToolApprovalConnection;
+  readonly policyContinuity?: McpPolicyContinuity;
+  readonly callControl?: McpCallControlGuard;
+  readonly home?: string;
+  readonly toolPaginationTimeoutMs?: number;
+  readonly enqueueToServer?: (task: () => Promise<void>) => void;
+  readonly enqueueToClient?: (task: () => Promise<void>) => void;
 }
 
 /** What `proxy.ts` supplies for strict mode; the pump adds the streams it owns. */
@@ -152,6 +184,9 @@ export type StrictPumpDeps = Pick<
 export interface Pump {
   readonly onClientLine: (line: SplitLine) => Promise<void>;
   readonly onServerLine: (line: SplitLine) => Promise<void>;
+  readonly onClientIngress?: (line: SplitLine) => void;
+  readonly onServerIngress?: (line: SplitLine) => void;
+  readonly close?: (silent?: boolean) => Promise<void>;
   /** Strict mode only: whether the server was ended for exceeding its limit of withheld messages. */
   readonly strictTerminated?: () => boolean;
 }
@@ -160,6 +195,8 @@ export function createPump(deps: PumpDeps): Pump {
   const { ctx, pending, clientIn, serverIn, serverOut, clientOut } = deps;
   const cloak = deps.cloak ?? null;
   const strict = deps.strict ?? null;
+  const toolApproval = deps.toolApproval;
+  const policyFailure = policyDispatchGate(deps.policyContinuity);
 
   // Every write triggered by handling a CLIENT line — a forward to the server, or a
   // reply written straight back to the client — is paused against `clientIn`:
@@ -173,6 +210,21 @@ export function createPump(deps: PumpDeps): Pump {
     strict === null ? JSON.stringify(value) : strictLine(value);
   const replyToClient = (value: unknown): Promise<void> =>
     fromClient(clientOut, `${lineOf(value)}\n`);
+  const refuseApproval = async (id: JsonRpcId): Promise<void> => {
+    await auditToolApprovalRefusal(ctx, 'tools/call');
+    await replyToClient(toolApprovalResponse(id));
+  };
+  const refusePolicy = async (
+    message: Record<string, unknown>,
+    id: JsonRpcId,
+    failure: 'changed' | 'unavailable',
+  ): Promise<void> => {
+    pending.take(id);
+    await auditPolicyContinuityRefusal(ctx, failure, deps.home);
+    await replyToClient(
+      errorResponse(message, id, decisionText(policyContinuityDecision(failure), [], [])),
+    );
+  };
 
   // Every write triggered by handling a SERVER line always lands on `clientOut` and
   // is paused against `serverOut`.
@@ -181,11 +233,65 @@ export function createPump(deps: PumpDeps): Pump {
   const replyFromResult = (value: unknown): Promise<void> =>
     writeBackpressured(clientOut, `${JSON.stringify(value)}\n`, serverOut);
 
-  const strictHandler =
+  const internalQueue = new OrderedQueue();
+  const replyQueue = new OrderedQueue();
+  const pagination: ToolPagination | undefined =
+    toolApproval === undefined || strict === null
+      ? undefined
+      : createToolPagination({
+          approval: toolApproval,
+          ledger: strict.ledger,
+          ...(deps.toolPaginationTimeoutMs === undefined
+            ? {}
+            : { timeoutMs: deps.toolPaginationTimeoutMs }),
+          enqueueReply: (task) => (deps.enqueueToClient ?? ((task) => replyQueue.run(task)))(task),
+          reply: async (value) => {
+            await auditToolApprovalRefusal(ctx, 'tools/list');
+            await writeBackpressured(clientOut, `${strictLine(value)}\n`, serverOut);
+          },
+          cancelInternal: (id) => {
+            (deps.enqueueToServer ?? ((task) => internalQueue.run(task)))(async () => {
+              if (strictHandler?.wasTerminated() === true) return;
+              try {
+                await fromClient(
+                  serverIn,
+                  `${strictLine({ jsonrpc: '2.0', method: 'notifications/cancelled', params: { requestId: id } })}\n`,
+                );
+              } catch {
+                /* A cancelled exchange is already terminal; never retry it. */
+              }
+            });
+          },
+          sendInternal: (entry, message, live) => {
+            (deps.enqueueToServer ?? ((task) => internalQueue.run(task)))(async () => {
+              if (!live() || strictHandler?.wasTerminated() === true) return;
+              toolApproval.trackInternal(pagination!.rootOf(entry)!, entry);
+              strict.ledger.track(entry);
+              try {
+                await fromClient(serverIn, `${strictLine(message)}\n`);
+              } catch {
+                pagination!.failed(entry);
+              }
+            });
+          },
+        });
+  const onClientIngress = (line: SplitLine): void => {
+    pagination?.onClientIngress(line);
+    toolApproval?.onClientIngress(line);
+    pagination?.onIngress();
+  };
+  const onServerIngress = (line: SplitLine): void => {
+    if (pagination?.skipServerLine(line)) return;
+    toolApproval?.onServerIngress(line);
+    pagination?.onIngress();
+  };
+  const strictHandler: StrictServerHandler | null =
     strict === null
       ? null
       : createStrictHandler({
           ...strict,
+          ...(toolApproval === undefined ? {} : { toolApproval }),
+          ...(pagination === undefined ? {} : { pagination }),
           ctx,
           cloak,
           toClient: (value) => writeBackpressured(clientOut, `${strictLine(value)}\n`, serverOut),
@@ -247,8 +353,8 @@ export function createPump(deps: PumpDeps): Pump {
     restored: ReturnType<McpCloak['applyUncloak']>,
     track: (() => void) | undefined,
   ): Promise<void> {
-    // Not a gate, which is `sendToServer`: a restore audited for a call that is then
-    // refused would say the value reached a server it never did.
+    // The pre-audit records preparation, not delivery: sendToServer can still refuse
+    // after this await, and its final synchronous gate owns physical dispatch.
     const ended = refuseIfEnded(line);
     if (ended !== null) return ended;
     if (cloak === null || plan.values.size === 0) {
@@ -301,9 +407,54 @@ export function createPump(deps: PumpDeps): Pump {
    * dropped. Without `--strict` there is no handler to ask, `track` is absent, and this
    * is the write that was always here.
    */
-  function sendToServer(line: SplitLine, text: string, track?: () => void): Promise<void> {
+  async function sendToServer(line: SplitLine, text: string, track?: () => void): Promise<void> {
     const ended = refuseIfEnded(line);
     if (ended !== null) return ended;
+    const message = classifyMessage(
+      parseLine(line.text.startsWith(BOM) ? line.text.slice(1) : line.text),
+    );
+    if (message.kind === 'request' && isToolsCall(message.method)) {
+      const name = paramsOf(message.value)['name'];
+      const dispatched = await dispatchControlledMcpCall({
+        ...(deps.callControl === undefined ? {} : { guard: deps.callControl }),
+        ...(toolApproval === undefined
+          ? {}
+          : {
+              approval: (write: () => void) =>
+                typeof name === 'string'
+                  ? toolApproval.dispatch(line, name, write)
+                  : Promise.resolve(false),
+            }),
+        ended: () => strictHandler?.wasTerminated() === true,
+        policy: policyFailure,
+        write: () => {
+          track?.();
+          return fromClient(serverIn, text);
+        },
+      });
+      // The lease is already released. Never hold it while stream drain waits.
+      if (dispatched.delivery !== undefined) return dispatched.delivery;
+      if (dispatched.refusal !== null) {
+        pending.take(message.id);
+        await auditCallControlRefusal(ctx, dispatched.refusal, deps.home);
+        return replyToClient(
+          errorResponse(
+            message.value,
+            message.id,
+            decisionText(callControlDecision(dispatched.refusal.reason), [], []),
+          ),
+        );
+      }
+      if (dispatched.policyFailure !== null)
+        return refusePolicy(message.value, message.id, dispatched.policyFailure);
+      if (strictHandler?.wasTerminated() === true)
+        return refuseAfterEnd(
+          line,
+          strictHandler.terminatedLimit(),
+          strictHandler.terminationKind(),
+        );
+      return refuseApproval(message.id);
+    }
     track?.();
     return fromClient(serverIn, text);
   }
@@ -317,12 +468,19 @@ export function createPump(deps: PumpDeps): Pump {
     id: JsonRpcId,
     method: string,
     toolName: string | undefined,
+    line: SplitLine,
   ): (() => void) | undefined {
     if (strict === null || toolName === undefined) return undefined;
-    return () => strict.ledger.track({ id, method, toolName });
+    return () => {
+      const request = { id, method, toolName };
+      toolApproval?.track(line, request);
+      strict.ledger.track(request);
+    };
   }
 
   async function handleClientLine(line: SplitLine): Promise<void> {
+    onClientIngress(line);
+    if (pagination?.consumedCancellation(line)) return;
     const endedAtTheStart = refuseIfEnded(line);
     if (endedAtTheStart !== null) return endedAtTheStart;
     // Some servers (Jackson/.NET stacks are documented offenders) reject JSON
@@ -331,7 +489,16 @@ export function createPump(deps: PumpDeps): Pump {
     // forwarding stays byte-exact whichever way this goes.
     const unmarked = line.text.startsWith(BOM) ? line.text.slice(BOM.length) : line.text;
     const value = parseLine(unmarked);
+    if (deps.callControl !== undefined && !unambiguousControlledClientLine(line, value)) {
+      await auditCallControlInvalidMessage(ctx, deps.home);
+      return replyToClient({
+        jsonrpc: '2.0',
+        id: null,
+        error: { code: -32002, message: decisionText(callControlInvalidDecision, [], []) },
+      });
+    }
     if (value === undefined) {
+      if (toolApproval !== undefined) return;
       // Still unreadable. Most non-JSON client lines are the client's own framing
       // business and go through untouched — but one that NAMES tools/call anywhere
       // in its text must not be forwarded blind: an adversarial JSON quirk (this
@@ -348,6 +515,19 @@ export function createPump(deps: PumpDeps): Pump {
       return;
     }
     const message = classifyMessage(value);
+    // A message Stroq cannot read exactly is refused on its own, with why; approvals stay.
+    if (toolApproval !== undefined && !toolApproval.clientValid(line)) {
+      if (message.kind === 'request') return replyToClient(toolApproval.refusal(line, message.id));
+      if (message.kind === 'batch') {
+        const replies = message.items
+          .map(classifyMessage)
+          .flatMap((item) =>
+            item.kind === 'request' ? [toolApproval.refusal(line, item.id)] : [],
+          );
+        if (replies.length > 0) return replyToClient(replies);
+      }
+      return;
+    }
     if (message.kind === 'batch') {
       if (!batchHasToolCall(message.items)) return forwardToServer(line);
       return replyToClient(await refuseBatch(ctx, message.items));
@@ -358,6 +538,8 @@ export function createPump(deps: PumpDeps): Pump {
         if (cancelled !== null) {
           pending.cancel(cancelled);
           strict?.ledger.cancel(cancelled);
+          toolApproval?.cancel(cancelled);
+          if (pagination?.cancel(cancelled)) return;
         }
         return forwardToServer(line);
       }
@@ -380,8 +562,52 @@ export function createPump(deps: PumpDeps): Pump {
       return forwardToServer(line);
     }
     if (message.kind !== 'request') return forwardToServer(line);
+    if (pagination?.conflictingLine(line)) {
+      toolApproval?.failed();
+      pagination.onIngress();
+      return;
+    }
+    if (pagination?.clientReserved(message.id)) {
+      toolApproval?.failed();
+      pagination.onIngress();
+      return replyToClient({ ...toolApprovalResponse(message.id), id: null });
+    }
+    if (pagination?.conflictingRoot(message.id)) {
+      toolApproval?.failed();
+      pagination.onIngress();
+      return;
+    }
+    if (toolApproval !== undefined && !toolApproval.admit(line, message.id, message.method))
+      return replyToClient(toolApproval.refusal(line, message.id));
+    if (
+      pagination !== undefined &&
+      toolApproval !== undefined &&
+      strict !== null &&
+      message.method === 'tools/list'
+    ) {
+      const root = {
+        id: message.id,
+        method: 'tools/list',
+        toolName: mcpMethodToolName(ctx.server, 'tools/list'),
+      };
+      toolApproval.track(line, root);
+      const first = pagination.begin(root, message.value);
+      if (first === null || !first.live()) return;
+      toolApproval.trackInternal(root, first.entry);
+      strict.ledger.track(first.entry);
+      // This first write runs in the client queue and retains its backpressure.
+      // Later bounded cursor requests are scheduled without occupying the server queue.
+      try {
+        await fromClient(serverIn, `${strictLine(first.message)}\n`);
+      } catch {
+        pagination.failed(first.entry);
+      }
+      return;
+    }
     if (isToolsCall(message.method)) {
       const params = paramsOf(message.value);
+      if (toolApproval !== undefined && !toolApproval.canCall(line, params['name']))
+        return refuseApproval(message.id);
       try {
         // Resolve credentials first, then judge the exact arguments that will be
         // forwarded. Restored values can affect path and command classification.
@@ -414,7 +640,7 @@ export function createPump(deps: PumpDeps): Pump {
             params,
             plan,
             restored,
-            trackFor(message.id, 'tools/call', verdict.pending?.toolName),
+            trackFor(message.id, 'tools/call', verdict.pending?.toolName, line),
           );
         return verdict.reply === null ? undefined : replyToClient(verdict.reply);
       } catch (err) {
@@ -449,6 +675,7 @@ export function createPump(deps: PumpDeps): Pump {
         isScannedMethod(message.method)
           ? mcpMethodToolName(ctx.server, message.method)
           : mcpToolName(ctx.server, message.method),
+        line,
       ),
     );
   }
@@ -595,6 +822,17 @@ export function createPump(deps: PumpDeps): Pump {
   }
 
   return {
+    ...(toolApproval === undefined
+      ? {}
+      : {
+          onClientIngress,
+          onServerIngress,
+          close: async (silent = false) => {
+            pagination?.close(silent);
+            await internalQueue.idle();
+            await replyQueue.idle();
+          },
+        }),
     onClientLine: async (line: SplitLine): Promise<void> => {
       try {
         await handleClientLine(line);
@@ -605,6 +843,8 @@ export function createPump(deps: PumpDeps): Pump {
     },
     onServerLine: async (line: SplitLine): Promise<void> => {
       try {
+        if (pagination?.skipServerLine(line)) return;
+        onServerIngress(line);
         await handleServerLine(line);
       } catch (err) {
         logError('mcp proxy server line', err);

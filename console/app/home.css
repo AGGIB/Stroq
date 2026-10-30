@@ -1,0 +1,499 @@
+/* The home screen's answer, the grouped sidebar and the guide. Prefixes: verdict-, nav-section, guide-. */
+.verdict {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 16px;
+  padding: 20px 24px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.verdict.tone-red {
+  border-color: color-mix(in srgb, var(--st-red) 55%, var(--border));
+}
+.verdict.tone-orange {
+  border-color: color-mix(in srgb, var(--st-amber) 55%, var(--border));
+}
+.verdict-head {
+  display: flex;
+  align-items: flex-start;
+  gap: 16px;
+}
+.verdict-icon {
+  flex: none;
+  margin-top: 2px;
+  color: var(--ink-3);
+}
+.tone-green .verdict-icon {
+  color: var(--st-green);
+}
+.tone-orange .verdict-icon {
+  color: var(--st-amber);
+}
+.tone-red .verdict-icon {
+  color: var(--st-red);
+}
+.verdict-text {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.verdict-title {
+  margin: 0;
+  font-size: 24px;
+  font-weight: 600;
+  line-height: 1.25;
+  text-wrap: balance;
+  overflow-wrap: break-word;
+}
+.verdict-detail {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-ui);
+  max-width: 70ch;
+}
+.verdict-agents {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  border-top: 1px solid var(--border);
+}
+.verdict-agents li {
+  display: grid;
+  grid-template-columns: 28px 9rem max-content minmax(0, 1fr);
+  align-items: center;
+  gap: 4px 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--border);
+}
+.verdict-agent-name {
+  font-weight: 600;
+}
+.verdict-agent-line {
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+}
+.verdict-foot {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px 24px;
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+}
+.verdict-links {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 20px;
+}
+.verdict-links a {
+  white-space: nowrap;
+}
+.verdict-pending {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.protection-checks {
+  display: grid;
+  gap: 16px;
+  margin-top: 8px;
+}
+.protection-checks-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.protection-checks-hint {
+  margin: -8px 0 0;
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+}
+/* A column, not a grid: when the window is shorter than the menu, the menu scrolls; a group never
+   shrinks under its own items. */
+.desktop-sidebar .primary-nav,
+.mobile-sidebar .primary-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+/* Sidebar groups: a label in the body face, a step smaller, sentence case. */
+.nav-group {
+  display: grid;
+  gap: 2px;
+  flex-shrink: 0;
+}
+.nav-section {
+  margin: 0;
+  padding: 4px 12px;
+  color: var(--muted-foreground);
+  font-size: 14px;
+  font-weight: 500;
+}
+/* Guide */
+.guide-start {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  list-style: decimal;
+  padding: 20px 24px 20px 44px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  max-width: 80ch;
+}
+.guide-section {
+  display: grid;
+  gap: 12px;
+}
+.guide-section-head {
+  display: grid;
+  gap: 2px;
+}
+.guide-section-head h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.guide-section-head p {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+}
+.guide-pages {
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.guide-page {
+  display: grid;
+  grid-template-columns: 12rem minmax(0, 1fr);
+  gap: 4px 24px;
+  padding: 12px 20px;
+  border-top: 1px solid var(--border);
+}
+.guide-page:first-child {
+  border-top: 0;
+}
+.guide-page dt {
+  font-weight: 600;
+}
+.guide-page dd {
+  display: grid;
+  gap: 2px;
+  margin: 0;
+}
+.guide-when {
+  color: var(--card-foreground);
+}
+.guide-read {
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+}
+@media (max-width: 760px) {
+  .verdict {
+    padding: 16px;
+  }
+  .verdict-agents li {
+    grid-template-columns: 28px minmax(0, 1fr) max-content;
+  }
+  .verdict-agent-line {
+    grid-column: 2 / -1;
+  }
+  .guide-page {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+.inventory-summary-empty {
+  margin: 0;
+  padding: 16px 20px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  color: var(--ink-2);
+}
+.nav-more > summary {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  list-style: none;
+  border-radius: 6px;
+}
+.nav-more > summary::-webkit-details-marker {
+  display: none;
+}
+.nav-more > summary:hover {
+  color: var(--foreground);
+}
+.nav-more > summary > svg {
+  transition: transform var(--duration-fast, 150ms) var(--ease-out);
+}
+.nav-more[open] > summary > svg {
+  transform: rotate(90deg);
+}
+@media (prefers-reduced-motion: reduce) {
+  .nav-more > summary > svg {
+    transition: none;
+  }
+}
+
+.guide-start li::marker {
+  color: var(--muted-foreground);
+  font-variant-numeric: tabular-nums;
+}
+.verdict-agents li.verdict-agents-rest {
+  grid-template-columns: max-content max-content minmax(0, 1fr);
+}
+@media (max-width: 760px) {
+  .verdict-agents li.verdict-agents-rest {
+    grid-template-columns: minmax(0, 1fr) max-content;
+  }
+  .verdict-agents li.verdict-agents-rest .verdict-agent-line {
+    grid-column: 1 / -1;
+  }
+  .live-status-text {
+    flex: 1 1 100%;
+  }
+}
+
+/* The week on the home screen: what Stroq stopped each day, since the last visit, and what to do next. */
+.verdict-week {
+  display: grid;
+  gap: 20px;
+}
+.week-summary {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 18rem);
+  align-items: end;
+  gap: 16px 32px;
+}
+.week-text {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.week-title,
+.next-steps-title {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.week-sentence,
+.week-since {
+  margin: 0;
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+  max-width: 62ch;
+}
+.week-since {
+  color: var(--foreground);
+}
+.week-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 14px;
+  margin: 2px 0 0;
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.week-key-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.week-swatch {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+}
+.week-bars {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.week-day {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.week-column {
+  display: flex;
+  align-items: flex-end;
+  height: 64px;
+  border-bottom: 1px solid var(--hairline-strong);
+}
+.week-stack {
+  display: flex;
+  flex-direction: column-reverse;
+  gap: 2px;
+  width: 100%;
+  min-height: 3px;
+  border-radius: 4px 4px 0 0;
+  overflow: hidden;
+}
+.week-stack > span {
+  flex-basis: 0;
+  min-height: 0;
+}
+.week-none {
+  width: 100%;
+  height: 0;
+}
+.week-deny {
+  background: var(--chart-deny);
+}
+.week-ask {
+  background: var(--chart-ask);
+}
+.week-suspect {
+  background: var(--chart-flagged);
+}
+/* A day older than the part of the journal read: an outline, never an empty bar that reads as quiet. */
+.week-unread {
+  width: 100%;
+  height: 100%;
+  border: 1px dashed var(--hairline-strong);
+  border-bottom: 0;
+  border-radius: 4px 4px 0 0;
+}
+.week-day.is-unread .week-label {
+  color: var(--muted-foreground);
+}
+.week-label {
+  color: var(--ink-3);
+  font-size: 12px;
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.next-steps {
+  display: grid;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+/* The steps share one column for their commands, as wide as the longest one, so none is cut. */
+.next-steps-list {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px 24px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.next-step {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: subgrid;
+  align-items: center;
+  row-gap: 8px;
+}
+.next-step-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.next-step-text span {
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+}
+.next-step-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  justify-self: start;
+}
+@media (max-width: 760px) {
+  .week-summary,
+  .next-steps-list {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+/* Threats that match this project, from pwn.watch: off until turned on in Settings. */
+.threats {
+  display: grid;
+  gap: 10px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+.threats-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 4px 12px;
+}
+.threats-title {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.threats-source {
+  font-size: 13px;
+}
+.threat-list {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.threat {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+.threat-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 10px;
+  min-width: 0;
+}
+.threat-title {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: var(--foreground);
+  font-weight: 600;
+}
+/* The arrow follows the last word of a title that wraps. */
+.threat-title svg {
+  display: inline;
+  margin-left: 4px;
+  vertical-align: -2px;
+}
+a.threat-title:hover {
+  color: var(--brand);
+}
+.threat-why,
+.threats-note,
+.threats-compared {
+  margin: 0;
+  max-width: 80ch;
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+}
+.threats-compared {
+  color: var(--ink-3);
+  font-size: 13px;
+}
+.threats-off {
+  margin: 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+  color: var(--ink-3);
+  font-size: var(--text-secondary);
+}
+.threat-patch {
+  color: var(--ink-3);
+  font-size: 13px;
+}

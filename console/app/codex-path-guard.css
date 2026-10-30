@@ -1,0 +1,304 @@
+.codex-path-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-block: 16px;
+  border-top: 1px solid var(--border);
+  font-size: var(--text-secondary);
+}
+.codex-path-entry > div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+.codex-path-entry .control-meta {
+  margin: 0;
+}
+.dialog-content.codex-path-dialog {
+  width: min(720px, calc(100% - 32px));
+  max-height: calc(100dvh - 40px);
+  padding: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+}
+.codex-path-dialog .dialog-header {
+  display: flex;
+  flex-direction: row;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 16px 24px;
+  margin: 0;
+}
+.codex-path-dialog .dialog-header > div {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+.codex-path-dialog .dialog-header > .icon-button {
+  flex: 0 0 44px;
+  min-width: 44px;
+  min-height: 44px;
+}
+.codex-path-dialog .dialog-header h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  padding-right: 0;
+  line-height: 1.2;
+}
+.codex-path-dialog .dialog-header .control-meta {
+  margin-top: 4px;
+}
+.codex-path-dialog .dialog-header .agent-glyph {
+  flex: 0 0 auto;
+}
+.codex-path-body {
+  padding: 0 24px 24px;
+}
+.codex-path-body,
+.codex-path-body section,
+.codex-path-body article,
+.codex-path-body code {
+  min-width: 0;
+}
+.codex-path-dialog h3 {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 550;
+}
+.codex-path-dialog .control-meta {
+  margin: 0;
+  font-size: var(--text-secondary);
+  line-height: 1.5;
+}
+.codex-path-dialog .control-error {
+  margin-block: 12px;
+}
+.codex-path-dialog strong,
+.codex-path-dialog code {
+  overflow-wrap: anywhere;
+}
+.codex-path-views,
+.codex-path-heading,
+.codex-path-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 14px;
+  align-items: center;
+}
+.codex-path-views {
+  margin-bottom: 16px;
+}
+.codex-path-views .button[aria-pressed='true'] {
+  color: var(--foreground);
+  border-color: var(--foreground);
+}
+.codex-path-heading {
+  justify-content: space-between;
+}
+.codex-path-actions .button {
+  min-height: 44px;
+  min-width: 0;
+  white-space: normal;
+}
+.codex-path-default,
+.codex-path-history,
+.codex-path-review,
+.codex-path-record,
+.codex-path-notice {
+  display: grid;
+  gap: 14px;
+}
+.codex-path-default {
+  gap: 12px;
+}
+.codex-path-history {
+  margin-top: 22px;
+}
+.codex-path-review,
+.codex-path-record,
+.codex-path-notice {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 18px;
+}
+.codex-path-review {
+  background: var(--muted);
+}
+.codex-path-record[data-selected] {
+  border-color: var(--foreground);
+  scroll-margin-block: 144px 24px;
+}
+.codex-path-dialog .codex-path-facts {
+  margin: 0;
+}
+.codex-path-facts > div {
+  align-items: baseline;
+}
+.codex-path-review > p,
+.codex-path-notice > p {
+  margin: 0;
+}
+.codex-path-consent {
+  display: grid;
+  gap: 14px;
+}
+.codex-path-consent label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  font-size: var(--text-secondary);
+  line-height: 1.5;
+  cursor: pointer;
+}
+.codex-path-consent input {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin-top: 3px;
+  accent-color: var(--foreground);
+}
+.codex-path-consent span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.codex-path-evidence {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+  font-size: var(--text-secondary);
+  color: var(--muted-foreground);
+}
+.codex-path-evidence > summary {
+  cursor: pointer;
+  color: var(--foreground);
+}
+.codex-path-evidence[open] > summary {
+  margin-bottom: 12px;
+}
+.codex-path-evidence > code,
+.codex-path-evidence > span {
+  display: block;
+  margin-block: 8px;
+}
+.codex-path-evidence > code {
+  font-family: var(--font-mono);
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--background);
+  user-select: all;
+}
+.codex-path-evidence > p {
+  margin-block: 12px;
+}
+@media (max-width: 520px) {
+  .codex-path-dialog .dialog-header {
+    padding: 16px;
+  }
+  .codex-path-body {
+    padding: 0 16px 16px;
+  }
+  .codex-path-review,
+  .codex-path-record,
+  .codex-path-notice {
+    padding: 14px;
+  }
+  .codex-path-actions .button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .codex-path-facts > div {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 5px;
+  }
+  .codex-path-facts dd {
+    text-align: left;
+    max-width: none;
+  }
+}
+
+.codex-path-presets {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0 20px;
+}
+.codex-path-preset {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 68px;
+  padding: 8px 0;
+  border-bottom: 1px solid var(--border);
+  cursor: pointer;
+  min-width: 0;
+}
+.codex-path-preset input {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin: 0;
+  accent-color: var(--foreground);
+}
+.codex-path-preset > span,
+.codex-path-target {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.codex-path-preset strong {
+  font-size: var(--text-ui);
+  font-weight: 550;
+  line-height: 24px;
+}
+.codex-path-preset code,
+.codex-path-target code {
+  font-family: var(--font-mono);
+  font-size: var(--text-secondary);
+  overflow-wrap: anywhere;
+  line-height: 20px;
+}
+.codex-path-preset-meta {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+}
+.codex-path-preset-meta code {
+  min-width: 0;
+}
+.codex-path-preset-status {
+  flex: 0 0 auto;
+  color: var(--muted-foreground);
+  font-size: var(--text-secondary);
+  line-height: 20px;
+}
+.codex-path-preset:has(input:disabled) {
+  cursor: default;
+}
+.codex-path-preset[data-selected] {
+  color: var(--foreground);
+}
+.codex-path-dialog .codex-path-review > p {
+  margin: 0;
+}
+.codex-path-completion {
+  margin-bottom: 18px !important;
+}
+@media (max-width: 520px) {
+  .codex-path-presets {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

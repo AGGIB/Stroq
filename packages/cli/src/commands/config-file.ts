@@ -96,7 +96,8 @@ export function readJsonObject<T extends object>(file: string): T {
 /** `text` as JSON, or an error that names `file` and where parsing failed, never what it said. */
 export function parseConfigJson<T>(file: string, text: string): T {
   try {
-    return JSON.parse(text) as T;
+    // Editors may prefix UTF-8 JSON with one BOM; embedded characters stay data.
+    return JSON.parse(text.startsWith('\ufeff') ? text.slice(1) : text) as T;
   } catch (err) {
     throw new Error(`cannot parse ${file}: ${parseFailure(err)}`, { cause: err });
   }

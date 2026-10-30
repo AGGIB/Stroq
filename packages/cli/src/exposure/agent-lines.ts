@@ -86,8 +86,8 @@ export const PACKAGE_CONFIG = 'package manager config';
  * (`registry`, `script-shell`, `node-options`, `yarnPath`, `plugins`, `preload` all run or fetch
  * other code), and a line that does not parse is read the same way.
  */
-function setting(path: string): LineRule {
-  return (line) => hit('agent-api-redirect', path, 1, PACKAGE_SETTING, keyed(line));
+function setting(path: string, digest: (text: string) => string = keyed): LineRule {
+  return (line) => hit('agent-api-redirect', path, 1, PACKAGE_SETTING, digest(line));
 }
 
 const bounded = (line: string): string =>
@@ -104,9 +104,14 @@ const HIDDEN_BREAK = /\r(?!\n)|[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f\uff
 const SEMICOLON_COMMENTS: ReadonlySet<string> = new Set(['.npmrc', '.yarnrc']);
 
 /** The hits of one file's lines, with the line each is on. */
-export function lineHits(path: string, text: string): AgentHit[] {
+export function lineHits(
+  path: string,
+  text: string,
+  digest: (text: string) => string = keyed,
+): AgentHit[] {
   const name = ruleName(path);
-  const rule = (RULES.get(name) ?? (PNPMFILE.test(name) ? setting : undefined))?.(path);
+  const factory = RULES.get(name) ?? (PNPMFILE.test(name) ? setting : undefined);
+  const rule = factory === setting ? setting(path, digest) : factory?.(path);
   if (rule === undefined) return [];
   const isPackage = PACKAGE_CONFIGS.has(name) || PNPMFILE.test(name);
   if (isPackage && HIDDEN_BREAK.test(text))
@@ -131,7 +136,7 @@ export function lineHits(path: string, text: string): AgentHit[] {
     else left += 1;
   });
   if (left > 0) {
-    const all = name === '.gitattributes' ? digestOf(text) : keyed(text);
+    const all = name === '.gitattributes' ? digestOf(text) : digest(text);
     hits.push(hit('unreadable-config', path, 1, 'lines', `${left} more such lines (${all})`));
   }
   return hits;

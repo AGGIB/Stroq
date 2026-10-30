@@ -1,0 +1,112 @@
+.policy-history-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(0, 1.8fr);
+  gap: 24px;
+  align-items: start;
+}
+.policy-history-layout.is-overview {
+  grid-template-columns: 1fr;
+}
+.policy-history-list {
+  display: grid;
+  gap: 8px;
+}
+.policy-history-entry {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--foreground);
+  text-decoration: none;
+}
+.policy-history-entry > span {
+  display: grid;
+  gap: 6px;
+  min-width: 0;
+}
+.policy-history-entry strong {
+  font-size: var(--text-ui);
+  font-weight: 500;
+}
+.policy-history-entry > span > span {
+  color: var(--muted-foreground);
+  font-size: var(--text-secondary);
+}
+.policy-history-entry:hover,
+.policy-history-entry.is-active {
+  border-color: var(--st-amber);
+  background: color-mix(in srgb, var(--st-amber) 5%, var(--card));
+}
+.policy-history-actions,
+.policy-history-preview-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-top: 16px;
+}
+.policy-history-preview-heading {
+  margin-top: 0;
+}
+.policy-history-test-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 18px;
+  margin: 24px 0;
+}
+.policy-history-test-grid > div {
+  display: grid;
+  gap: 8px;
+}
+.policy-history-test-grid span {
+  color: var(--muted-foreground);
+  font-size: var(--text-secondary);
+}
+.policy-history-test-grid strong {
+  font-size: 26px;
+  font-weight: 550;
+}
+.policy-history-failed-check {
+  margin: 16px 0;
+}
+.policy-restore-consent .policy-ack {
+  margin-top: 12px;
+  padding: 12px;
+}
+.policy-history-receipt {
+  display: flex;
+  gap: 16px;
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--card);
+}
+.policy-history-receipt > svg {
+  flex-shrink: 0;
+  margin-top: 3px;
+}
+.policy-history-receipt > div {
+  min-width: 0;
+  flex: 1;
+}
+.policy-history-receipt code {
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono);
+}
+@media (max-width: 1000px) {
+  .policy-history-layout {
+    grid-template-columns: 1fr;
+  }
+}
+@media (max-width: 620px) {
+  .policy-history-entry {
+    padding: 12px;
+  }
+  .policy-history-receipt {
+    padding: 16px;
+  }
+}

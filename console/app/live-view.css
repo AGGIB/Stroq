@@ -1,0 +1,218 @@
+/* Live: a status line, four counts and a feed that grows from the top. Prefix: live-. */
+.live-status {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.live-status-text {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  flex: 1;
+}
+.live-status-text strong {
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.live-status-text span {
+  font-size: var(--text-secondary);
+}
+.live-dot {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  background: var(--ink-3);
+  flex: none;
+}
+.live-status.live .live-dot {
+  background: var(--st-green);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--st-green) 45%, transparent);
+  animation: live-pulse 2.4s var(--ease-out) infinite;
+}
+.live-status.error .live-dot,
+.live-status.refused .live-dot {
+  background: var(--st-red);
+}
+.live-status.paused .live-dot,
+.live-status.connecting .live-dot,
+.live-status.missing .live-dot {
+  background: var(--st-amber);
+}
+@keyframes live-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--st-green) 45%, transparent);
+  }
+  70%,
+  100% {
+    box-shadow: 0 0 0 9px color-mix(in srgb, var(--st-green) 0%, transparent);
+  }
+}
+.live-counts-section {
+  display: grid;
+  gap: 12px;
+}
+.live-section-title {
+  margin: 0;
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.live-counts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.live-count {
+  display: grid;
+  gap: 4px;
+  padding: 16px 18px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+  border-top-width: 3px;
+}
+.live-count.green {
+  border-top-color: var(--st-green);
+}
+.live-count.orange {
+  border-top-color: var(--st-amber);
+}
+.live-count.red {
+  border-top-color: var(--st-red);
+}
+.live-count-number {
+  font-size: 30px;
+  font-weight: 650;
+  line-height: 1.1;
+  font-variant-numeric: tabular-nums;
+}
+.live-count-label {
+  font-size: var(--text-secondary);
+  color: var(--ink-2);
+}
+.live-note {
+  margin: 0;
+  padding: 12px 18px;
+  border-bottom: 1px solid var(--border);
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+}
+.live-feed {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.live-row {
+  display: grid;
+  grid-template-columns: 6.5rem 8rem minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+  padding: 12px 18px;
+  border-top: 1px solid var(--border);
+}
+.live-row:first-child {
+  border-top: 0;
+}
+.live-row.is-fresh {
+  background: color-mix(in srgb, var(--st-amber) 9%, transparent);
+  animation: live-arrive 240ms var(--ease-out) backwards;
+}
+@keyframes live-arrive {
+  from {
+    opacity: 0;
+    transform: translateY(-6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.live-time {
+  color: var(--ink-2);
+  font-size: 15px;
+}
+.live-what {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+.live-what strong {
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.live-detail {
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+  overflow-wrap: anywhere;
+}
+.live-foot {
+  margin: 0;
+  padding: 14px 18px;
+  border-top: 1px solid var(--border);
+  color: var(--ink-2);
+  font-size: var(--text-secondary);
+}
+@media (max-width: 760px) {
+  .live-counts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .live-row {
+    grid-template-columns: auto minmax(0, 1fr);
+    grid-template-areas: 'verdict time' 'what what';
+    row-gap: 6px;
+  }
+  .live-verdict {
+    grid-area: verdict;
+  }
+  .live-time {
+    grid-area: time;
+    justify-self: end;
+  }
+  .live-what {
+    grid-area: what;
+  }
+  .live-status {
+    flex-wrap: wrap;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .live-status.live .live-dot {
+    animation: none;
+  }
+  .live-row.is-fresh {
+    animation: none;
+  }
+}
+.live-receipt-actions {
+  display: flex;
+  gap: 8px;
+}
+.live-receipt-text {
+  margin: 0;
+  padding: 14px 18px;
+  overflow-x: auto;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 15px;
+  line-height: 1.55;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.live-notify-blocked {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: var(--text-secondary);
+}
+.live-status-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}

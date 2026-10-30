@@ -47,7 +47,11 @@ function summaryLine(report: CheckReport): string {
       'Bash, edits, fetches and MCP calls are denied) until the file loads.'
     );
   }
-  return `${plural(policy.rules, 'rule')}, default: ${policy.default}, threshold: ${policy.threshold}`;
+  const governance =
+    policy.mcpGovernance === undefined
+      ? ''
+      : `; MCP governance policy: enforce reported channel/label pairs (${policy.mcpGovernance.allowedServers} listed). Reported MCP identities were not replayed; native host enforcement was not checked.`;
+  return `${plural(policy.rules, 'rule')}, default: ${policy.default}, threshold: ${policy.threshold}${governance}`;
 }
 
 /**

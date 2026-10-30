@@ -54,6 +54,7 @@ const SECTIONS: readonly Section[] = [
     job: 'guard',
     title: 'Guard your agent',
     commands: [
+      more('console', 'console', 'Open the local security platform'),
       core('init', 'init', 'Block risky actions from now on (asks first)'),
       core('doctor', 'doctor', 'Is the guard installed and being called?'),
       core('why', 'why', 'Why was the last action blocked or asked about?'),

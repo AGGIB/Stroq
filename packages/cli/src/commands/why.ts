@@ -28,13 +28,20 @@ function verdictLine(entry: AuditEntry): string {
  * that field existed simply print without it.
  */
 function taintLines(state: SessionState): string[] {
-  if (!state.taint) return ['  taint:   none'];
+  const flagged = state.flagged
+    ? [
+        `  flagged: ${state.flagged.count} time${state.flagged.count === 1 ? '' : 's'} in the project's own files or command output since ${state.flagged.since} (not a taint)`,
+        `    last:  ${state.flagged.last.tool}${state.flagged.last.source ? ` ${state.flagged.last.source}` : ''} — ${state.flagged.last.ruleIds.join(', ')}`,
+      ]
+    : [];
+  if (!state.taint) return ['  taint:   none', ...flagged];
   const head = `  taint:   suspect since ${state.taint.since}`;
   return [
     head,
     ...state.taint.sources.map(
       (s) => `    from:  ${s.tool}${s.source ? ` ${s.source}` : ''} — ${s.ruleIds.join(', ')}`,
     ),
+    ...flagged,
   ];
 }
 
@@ -60,7 +67,11 @@ export function formatWhy(entry: AuditEntry, state: SessionState, now: Date): st
   const gapLines = (entry.provenanceIncomplete ?? []).map((g) => `  because: ${describeGap(g)}`);
   const secretLines = (entry.secrets ?? []).map((s) => `  because: ${describeSecretHit(s)}`);
   const fallback =
-    because.length === 0 && gapLines.length === 0 && secretLines.length === 0 && !state.taint
+    because.length === 0 &&
+    gapLines.length === 0 &&
+    secretLines.length === 0 &&
+    !state.taint &&
+    !state.flagged
       ? ['  because: the action itself matches the rule; no untrusted content was involved']
       : [];
   return `${[

@@ -122,6 +122,39 @@ export function readBackup(env: HardenEnv, real: string, id: string): string | n
 }
 
 /**
+ * The copy undo may put back for `real`: its text when it is exactly the bytes the manifest recorded
+ * (`sha256`, of the file before that apply), or `null` when it is gone (pruned, or never kept), and
+ * undo then takes the apply's entries out instead. A copy that is there but is not those bytes, or
+ * cannot be read as a file, was changed by something other than Stroq: that is refused, so that
+ * undo writes nothing rather than quietly doing something else.
+ */
+export function readRecordedBackup(
+  env: HardenEnv,
+  real: string,
+  id: string,
+  sha256: string | null,
+): string | null {
+  if (!isBackupId(id)) return null;
+  const file = backupPath(env.home, id, real);
+  let copy: string | null;
+  try {
+    copy = readTargetText(file);
+  } catch (err) {
+    throw backupMismatch(real, file, err);
+  }
+  if (copy === null) return null;
+  if (sha256Text(copy) !== sha256) throw backupMismatch(real, file);
+  return copy;
+}
+
+const backupMismatch = (real: string, file: string, cause?: unknown): HardenError =>
+  new HardenError(
+    'backup-mismatch',
+    `refusing to undo ${real}: the copy Stroq kept of it (${file}) is not the bytes Stroq recorded, so something other than Stroq changed it, and nothing was changed. Look at that copy; once it is removed, undo takes Stroq's entries out of the file instead`,
+    cause === undefined ? undefined : { cause },
+  );
+
+/**
  * Removes copies of `real` until `BACKUPS_KEPT_PER_FILE` are left, counting the one just written
  * (`keepId`), which is never removed whatever its id sorts like.
  *

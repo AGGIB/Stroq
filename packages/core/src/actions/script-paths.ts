@@ -17,7 +17,20 @@ export interface ScriptReference {
   readonly direct?: boolean;
   /** Read by `source` or `.`: a file of variables is configuration, not a program. */
   readonly sourced?: boolean;
+  /**
+   * A file a shell looks for in a directory as it starts (`HOME=dir bash`, `ZDOTDIR=dir zsh`): one that
+   * is missing is skipped, so it is only made by the line where the line starts a shell.
+   */
+  readonly startup?: boolean;
+  /**
+   * Found in text read out of the command that may not be shell (a quote left open, `f(x)`): a script
+   * that is there is still read, and one that is not is no question.
+   */
+  readonly uncertain?: boolean;
 }
+
+/** The names of the files read as shell scripts whatever their first line. */
+export const SCRIPT_EXTENSION = /\.(?:sh|bash|zsh|ksh|ps1|bat|cmd)$/i;
 
 export const named = (token: string, sourced = false): ScriptReference => ({
   token,

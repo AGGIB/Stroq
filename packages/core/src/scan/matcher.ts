@@ -19,6 +19,7 @@ export interface MatchContext {
  */
 export function appliesTo(rule: CompiledRule, target: ScanTarget | undefined): boolean {
   if (target === undefined || target === 'any') return true;
+  if (rule.surfaces !== undefined) return rule.surfaces.includes(target);
   return rule.scanTarget === 'any' || rule.scanTarget === target;
 }
 
@@ -42,9 +43,20 @@ export function evaluateTest(test: CompiledTest, text: string, context: MatchCon
   }
 }
 
+/**
+ * Whether a condition is read on the surface being scanned: always when it names no surfaces or
+ * the caller names none (or `any`), so an unscoped call loses nothing.
+ */
+function testApplies(test: CompiledTest, target: ScanTarget | undefined): boolean {
+  if (test.surfaces === undefined || target === undefined || target === 'any') return true;
+  return test.surfaces.includes(target);
+}
+
 export function ruleMatches(rule: CompiledRule, text: string, context: MatchContext): boolean {
   if (!appliesTo(rule, context.target)) return false;
-  const results = rule.tests.map((t) => evaluateTest(t, text, context));
+  const tests = rule.tests.filter((t) => testApplies(t, context.target));
+  if (tests.length === 0) return false;
+  const results = tests.map((t) => evaluateTest(t, text, context));
   return rule.condition === 'all' ? results.every(Boolean) : results.some(Boolean);
 }
 

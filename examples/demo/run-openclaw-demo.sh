@@ -8,6 +8,7 @@ set -euo pipefail
 root="$(cd "$(dirname "$0")/../.." && pwd)"
 cli="$root/packages/cli/dist/index.js"
 [ -f "$cli" ] || { echo "build first: pnpm build" >&2; exit 1; }
+real_home="$HOME"
 export STROQ_HOME="$(mktemp -d)"
 export HOME="$(mktemp -d)"
 demo_cwd="$(mktemp -d)"
@@ -106,7 +107,9 @@ echo
 echo "== the plugin ships inside @stroq/cli"
 # A plugin that is not in the packed tarball is an adapter that cannot be installed,
 # and `files` is the only thing that decides.
-( cd "$root/packages/cli" && npm pack --dry-run --json ) > "$work/pack" 2>/dev/null \
+# `npm pack` runs the package's prepack hook, which installs and builds the console with pnpm; that
+# needs the real home folder (pnpm's store and config), not the throwaway one used above.
+( cd "$root/packages/cli" && HOME="$real_home" npm pack --dry-run --json ) > "$work/pack" 2>/dev/null \
   || fail "npm pack --dry-run failed"
 for f in openclaw-plugin/openclaw.plugin.json openclaw-plugin/package.json \
          openclaw-plugin/index.js openclaw-plugin/run-stroq.js openclaw-plugin/README.md; do

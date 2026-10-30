@@ -145,6 +145,7 @@ export class ProvenanceRecorder {
     lost: boolean,
     pendingOwner?: string,
     digestsLost = false,
+    flaggedOwn = false,
   ): Promise<ProvenanceOutcome> {
     const store = this.store;
     if (!store) return { error: null, incomplete: false };
@@ -179,6 +180,7 @@ export class ProvenanceRecorder {
           hash: atomHash(atom),
           excerpt: excerpts[i] ?? '',
           suspect,
+          ...(flaggedOwn && !suspect ? { flaggedOwn: true } : {}),
         }),
       );
     }

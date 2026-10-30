@@ -66,18 +66,20 @@ describe('post_read_code scans every disagreeing path candidate', () => {
     // accident.
     [
       'path holds the poisoned file, file_path the safe one',
-      { path: 'poisoned.md', file_path: 'safe.md' },
+      { path: 'node_modules/w/poisoned.md', file_path: 'safe.md' },
     ],
     // This is the exact bypass the finding reported: `candidates[0]` is `path`'s
     // value, `safe.md`, so the old code scanned the safe file and never looked at
     // `poisoned.md`, which is what Cascade actually read.
     [
       'path holds the safe file, file_path the poisoned one',
-      { path: 'safe.md', file_path: 'poisoned.md' },
+      { path: 'safe.md', file_path: 'node_modules/w/poisoned.md' },
     ],
   ])('%s: warns, taints, then denies the taint-dependent command', async (_label, tool_info) => {
+    // The poisoned file is a dependency's: a flag on one of the project's own would not taint.
     writeFileSync(join(cwd, 'safe.md'), CLEAN);
-    writeFileSync(join(cwd, 'poisoned.md'), POISONED);
+    mkdirSync(join(cwd, 'node_modules', 'w'), { recursive: true });
+    writeFileSync(join(cwd, 'node_modules', 'w', 'poisoned.md'), POISONED);
 
     // Both orderings must be scanned regardless of which one reproduces the old
     // bug: the fix scans every candidate, not just whichever one happens to land

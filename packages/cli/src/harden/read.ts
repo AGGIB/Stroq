@@ -1,4 +1,12 @@
-import { closeSync, constants, fstatSync, openSync, readSync } from 'node:fs';
+import {
+  closeSync,
+  constants,
+  fstatSync,
+  lstatSync,
+  openSync,
+  readSync,
+  type BigIntStats,
+} from 'node:fs';
 import { HardenError } from './types.js';
 
 /**
@@ -114,4 +122,93 @@ export function readTargetStrict(path: string): string | null {
 export function sameBytes(a: Uint8Array | null, b: Uint8Array | null): boolean {
   if (a === null || b === null) return a === b;
   return a.length === b.length && Buffer.compare(a, b) === 0;
+}
+
+/** JSON-safe identity used by private, prepared operations; never a filesystem attestation. */
+export interface HardenFileIdentity {
+  readonly dev: string;
+  readonly ino: string;
+  readonly uid: string;
+  readonly gid: string;
+  readonly nlink: string;
+  readonly mode: number;
+  readonly size: number;
+  readonly mtimeNs: string;
+  readonly ctimeNs: string;
+}
+
+export const fileIdentity = (stat: BigIntStats): HardenFileIdentity => ({
+  dev: String(stat.dev),
+  ino: String(stat.ino),
+  uid: String(stat.uid),
+  gid: String(stat.gid),
+  nlink: String(stat.nlink),
+  mode: Number(stat.mode),
+  size: Number(stat.size),
+  mtimeNs: String(stat.mtimeNs),
+  ctimeNs: String(stat.ctimeNs),
+});
+
+export interface HardenFileSnapshot {
+  readonly bytes: Buffer | null;
+  readonly identity: HardenFileIdentity | null;
+}
+
+/** Exact same-descriptor read for the stricter prepared API. Does not follow a final link. */
+export function readTargetSnapshot(
+  path: string,
+  maxBytes = MAX_TARGET_BYTES,
+  privateMode = false,
+): HardenFileSnapshot {
+  const unsafe = (): never => {
+    throw new HardenError('stale-plan', 'a prepared file is unsafe or changed while being read');
+  };
+  const before = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+  if (before === undefined) return { bytes: null, identity: null };
+  const valid = (s: BigIntStats): boolean =>
+    s.isFile() &&
+    !s.isSymbolicLink() &&
+    s.ino !== 0n &&
+    s.nlink === 1n &&
+    (typeof process.getuid !== 'function' || s.uid === BigInt(process.getuid())) &&
+    (!privateMode || (s.mode & 0o777n) === 0o600n);
+  if (!valid(before)) unsafe();
+  if (before.size > BigInt(maxBytes))
+    throw new HardenError('target-too-large', 'a prepared file exceeds its bounded size');
+  let fd: number;
+  try {
+    fd = openSync(path, OPEN_FLAGS | (constants.O_NOFOLLOW ?? 0));
+  } catch {
+    return unsafe();
+  }
+  try {
+    const opened = fstatSync(fd, { bigint: true });
+    if (
+      !valid(opened) ||
+      JSON.stringify(fileIdentity(opened)) !== JSON.stringify(fileIdentity(before))
+    )
+      unsafe();
+    const bytes = Buffer.alloc(Number(opened.size));
+    let filled = 0;
+    while (filled < bytes.length) {
+      const count = readSync(fd, bytes, filled, bytes.length - filled, filled);
+      if (!count) break;
+      filled += count;
+    }
+    const extra = readSync(fd, Buffer.alloc(1), 0, 1, bytes.length);
+    const after = fstatSync(fd, { bigint: true });
+    const found = lstatSync(path, { bigint: true, throwIfNoEntry: false });
+    if (
+      filled !== bytes.length ||
+      extra !== 0 ||
+      found === undefined ||
+      !valid(found) ||
+      JSON.stringify(fileIdentity(opened)) !== JSON.stringify(fileIdentity(after)) ||
+      JSON.stringify(fileIdentity(opened)) !== JSON.stringify(fileIdentity(found))
+    )
+      unsafe();
+    return { bytes, identity: fileIdentity(opened) };
+  } finally {
+    closeSync(fd);
+  }
 }

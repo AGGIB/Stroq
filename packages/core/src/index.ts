@@ -1,4 +1,5 @@
 export * from './types.js';
+export * from './mcp/identity.js';
 export * from './normalize/normalizer.js';
 export * from './rules/atr-types.js';
 export * from './rules/atr-loader.js';
@@ -25,7 +26,9 @@ export * from './actions/shell-tools.js';
 export { lex, type Lexed, type Stage as LexedStage } from './actions/shell-lex.js';
 export { REDIRECT, resolve, type Resolved, type Word } from './actions/shell-words.js';
 export * from './taint/trust.js';
+export * from './taint/guarded-clear.js';
 export * from './policy/policy-types.js';
+export * from './policy/mcp-governance.js';
 export * from './policy/default-policy.js';
 export * from './policy/evaluate.js';
 export * from './policy/load-policy.js';
@@ -64,3 +67,10 @@ export * from './scope/fingerprint.js';
 export * from './scope/hard-set.js';
 export * from './scope/escalation.js';
 export * from './scope/gate.js';
+export * from './scope/access-request.js';
+export {
+  TaskAccessReviewSchema,
+  parseTaskAccessReview,
+  type TaskAccessReview,
+} from './scope/access-review.js';
+export { describeEscalationFingerprint } from './scope/scope-check.js';

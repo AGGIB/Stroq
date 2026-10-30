@@ -28,6 +28,12 @@ export interface PolicySummary {
   readonly default: Effect;
   readonly threshold: number;
   readonly sha256: string;
+  /** Static linting is not a replay of producer-reported labels or native host enforcement. */
+  readonly mcpGovernance?: {
+    readonly mode: 'enforce';
+    readonly allowedServers: number;
+    readonly identityReplay: 'not-performed';
+  };
 }
 
 /** What `stroq policy check --json` prints, and what the text form is made from. */
@@ -51,6 +57,15 @@ const summaryOf = (policy: Policy): PolicySummary => ({
   default: policy.default,
   threshold: policy.threshold,
   sha256: policySha256(policy),
+  ...(policy.version === 2
+    ? {
+        mcpGovernance: {
+          mode: 'enforce' as const,
+          allowedServers: policy.mcpGovernance.allowed.length,
+          identityReplay: 'not-performed' as const,
+        },
+      }
+    : {}),
 });
 
 export function faultsOf(read: Exclude<Loaded, { readonly ok: true }>): readonly Fault[] {

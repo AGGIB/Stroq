@@ -1,5 +1,6 @@
-import { existsSync } from 'node:fs';
+import { lstatSync, readFileSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
+import { dirname } from 'node:path';
 import {
   AuditLog,
   DEFAULT_POLICY,
@@ -10,9 +11,10 @@ import {
   FileTrustStore,
   StroqEngine,
   loadBundledRules,
-  loadPolicyFile,
+  parsePolicy,
   type Policy,
   type ScopeGate,
+  type TaskAccessRequestSigner,
 } from '@stroq/core';
 import {
   auditFileIn,
@@ -23,20 +25,92 @@ import {
   stroqHome,
   trustFileIn,
 } from './paths.js';
+import { policySha256 } from './policy/digest.js';
 
-export function loadPolicy(): Policy {
-  const file = policyFile();
-  return existsSync(file) ? loadPolicyFile(file) : DEFAULT_POLICY;
+/**
+ * Where the policy in force came from. `file` is the override with the digest of what it says
+ * (`policySha256`, the hash `stroq attack --json` reports); `default` is the built-in version 1
+ * policy, which is what the hook runs under when there is no file.
+ */
+export type PolicyOrigin =
+  | { readonly kind: 'file'; readonly path: string; readonly sha256: string }
+  | { readonly kind: 'default'; readonly sha256: string };
+
+export interface LoadedPolicy {
+  readonly policy: Policy;
+  readonly source: PolicyOrigin;
 }
 
-/** Where the active policy comes from: the override file's path, or `default`. */
+const errnoOf = (error: unknown): string =>
+  (error as NodeJS.ErrnoException | undefined)?.code ?? 'error';
+
+/**
+ * True only when nothing at all is at `path`: a dangling link is something, and is not absent, and
+ * so is a file where the folder holding it should be — which Windows reports as `ENOENT` where
+ * Linux and macOS say `ENOTDIR`.
+ */
+function nothingAt(path: string): boolean {
+  try {
+    lstatSync(path);
+    return false;
+  } catch (error) {
+    if (errnoOf(error) !== 'ENOENT') return false;
+  }
+  try {
+    const parent = statSync(dirname(path), { throwIfNoEntry: false });
+    return parent === undefined || parent.isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * The text of the policy file, or null when there is none. Only a missing file (or a home not
+ * created yet) means "no override": a file that is there and cannot be read (a link to nothing, a
+ * directory, a home that is a file, no permission) is refused, never read as the default, because a
+ * policy the user wrote and Stroq silently ignored is weaker protection nobody asked for.
+ */
+function readPolicyText(file: string): string | null {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch (error) {
+    const code = errnoOf(error);
+    if (code === 'ENOENT' && nothingAt(file)) return null;
+    throw new Error(
+      `the policy file ${file} is there but cannot be read (${code}); Stroq refuses to fall back to the default policy`,
+    );
+  }
+}
+
+/** The policy at `file` (the override in the Stroq home unless told), and where it came from. */
+export function loadPolicyWithSource(file: string = policyFile()): LoadedPolicy {
+  const text = readPolicyText(file);
+  if (text === null)
+    return {
+      policy: DEFAULT_POLICY,
+      source: { kind: 'default', sha256: policySha256(DEFAULT_POLICY) },
+    };
+  // A file that is not a policy throws here, exactly as the hook always has: no default either.
+  const policy = parsePolicy(text);
+  return { policy, source: { kind: 'file', path: file, sha256: policySha256(policy) } };
+}
+
+/** The policy the hook runs under; the digest is left out because the hook never reports it. */
+export function loadPolicy(): Policy {
+  const text = readPolicyText(policyFile());
+  return text === null ? DEFAULT_POLICY : parsePolicy(text);
+}
+
+/** Where the active policy comes from: the override file's path, or `default`. A file that cannot be read throws. */
 export function policySource(): string {
   const file = policyFile();
-  return existsSync(file) ? file : 'default';
+  return readPolicyText(file) === null ? 'default' : file;
 }
 
 export interface EngineLocation {
   readonly scope?: ScopeGate;
+  /** A trusted task parent's signing closure; never loaded by ordinary hook engines. */
+  readonly taskAccessSigner?: TaskAccessRequestSigner;
   /** Keep the task project's credential sources indexed when an event runs in a subdirectory. */
   readonly projectRoot?: string;
   /** The Stroq home: sessions, provenance, audit log, secret index. */
@@ -61,9 +135,13 @@ export interface EngineLocation {
 export function createEngineAt(location: EngineLocation): StroqEngine {
   const now = location.now;
   return new StroqEngine({
-    rules: loadBundledRules(),
+    // Compiled on the first scan, not here: most PreToolUse calls scan nothing (`EngineOptions.rules`).
+    rules: loadBundledRules,
     policy: location.policy,
     ...(location.scope === undefined ? {} : { scope: location.scope }),
+    ...(location.taskAccessSigner === undefined
+      ? {}
+      : { taskAccessSigner: location.taskAccessSigner }),
     // Spread rather than `now` so the key is absent when the caller gave none:
     // under exactOptionalPropertyTypes an explicit `undefined` is not the same as
     // leaving an optional property off.

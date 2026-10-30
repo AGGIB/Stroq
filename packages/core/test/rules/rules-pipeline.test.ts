@@ -380,6 +380,139 @@ detection:
       );
     });
 
+    it('scopes a rule to the surfaces an override names, leaving its patterns alone', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: reads ordinary code as an attack\n' +
+          '  surfaces:\n' +
+          '    - tool_result\n' +
+          '    - web_content\n',
+      );
+      const { rules, applied } = applyRuleOverrides(loadOne(), loadRuleOverrides(file));
+      expect(applied).toEqual(['ATR-2099-00002']);
+      expect((rules[0]?.tags as Record<string, unknown> | undefined)?.['stroq_surfaces']).toEqual([
+        'tool_result',
+        'web_content',
+      ]);
+      expect(rules[0]?.detection.conditions[0]?.value).toBe('upstream-pattern');
+    });
+
+    it('keeps the broad pattern for text somebody else wrote and adds a narrow one for local text', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: fires on code\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: upstream-pattern\n' +
+          '      local: narrow-pattern\n',
+      );
+      const { rules } = applyRuleOverrides(loadOne(), loadRuleOverrides(file));
+      const conditions = rules[0]?.detection.conditions ?? [];
+      expect(conditions).toHaveLength(3);
+      expect(conditions[0]).toMatchObject({
+        value: 'upstream-pattern',
+        stroq_surfaces: ['tool_description', 'tool_result', 'instruction_file', 'web_content'],
+      });
+      expect(conditions[1]?.value).toBe('second-pattern');
+      expect(conditions[1]?.stroq_surfaces).toBeUndefined();
+      expect(conditions[2]).toMatchObject({
+        value: 'narrow-pattern',
+        stroq_surfaces: ['repo_content', 'command_output'],
+      });
+    });
+
+    it('scopes one condition to the surfaces it names, leaving the others alone', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: right in a tool description only\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: upstream-pattern\n' +
+          '      surfaces: [tool_description]\n',
+      );
+      const { rules } = applyRuleOverrides(loadOne(), loadRuleOverrides(file));
+      const conditions = rules[0]?.detection.conditions ?? [];
+      expect(conditions).toHaveLength(2);
+      expect(conditions[0]).toMatchObject({
+        value: 'upstream-pattern',
+        stroq_surfaces: ['tool_description'],
+      });
+      expect(conditions[1]?.stroq_surfaces).toBeUndefined();
+    });
+
+    it('keeps the broad pattern on the surfaces named with local, and reads local everywhere else', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: broad only where it is evidence\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: upstream-pattern\n' +
+          '      local: narrow-pattern\n' +
+          '      surfaces: [tool_description, instruction_file]\n',
+      );
+      const { rules } = applyRuleOverrides(loadOne(), loadRuleOverrides(file));
+      const conditions = rules[0]?.detection.conditions ?? [];
+      expect(conditions).toHaveLength(3);
+      expect(conditions[0]).toMatchObject({
+        value: 'upstream-pattern',
+        stroq_surfaces: ['tool_description', 'instruction_file'],
+      });
+      expect(conditions[2]).toMatchObject({
+        value: 'narrow-pattern',
+        stroq_surfaces: ['tool_result', 'repo_content', 'command_output', 'web_content'],
+      });
+    });
+
+    it('rejects local: off with surfaces, which is surfaces alone', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: both\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: upstream-pattern\n' +
+          "      local: 'off'\n" +
+          '      surfaces: [tool_description]\n',
+      );
+      expect(() => loadRuleOverrides(file)).toThrow(/surfaces" alone/);
+    });
+
+    it('drops a condition on local text with local: off', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: caught by the other conditions\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: upstream-pattern\n' +
+          '      local: "off"\n',
+      );
+      const { rules } = applyRuleOverrides(loadOne(), loadRuleOverrides(file));
+      expect(rules[0]?.detection.conditions).toHaveLength(2);
+      expect(rules[0]?.detection.conditions[0]?.stroq_surfaces).toEqual([
+        'tool_description',
+        'tool_result',
+        'instruction_file',
+        'web_content',
+      ]);
+    });
+
+    it('rejects a condition entry with neither to nor local', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: nothing\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: upstream-pattern\n',
+      );
+      expect(() => loadRuleOverrides(file)).toThrow(/or name "local"/);
+    });
+
+    it('rejects a surface outside the vocabulary', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' + '  reason: typo\n' + '  surfaces:\n' + '    - web-content\n',
+      );
+      expect(() => loadRuleOverrides(file)).toThrow(/unknown surface "web-content"/);
+    });
+
     it('rejects a malformed entry rather than silently applying nothing', () => {
       const file = tempOverrides('ATR-2099-00002:\n  reason: no conditions\n');
       expect(() => loadRuleOverrides(file)).toThrow(/"conditions" must be a non-empty list/);

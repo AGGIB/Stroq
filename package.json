@@ -1,6 +1,6 @@
 {
   "name": "stroq-monorepo",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "private": true,
   "type": "module",
   "license": "Apache-2.0",
@@ -13,6 +13,9 @@
     "node": ">=22"
   },
   "scripts": {
+    "platform": "node console/scripts/launch.mjs",
+    "platform:build": "pnpm build && pnpm --dir console build && node scripts/package-platform.mjs",
+    "platform:test": "pnpm --dir console test && pnpm --dir console test:local",
     "build": "pnpm -r --filter \"./packages/*\" build",
     "build:rules": "tsx scripts/build-rules.ts",
     "check:rules": "tsx scripts/build-rules.ts --check",
@@ -35,6 +38,7 @@
     "@vitest/coverage-v8": "4.1.11",
     "fast-check": "^4.10.2",
     "prettier": "3.9.10",
+    "smol-toml": "1.9.1",
     "tsup": "8.5.1",
     "tsx": "4.23.15",
     "typescript": "5.9.3",

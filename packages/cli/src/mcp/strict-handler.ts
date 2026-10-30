@@ -40,6 +40,12 @@ import { readStrictError, readStrictResult, type StrictRead } from './strict-res
 import type { BoundedScanVerdict } from './strict-scan.js';
 import { sniffId } from './strict-sniff.js';
 import type { ScanView } from './strict-views.js';
+import type { ToolPagination } from './proxy-tool-pagination.js';
+import {
+  auditToolApprovalRefusal,
+  toolApprovalResponse,
+  type ToolApprovalConnection,
+} from './proxy-tool-approval.js';
 
 /**
  * The server-to-client half of `stroq mcp --strict`. Every server line comes through
@@ -76,6 +82,8 @@ export interface StrictHandlerDeps {
   readonly terminate: () => void;
   /** A line for the proxy's own diagnostics (stderr). */
   readonly note: (text: string) => void;
+  readonly toolApproval?: ToolApprovalConnection;
+  readonly pagination?: ToolPagination;
 }
 
 export interface StrictServerHandler {
@@ -174,6 +182,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     endedBy = kind;
     const alsoList = also === null ? [] : Array.isArray(also) ? also : [also];
     const waiting = [...alsoList, ...ledger.drain()];
+    deps.pagination?.close();
     deps.terminate();
     await audit(crossing.reason, crossing.toolName, crossing.summary);
     try {
@@ -194,7 +203,11 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     deps.note(
       `stroq mcp: strict mode ended the server "${ctx.server}": ${terminationCount(limit, kind)} (see stroq log)\n`,
     );
-    for (const request of waiting) await deps.toClient(terminatedResponse(request.id, limit, kind));
+    for (const request of waiting) {
+      if (deps.pagination?.owns(request)) continue;
+      deps.toolApproval?.finish(request);
+      await deps.toClient(terminatedResponse(request.id, limit, kind));
+    }
   }
 
   /**
@@ -209,7 +222,11 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     if (request === null) return Promise.resolve();
     const list = Array.isArray(request) ? request : [request];
     return Promise.all(
-      list.map((r) => deps.toClient(terminatedResponse(r.id, endedAtLimit, endedBy))),
+      list.map((r) =>
+        deps.pagination?.failed(r)
+          ? Promise.resolve()
+          : deps.toClient(terminatedResponse(r.id, endedAtLimit, endedBy)),
+      ),
     ).then(() => {});
   };
 
@@ -232,6 +249,10 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     },
   ): Promise<void> {
     if (terminated) return answerEnded(options.answers ?? null);
+    // Withholding one message does not by itself end tool approval: what does (a line that could
+    // hide `list_changed`, a forged answer) was decided at ingress, and a listing that fails is
+    // failed through `pagination.failed` below.
+    deps.pagination?.onIngress();
     const hostile = countClass(reason, options.method, options.hasId) === 'hostile';
     const count = hostile ? (hostileCount += 1) : (benignCount += 1);
     const limit = hostile ? maxWithheld : maxBenign;
@@ -254,7 +275,11 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     if (options.toServer !== undefined) deps.toServer(options.toServer);
     if (answers !== null) {
       const list = Array.isArray(answers) ? answers : [answers];
-      for (const req of list) await deps.toClient(withheldResponse(req.id, reason));
+      for (const req of list) {
+        if (deps.pagination?.failed(req)) continue;
+        deps.toolApproval?.finish(req);
+        await deps.toClient(withheldResponse(req.id, reason));
+      }
     }
   }
 
@@ -411,7 +436,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     }
   }
 
-  async function onResponse(message: ResponseMessage): Promise<void> {
+  async function onResponse(message: ResponseMessage, rawLine: SplitLine): Promise<void> {
     const { id } = message;
     // An integer beyond 2^53 does not survive being written again: it would reach the
     // client as a different number. No request of a client has one.
@@ -434,7 +459,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     }
     // From here the request is taken and has to be answered, whatever goes wrong.
     try {
-      return await answer(entry, message);
+      return await answer(entry, message, rawLine);
     } catch (err) {
       logError('mcp strict response', err);
       return withhold('scan-failed', {
@@ -442,10 +467,17 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
         answers: entry,
         summary: `withheld a ${describeMethod(entry.method)} response after an internal error`,
       });
+    } finally {
+      if (deps.pagination?.owns(entry)) deps.pagination.finishPage(entry);
+      else deps.toolApproval?.finish(entry);
     }
   }
 
-  async function answer(entry: TrackedRequest, message: ResponseMessage): Promise<void> {
+  async function answer(
+    entry: TrackedRequest,
+    message: ResponseMessage,
+    rawLine: SplitLine,
+  ): Promise<void> {
     const { value } = message;
     const about = { toolName: entry.toolName, answers: entry };
     const isError = Object.hasOwn(value, 'error');
@@ -467,13 +499,14 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
         ...about,
         summary: `withheld a ${describeMethod(entry.method)} response`,
       });
-    return deliver(entry, message, read);
+    return deliver(entry, message, read, rawLine);
   }
 
   async function deliver(
     entry: TrackedRequest,
     message: ResponseMessage,
     read: ReadOk,
+    rawLine: SplitLine,
   ): Promise<void> {
     const { value } = message;
     const about = { toolName: entry.toolName, answers: entry };
@@ -496,6 +529,7 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
       });
     const warning = outcome?.warning ?? null;
     if (Object.hasOwn(value, 'error')) {
+      if (deps.pagination?.failed(entry)) return;
       const error = value['error'] as Record<string, unknown>;
       return send(entry, {
         ...value,
@@ -519,7 +553,45 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     }
     if (isRecord(result) && entry.method === 'tools/call')
       result = appendBlocks(result, [warning, notice]);
-    return send(entry, { ...value, result });
+    if (entry.method === 'tools/list' && deps.pagination?.owns(entry)) {
+      const page = deps.pagination.accept(entry, result);
+      if (page.kind === 'held') return;
+      if (!page.live()) return;
+      const aggregateRead = readStrictResult('tools/list', page.result);
+      if (!aggregateRead.ok || !isCovered(page.result, aggregateRead.media, aggregateRead.text)) {
+        page.failed();
+        return;
+      }
+      const aggregateOutcome =
+        aggregateRead.views.length === 0 ? null : await scanned(page.root, aggregateRead.views);
+      if (typeof aggregateOutcome === 'string') {
+        page.failed();
+        return;
+      }
+      if (!page.live()) return;
+      let drain: Promise<void> | undefined;
+      let line: string;
+      try {
+        line = strictLine({ jsonrpc: '2.0', id: page.root.id, result: page.result });
+      } catch {
+        page.failed();
+        return;
+      }
+      await deps.toolApproval!.publishComplete(
+        page.root,
+        page.result,
+        () => {
+          if (terminated || !page.live()) return;
+          page.delivered();
+          drain = deps.toClientLine(line);
+        },
+        page.live,
+      );
+      if (drain !== undefined) return drain;
+      page.refused();
+      return;
+    }
+    return send(entry, { ...value, result }, rawLine);
   }
 
   /**
@@ -529,7 +601,11 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
    * wrapped in the envelope: that is a message Stroq could not finish reading, not a
    * request to leave waiting.
    */
-  async function send(entry: TrackedRequest, message: Record<string, unknown>): Promise<void> {
+  async function send(
+    entry: TrackedRequest,
+    message: Record<string, unknown>,
+    rawLine?: SplitLine,
+  ): Promise<void> {
     // The scan (and the cloak) before this were awaits: a response that was being read
     // when the server was ended is not delivered, and its request is answered as the end.
     if (terminated) return answerEnded(entry);
@@ -543,6 +619,17 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
         answers: entry,
         summary: `withheld a ${describeMethod(entry.method)} response that could not be written`,
       });
+    }
+    if (deps.toolApproval !== undefined && entry.method === 'tools/list' && rawLine !== undefined) {
+      let drain: Promise<void> | undefined;
+      await deps.toolApproval.deliverList(entry, rawLine, message['result'], () => {
+        if (!terminated) drain = deps.toClientLine(line);
+      });
+      if (drain !== undefined) return drain;
+      if (terminated) return answerEnded(entry);
+      await auditToolApprovalRefusal(ctx, 'tools/list');
+      if (terminated) return answerEnded(entry);
+      return deps.toClient(toolApprovalResponse(entry.id));
     }
     return deps.toClientLine(line);
   }
@@ -585,11 +672,31 @@ export function createStrictHandler(deps: StrictHandlerDeps): StrictServerHandle
     if (line.text.trim() === '') return;
     // A few servers write a byte-order mark before their JSON; `JSON.parse` rejects it.
     const text = line.text.startsWith(BOM) ? line.text.slice(BOM.length) : line.text;
+    if (deps.toolApproval !== undefined && !deps.toolApproval.serverValid(line)) {
+      // A request or notification the server starts, refused only for a number it would deliver
+      // rounded (a progress count, say), concerns no waiting call: it is withheld alone, and a
+      // request is refused to the server.
+      const parsed = deps.toolApproval.serverInexact(line) ? parseLine(text) : undefined;
+      const initiated = parsed === undefined ? null : classifyMessage(parsed);
+      if (initiated?.kind === 'request' || initiated?.kind === 'notification')
+        return withhold('invalid-shape', {
+          method: initiated.method,
+          hasId: initiated.kind === 'request',
+          toolName: toolOf('unsolicited_server_message'),
+          summary: `withheld a server ${initiated.kind} (${describeMethod(initiated.method)}) with a number it cannot pass on exactly`,
+          ...(initiated.kind === 'request' ? { toServer: refusedServerRequest(initiated.id) } : {}),
+        });
+      return withholdUnaddressed(
+        'invalid-shape',
+        'an unsupported tool-contract protocol message',
+        text,
+      );
+    }
     const value = parseLine(text);
     if (value === undefined)
       return withholdUnaddressed('unparsable', 'a server line that is not JSON', text);
     const message = classifyMessage(value);
-    if (message.kind === 'response') return onResponse(message);
+    if (message.kind === 'response') return onResponse(message, line);
     if (message.kind === 'request' || message.kind === 'notification')
       return onServerInitiated(message);
     // A batch, or an object that is no kind of message: nothing to forward. A response

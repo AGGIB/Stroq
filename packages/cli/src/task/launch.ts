@@ -1,8 +1,13 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, type KeyObject } from 'node:crypto';
 import { rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
-import { FilePermitStore, type Policy, type SignedPermit } from '@stroq/core';
+import {
+  FilePermitStore,
+  signTaskAccessRequest,
+  type Policy,
+  type SignedPermit,
+} from '@stroq/core';
 import type { TaskDeps } from '../commands/task.js';
 import { hardeningEnv } from '../commands/inspect.js';
 import { createEngineAt } from '../engine-factory.js';
@@ -18,6 +23,8 @@ import { taskSandbox } from './sandbox.js';
 
 interface TaskLaunch {
   readonly signed: SignedPermit;
+  /** Parent memory only: never included in child environment, runtime files or configuration. */
+  readonly privateKey: KeyObject;
   readonly policy: Policy;
   readonly home: string;
   readonly env: NodeJS.ProcessEnv;
@@ -51,6 +58,7 @@ export async function launchTask(input: TaskLaunch): Promise<number> {
         stop.abort();
       }),
       projectRoot: body.projectRoot,
+      taskAccessSigner: (request) => signTaskAccessRequest(request, input.privateKey),
     });
     broker = await startTaskBroker(engine, randomBytes(24).toString('hex'), {
       cwd: body.projectRoot,

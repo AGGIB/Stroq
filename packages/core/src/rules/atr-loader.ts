@@ -1,6 +1,6 @@
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { parse } from 'yaml';
+import { yaml } from '../util/yaml.js';
 import { AtrRuleSchema, type AtrRule } from './atr-types.js';
 
 export interface SkippedRule {
@@ -16,7 +16,7 @@ export interface LoadResult {
 export function parseRule(yamlText: string, file: string): { rule?: AtrRule; error?: string } {
   let doc: unknown;
   try {
-    doc = parse(yamlText);
+    doc = yaml().parse(yamlText);
   } catch (err) {
     return { error: `${file}: invalid YAML: ${(err as Error).message}` };
   }

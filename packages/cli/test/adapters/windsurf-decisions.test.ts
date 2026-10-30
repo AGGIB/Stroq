@@ -118,7 +118,9 @@ describe('taint from a file Cascade read', () => {
   });
 
   it('denies a tainted pre_read_code of a secret path', async () => {
-    const file = join(cwd, 'README-widgets.md');
+    // A dependency's file: a flag on one of the project's own would not taint.
+    mkdirSync(join(cwd, 'node_modules', 'widgets'), { recursive: true });
+    const file = join(cwd, 'node_modules', 'widgets', 'README.md');
     writeFileSync(file, POISONED);
     await run({ agent_action_name: 'post_read_code', tool_info: { file_path: file } });
 

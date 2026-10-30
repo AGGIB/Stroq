@@ -18,7 +18,7 @@ import {
   type Manifest,
 } from '../../src/harden/manifest.js';
 import type { Fs } from '../../src/harden/types.js';
-import { entry, plant, setup } from './manifest-fixtures.js';
+import { entry, plant, setup, signedText } from './manifest-fixtures.js';
 import { fakeEnv, removeTempDirs, tempDir } from './helpers.js';
 
 afterEach(removeTempDirs);
@@ -30,13 +30,13 @@ describe('readManifest', () => {
     const { env } = setup();
 
     expect(readManifest(env)).toEqual(emptyManifest());
-    expect(emptyManifest()).toEqual({ version: 1, files: {} });
+    expect(emptyManifest()).toEqual({ version: 2, files: {} });
   });
 
   it('reads what writeManifest wrote', async () => {
     const { env, file } = setup();
     const manifest: Manifest = {
-      version: 1,
+      version: 2,
       files: { [file]: [entry(), entry({ created: true })] },
     };
 
@@ -46,17 +46,17 @@ describe('readManifest', () => {
   });
 
   it('reads an entry for a file Stroq made, which has no copy and no sha before', () => {
-    const { env, file, manifestFile } = setup();
+    const { env, home, file, manifestFile } = setup();
     const made = entry({ created: true, shaBefore: null, backup: null });
-    plant(manifestFile, { version: 1, files: { [file]: [made] } });
+    plant(manifestFile, signedText(home, { [file]: [made] }));
 
     expect(readManifest(env).files[file]).toEqual([made]);
   });
 
   it('reads a manifest without createdDirs', () => {
-    const { env, file, manifestFile } = setup();
+    const { env, home, file, manifestFile } = setup();
     const older = entry({ created: true });
-    plant(manifestFile, { version: 1, files: { [file]: [older] } });
+    plant(manifestFile, signedText(home, { [file]: [older] }));
 
     const manifest = readManifest(env);
     expect(manifest.files[file]?.[0]?.createdDirs).toBeUndefined();
@@ -157,11 +157,11 @@ describe('writeManifest', () => {
     const second = join(tempDir('b'), 'b.json');
     const first = join(tempDir('a'), 'a.json');
 
-    await writeManifest(env, { version: 1, files: { [second]: [entry()], [first]: [entry()] } });
+    await writeManifest(env, { version: 2, files: { [second]: [entry()], [first]: [entry()] } });
 
     const text = readFileSync(manifestFile, 'utf8');
     expect(text.endsWith('\n')).toBe(true);
-    expect(text).toContain('\n  "version": 1,');
+    expect(text).toContain('\n  "version": 2,');
     expect(Object.keys((JSON.parse(text) as Manifest).files)).toEqual([first, second].sort());
   });
 
@@ -183,14 +183,14 @@ describe('writeManifest', () => {
     const { env, file } = setup();
     await writeManifest(env, emptyManifest());
 
-    await writeManifest(env, { version: 1, files: { [file]: [entry()] } });
+    await writeManifest(env, { version: 2, files: { [file]: [entry()] } });
 
     expect(Object.keys(readManifest(env).files)).toEqual([file]);
   });
 
   it('leaves the manifest it had, byte for byte, and no temporary file, when the write fails', async () => {
     const { env, home, file, manifestFile } = setup();
-    await writeManifest(env, { version: 1, files: { [file]: [entry()] } });
+    await writeManifest(env, { version: 2, files: { [file]: [entry()] } });
     const before = readFileSync(manifestFile);
     const fs: Fs = { ...nodeFs, rename: () => Promise.reject(new Error('simulated EXDEV')) };
 
@@ -214,11 +214,11 @@ describe('writeManifest', () => {
     ],
   ])('will not write %s, and keeps the manifest it had', async (_name, bad) => {
     const { env, file, manifestFile } = setup();
-    await writeManifest(env, { version: 1, files: { [file]: [entry()] } });
+    await writeManifest(env, { version: 2, files: { [file]: [entry()] } });
     const before = readFileSync(manifestFile, 'utf8');
 
     await expect(
-      writeManifest(env, { version: 1, files: { [file]: [bad] } }),
+      writeManifest(env, { version: 2, files: { [file]: [bad] } }),
     ).rejects.toMatchObject({ code: 'manifest-invalid' });
 
     expect(readFileSync(manifestFile, 'utf8')).toBe(before);
@@ -229,7 +229,7 @@ describe('writeManifest', () => {
     const many = Array.from({ length: 4_000 }, () => entry());
 
     await expect(
-      writeManifest(env, { version: 1, files: { [join(tempDir('big'), 'a.json')]: many } }),
+      writeManifest(env, { version: 2, files: { [join(tempDir('big'), 'a.json')]: many } }),
     ).rejects.toMatchObject({ code: 'manifest-too-large' });
 
     expect(existsSync(manifestFile)).toBe(false);

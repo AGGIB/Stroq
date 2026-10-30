@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { MAX_MANIFEST_BYTES, emptyManifest, readManifest } from '../../src/harden/manifest.js';
 import { HardenError } from '../../src/harden/types.js';
-import { FAKE_SECRET, entry, plant, setup, thrownBy } from './manifest-fixtures.js';
+import { FAKE_SECRET, entry, plant, setup, signedText, thrownBy } from './manifest-fixtures.js';
 import { removeTempDirs, tempDir } from './helpers.js';
 
 afterEach(removeTempDirs);
@@ -135,8 +135,8 @@ describe('readManifest: what it refuses', () => {
   });
 
   it('reads a manifest of exactly 1 MiB', () => {
-    const { env, manifestFile } = setup();
-    const body = '{"version": 1, "files": {}}';
+    const { env, home, manifestFile } = setup();
+    const body = signedText(home, {});
     plant(manifestFile, body + ' '.repeat(MAX_MANIFEST_BYTES - body.length));
 
     expect(readManifest(env)).toEqual(emptyManifest());

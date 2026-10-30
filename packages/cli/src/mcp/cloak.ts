@@ -169,7 +169,7 @@ export class McpCloak {
     });
   }
 
-  /** Writes the `pre`-phase record of a restore, and of the placeholders it could not resolve. */
+  /** Records prepared substitutions before dispatch; this is not evidence of delivery. */
   async auditUncloak(
     toolName: string,
     plan: UncloakPlan,
@@ -181,8 +181,8 @@ export class McpCloak {
       phase: 'pre',
       tool: toolName,
       summary:
-        `mcp uncloak: ${replacements.length} placeholder(s) restored, ` +
-        `${plan.unresolved.length} unresolved and forwarded as written`,
+        `mcp uncloak: ${replacements.length} placeholder(s) prepared for dispatch, ` +
+        `${plan.unresolved.length} unresolved and retained as written; delivery is not recorded here`,
       ...(replacements.length > 0 ? { cloak: replacements } : {}),
     });
   }

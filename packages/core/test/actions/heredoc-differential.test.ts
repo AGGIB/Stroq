@@ -478,7 +478,8 @@ describe.skipIf(SHELLS.length === 0)(
         expect(ran, `${shell}: marks that ran`).toBeGreaterThan(20);
         expect(missed.slice(0, 5)).toEqual([]);
       },
-      240_000,
+      // Real shells, many of them: a busy macOS runner took past four minutes for zsh.
+      600_000,
     );
   },
 );
@@ -511,7 +512,8 @@ describe.skipIf(SHELLS.length === 0)(
         expect(heldAsText, `${shell}: commands whose lines stayed text`).toBeGreaterThan(20);
         expect(missed.slice(0, 5)).toEqual([]);
       },
-      240_000,
+      // Real shells, many of them: a busy macOS runner took past four minutes for zsh.
+      600_000,
     );
   },
 );

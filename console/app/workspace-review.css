@@ -1,0 +1,49 @@
+.workspace-review-summary {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 16px;
+}
+.workspace-review-summary strong {
+  font-size: 26px;
+  font-weight: 550;
+}
+.workspace-review-sources code {
+  overflow-wrap: anywhere;
+  font-size: var(--text-secondary);
+}
+.workspace-review-sources td:first-child {
+  min-width: 200px;
+}
+.workspace-review-signals {
+  display: grid;
+  gap: 12px;
+}
+.workspace-review-signal {
+  display: flex;
+  align-items: start;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 16px 0;
+  border-bottom: 1px solid var(--border);
+}
+.workspace-review-signal p {
+  margin: 5px 0 0;
+}
+.workspace-review-signal code {
+  overflow-wrap: anywhere;
+}
+.workspace-review-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 12px;
+  margin-top: 20px;
+}
+@media (max-width: 720px) {
+  .workspace-review-signal {
+    flex-direction: column;
+    gap: 8px;
+  }
+}

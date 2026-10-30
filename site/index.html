@@ -101,6 +101,7 @@
         <li><a href="#incident">The incident</a></li>
         <li><a href="#how">How it works</a></li>
         <li><a href="#attacks">36 attacks</a></li>
+        <li><a href="#console">Console</a></li>
         <li><a href="#install">Install</a></li>
         <li><a href="/docs/">Docs</a></li>
         <li><a href="https://github.com/AGGIB/Stroq">GitHub <svg class="ic ic-ext" width="14" height="14" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a></li>
@@ -424,13 +425,13 @@
   <section class="chapter score" id="attacks" aria-labelledby="score-title">
     <div class="container">
       <div class="chapter-head">
-        <h2 id="score-title">36 attacks replayed. <span class="hi-deny">17 blocked</span>, <span class="hi-ask">19 asked</span>, none through.</h2>
+        <h2 id="score-title">36 attacks replayed. <span class="hi-deny">15 blocked</span>, <span class="hi-ask">21 asked</span>, none through.</h2>
         <p class="chapter-lead">Each incident is replayed through <em>your</em> policy on every commit. This tests the policy, not a live agent. <code>stroq attack</code> exits 1 if a scenario gets through.</p>
       </div>
 
-      <div class="sc-bar" role="img" aria-label="Of 36 replayed attacks, 17 were blocked outright, 19 were turned into a prompt, and none passed through.">
-        <span class="sc-seg sc-seg-deny"><b>17</b> blocked</span>
-        <span class="sc-seg sc-seg-ask"><b>19</b> asked</span>
+      <div class="sc-bar" role="img" aria-label="Of 36 replayed attacks, 15 were blocked outright, 21 were turned into a prompt, and none passed through.">
+        <span class="sc-seg sc-seg-deny"><b>15</b> blocked</span>
+        <span class="sc-seg sc-seg-ask"><b>21</b> asked</span>
       </div>
 
       <div class="wall-grid">
@@ -441,7 +442,7 @@
             <button class="tile tile-deny" type="button" data-for="atk-03" role="radio" aria-checked="false" aria-controls="viewer" aria-label="03, blocked, credential theft">03</button>
             <button class="tile tile-deny" type="button" data-for="atk-04" role="radio" aria-checked="false" aria-controls="viewer" aria-label="04, blocked, credential theft">04</button>
             <button class="tile tile-deny" type="button" data-for="atk-05" role="radio" aria-checked="false" aria-controls="viewer" aria-label="05, blocked, credential theft">05</button>
-            <button class="tile tile-deny" type="button" data-for="atk-06" role="radio" aria-checked="false" aria-controls="viewer" aria-label="06, blocked, credential theft">06</button>
+            <button class="tile tile-ask" type="button" data-for="atk-06" role="radio" aria-checked="false" aria-controls="viewer" aria-label="06, asked, credential theft">06</button>
             <button class="tile tile-deny" type="button" data-for="atk-07" role="radio" aria-checked="false" aria-controls="viewer" aria-label="07, blocked, guard removal">07</button>
             <button class="tile tile-ask" type="button" data-for="atk-08" role="radio" aria-checked="false" aria-controls="viewer" aria-label="08, asked, data loss">08</button>
             <button class="tile tile-ask" type="button" data-for="atk-09" role="radio" aria-checked="false" aria-controls="viewer" aria-label="09, asked, data loss">09</button>
@@ -471,7 +472,7 @@
             <button class="tile tile-ask" type="button" data-for="atk-33" role="radio" aria-checked="false" aria-controls="viewer" aria-label="33, asked, data loss">33</button>
             <button class="tile tile-ask" type="button" data-for="atk-34" role="radio" aria-checked="false" aria-controls="viewer" aria-label="34, asked, data loss">34</button>
             <button class="tile tile-ask" type="button" data-for="atk-35" role="radio" aria-checked="false" aria-controls="viewer" aria-label="35, asked, data loss">35</button>
-            <button class="tile tile-deny" type="button" data-for="atk-36" role="radio" aria-checked="false" aria-controls="viewer" aria-label="36, blocked, credential theft">36</button>
+            <button class="tile tile-ask" type="button" data-for="atk-36" role="radio" aria-checked="false" aria-controls="viewer" aria-label="36, asked, credential theft">36</button>
           </div>
           <p class="wall-key" id="wall-key"><span class="key key-deny" aria-hidden="true"></span>blocked <span class="key key-ask" aria-hidden="true"></span>asked<span class="wall-keys"> · arrows move</span></p>
         </div>
@@ -483,7 +484,7 @@
           <h3>What the attacker was after</h3>
           <ul class="unit-chart">
         <li class="unit-row" data-effect="code execution" data-deny="7" data-ask="3"><span class="unit-name">code execution</span><span class="units" aria-hidden="true"><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-ask"></i><i class="u u-ask"></i><i class="u u-ask"></i></span><span class="unit-tally"><b>10</b> · 7 blocked, 3 asked</span></li>
-        <li class="unit-row" data-effect="credential theft" data-deny="7" data-ask="2"><span class="unit-name">credential theft</span><span class="units" aria-hidden="true"><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-ask"></i><i class="u u-ask"></i></span><span class="unit-tally"><b>9</b> · 7 blocked, 2 asked</span></li>
+        <li class="unit-row" data-effect="credential theft" data-deny="5" data-ask="4"><span class="unit-name">credential theft</span><span class="units" aria-hidden="true"><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-deny"></i><i class="u u-ask"></i><i class="u u-ask"></i><i class="u u-ask"></i><i class="u u-ask"></i></span><span class="unit-tally"><b>9</b> · 5 blocked, 4 asked</span></li>
         <li class="unit-row" data-effect="data loss" data-deny="0" data-ask="10"><span class="unit-name">data loss</span><span class="units" aria-hidden="true"><i class="u u-ask"></i><i class="u u-ask"></i><i class="u u-ask"></i><i class="u u-ask"></i><i class="u u-ask"></i><i class="u u-ask"></i><i class="u u-ask"></i><i class="u u-ask"></i><i class="u u-ask"></i><i class="u u-ask"></i></span><span class="unit-tally"><b>10</b> · 0 blocked, 10 asked</span></li>
         <li class="unit-row" data-effect="persistence" data-deny="1" data-ask="3"><span class="unit-name">persistence</span><span class="units" aria-hidden="true"><i class="u u-deny"></i><i class="u u-ask"></i><i class="u u-ask"></i><i class="u u-ask"></i></span><span class="unit-tally"><b>4</b> · 1 blocked, 3 asked</span></li>
         <li class="unit-row" data-effect="guard removal" data-deny="2" data-ask="0"><span class="unit-name">guard removal</span><span class="units" aria-hidden="true"><i class="u u-deny"></i><i class="u u-deny"></i></span><span class="unit-tally"><b>2</b> · 2 blocked, 0 asked</span></li>
@@ -586,7 +587,7 @@
           </ol>
         </details>
         <details class="grp" data-effect="credential theft">
-          <summary><span class="grp-name">credential theft</span><span class="grp-n">9</span><span class="sr-only"> attacks, </span><span class="grp-dots" aria-hidden="true"><i class="d d-deny"></i><i class="d d-deny"></i><i class="d d-deny"></i><i class="d d-deny"></i><i class="d d-deny"></i><i class="d d-deny"></i><i class="d d-ask"></i><i class="d d-ask"></i><i class="d d-deny"></i></span><span class="grp-tally">7 blocked, 2 asked</span></summary>
+          <summary><span class="grp-name">credential theft</span><span class="grp-n">9</span><span class="sr-only"> attacks, </span><span class="grp-dots" aria-hidden="true"><i class="d d-deny"></i><i class="d d-deny"></i><i class="d d-deny"></i><i class="d d-ask"></i><i class="d d-deny"></i><i class="d d-deny"></i><i class="d d-ask"></i><i class="d d-ask"></i><i class="d d-ask"></i></span><span class="grp-tally">5 blocked, 4 asked</span></summary>
           <ol class="atk-list">
             <li id="atk-03" class="atk atk-deny" data-effect="credential theft" data-source="modelled">
               <span class="atk-n">03</span>
@@ -606,10 +607,10 @@
               <span class="chip chip-deny"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-cross"/></svg>blocked</span>
               <a class="atk-src" href="https://orca.security/resources/blog/roguepilot-github-copilot-vulnerability/">Orca Security (modelled on)<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
             </li>
-            <li id="atk-06" class="atk atk-deny" data-effect="credential theft" data-source="modelled">
+            <li id="atk-06" class="atk atk-ask" data-effect="credential theft" data-source="modelled">
               <span class="atk-n">06</span>
               <span class="atk-what">A poisoned note makes the agent pipe its environment to an external host</span>
-              <span class="chip chip-deny"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-cross"/></svg>blocked</span>
+              <span class="chip chip-ask"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
               <a class="atk-src" href="https://github.com/anthropics/claude-code/issues/44868">claude-code #44868 (modelled on)<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
             </li>
             <li id="atk-11" class="atk atk-deny" data-effect="credential theft" data-source="modelled">
@@ -636,10 +637,10 @@
               <span class="chip chip-ask"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
               <a class="atk-src" href="https://osv.dev/vulnerability/MAL-2026-10736">OSV MAL-2026-10736<svg class="ic ic-ext" width="11" height="11" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a>
             </li>
-            <li id="atk-36" class="atk atk-deny" data-effect="credential theft" data-source="own">
+            <li id="atk-36" class="atk atk-ask" data-effect="credential theft" data-source="own">
               <span class="atk-n">36</span>
               <span class="atk-what">A script written after reading a hostile README sends a .env file out</span>
-              <span class="chip chip-deny"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-cross"/></svg>blocked</span>
+              <span class="chip chip-ask"><svg class="ic" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-partial"/></svg>asked</span>
               <span class="atk-src atk-src-own">Stroq-authored</span>
             </li>
           </ol>
@@ -810,7 +811,88 @@ Executing decoded or remotely fetched code is blocked
     </div>
   </section>
 
-  <!-- 6. Install: the command you would actually type, on the page's one full field
+  <!-- 6. The console: what the hooks record, read on one local page. The picture is a
+       real frame of the console's Protection page (captured with the 0.28 build, whose
+       top of the page 0.29 prints the same way) on a staged session: a throwaway home, a
+       made-up project, agent calls fed to the real hook. The caption says so. Light and
+       dark are separate captures of the same session; under 1000px a crop of its left
+       side keeps the text at a readable size. -->
+  <section class="chapter console" id="console" aria-labelledby="console-title">
+    <div class="container">
+      <div class="chapter-head">
+        <h2 id="console-title">Every decision, in a console at 127.0.0.1.</h2>
+        <div class="console-intro">
+          <p class="chapter-lead">It opens in your browser on a private link whose key changes every start.</p>
+          <div class="install-pill">
+            <code class="install-cmd" id="console-cmd"><span class="prompt-mark" aria-hidden="true">$ </span>npx @stroq/cli console</code>
+            <button class="copy-btn" type="button" data-copy="npx @stroq/cli console" data-select="console-cmd" aria-describedby="console-cmd">
+              <svg class="ic" width="16" height="16" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg>
+              <span class="copy-label">Copy</span>
+            </button>
+          </div>
+          <p class="console-meta"><span>Loopback only</span> · <span>no account</span> · <span>no telemetry</span></p>
+        </div>
+      </div>
+
+      <figure class="screen">
+        <picture>
+          <source media="(max-width: 1000px) and (prefers-color-scheme: dark)" type="image/avif" srcset="/assets/console/protection-dark-narrow.avif" width="2264" height="1212">
+          <source media="(max-width: 1000px)" type="image/avif" srcset="/assets/console/protection-light-narrow.avif" width="2264" height="1212">
+          <source media="(prefers-color-scheme: dark)" type="image/avif" srcset="/assets/console/protection-dark.avif" width="2320" height="732">
+          <source media="(prefers-color-scheme: dark)" type="image/jpeg" srcset="/assets/console/protection-dark.jpg" width="1600" height="506">
+          <source type="image/avif" srcset="/assets/console/protection-light.avif" width="2320" height="732">
+          <img src="/assets/console/protection-light.jpg" width="1600" height="506" loading="lazy" decoding="async" alt="The Protection page of the Stroq console. It reads: Stroq is being asked by Claude Code, Cursor and Codex CLI. Each of the three is Connected: hooks are in place, and Stroq was last asked about an action just now or 2 minutes ago. In the newest 11 recorded actions: 2 denied, 1 asked you, 0 flagged and 8 allowed. Below: 1 critical and 2 high settings found in your agents' files.">
+        </picture>
+        <figcaption>A staged session: made-up project, scripted agent calls. The states and counts are the console's own.</figcaption>
+      </figure>
+
+      <div class="console-index">
+        <div class="console-group">
+          <h3>Every day</h3>
+          <dl>
+            <dt>Protection</dt>
+            <dd>Whether each agent asks Stroq before it acts. Connected means a call was seen, not that every action is covered.</dd>
+            <dt>Live and Activity</dt>
+            <dd>The audit journal as it happens, each call with its decision.</dd>
+            <dt>The event card</dt>
+            <dd>Source, action, decision, outcome, as far as recorded.</dd>
+          </dl>
+        </div>
+        <div class="console-group">
+          <h3>Set up</h3>
+          <dl>
+            <dt>Try an action</dt>
+            <dd>Test the policy on a command before the agent runs it.</dd>
+            <dt>Settings check</dt>
+            <dd>Agent settings that weaken protection.</dd>
+          </dl>
+        </div>
+        <div class="console-group">
+          <h3>When you need it</h3>
+          <dl>
+            <dt>Secret exposure</dt>
+            <dd>Where a known secret went.</dd>
+            <dt>MCP call control</dt>
+            <dd>Pause one server's new calls; hold a tool until you approve it.</dd>
+          </dl>
+        </div>
+      </div>
+
+      <details class="also">
+        <summary>Also new in 0.29</summary>
+        <div class="also-body">
+          <ul class="also-list">
+            <li>A question about a copied value is asked once.</li>
+            <li>A flag on your own file no longer locks the session.</li>
+            <li>A script that the same line downloads and runs is judged by where its text came from.</li>
+          </ul>
+          <p class="also-note">Replayed on 500 public agent sessions, 28,347 tool calls: <b>21 stops (0.07%)</b>. <a href="https://github.com/AGGIB/Stroq/blob/main/CHANGELOG.md">Changelog <svg class="ic ic-ext" width="13" height="13" aria-hidden="true" focusable="false"><use href="#i-ext"/></svg></a></p>
+        </div>
+      </details>
+    </div>
+  </section>
+
+  <!-- 7. Install: the command you would actually type, on the page's one full field
        of the signal colour. -->
   <section class="install" id="install" aria-labelledby="install-title">
     <div class="container install-grid">
@@ -863,7 +945,7 @@ npx @stroq/cli init --agent mcp --client claude-desktop</code></pre>
     </div>
   </section>
 
-  <!-- 7. Who, and where it stops. -->
+  <!-- 8. Who, and where it stops. -->
   <section class="about" id="about" aria-labelledby="about-title">
     <div class="container about-grid">
       <h2 id="about-title">Built in the open, by one developer.</h2>

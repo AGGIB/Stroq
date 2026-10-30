@@ -1,6 +1,7 @@
-import { existsSync, readdirSync, statSync, type Dirent } from 'node:fs';
+import type { Dirent } from 'node:fs';
+import { LEGACY_SURFACE_IO, type SurfaceReadContext } from './surface-io.js';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { isGitExecKey, readRegularFile } from '@stroq/core';
+import { isGitExecKey } from '@stroq/core';
 import { INSTALL_SCRIPT_NAMES } from './agent-editor.js';
 import { hookOutcome } from './hook-outcome.js';
 import type { Finding } from './findings.js';
@@ -67,9 +68,13 @@ const MAX_CONFIG_BYTES = 256 * 1024;
 /** Only `node_modules` is skipped: a bare repository under `vendor` or `build` runs as well. */
 const SKIP_DIRS = new Set(['node_modules']);
 
-const readTextOr = (file: string, fallback = ''): string => {
+const readTextOr = (
+  file: string,
+  fallback = '',
+  io: SurfaceReadContext = LEGACY_SURFACE_IO,
+): string => {
   try {
-    const read = readRegularFile(file, MAX_CONFIG_BYTES);
+    const read = io.read(file, MAX_CONFIG_BYTES);
     return read.kind === 'text' ? read.text : fallback;
   } catch {
     return fallback;
@@ -257,9 +262,9 @@ export const UNREAD_CONFIG_LINE = 'a line the check could not read';
 const isBoolean = (value: string): boolean => /^(true|false|yes|no|on|off|1|0)$/i.test(value);
 
 /** A git config's text; `missing` when there is none, `unread` when it is there and was not read. */
-function configText(file: string): string | 'missing' | 'unread' {
+function configText(file: string, io: SurfaceReadContext): string | 'missing' | 'unread' {
   try {
-    const read = readRegularFile(file, MAX_CONFIG_BYTES);
+    const read = io.read(file, MAX_CONFIG_BYTES);
     return read.kind === 'text' ? read.text : 'unread';
   } catch (err) {
     return (err as { code?: unknown }).code === 'ENOENT' ? 'missing' : 'unread';
@@ -267,9 +272,9 @@ function configText(file: string): string | 'missing' | 'unread' {
 }
 
 /** The keys of a git config that run something, `label` being how the report names the file. */
-function gitConfigHits(file: string, label: string): RepoExecHit[] {
+function gitConfigHits(file: string, label: string, io: SurfaceReadContext): RepoExecHit[] {
   const hits: RepoExecHit[] = [];
-  const text = configText(file);
+  const text = configText(file, io);
   if (text === 'missing') return hits;
   // Too large, not a file, or not readable: what git reads from it is not known.
   if (text === 'unread')
@@ -277,6 +282,7 @@ function gitConfigHits(file: string, label: string): RepoExecHit[] {
   const config = parseGitConfig(text);
   // At most one: each says the same, that the file must be read by eye.
   const line = config.unplaced[0];
+  if (line !== undefined) io.parseGap?.(file);
   if (line !== undefined)
     hits.push({
       kind: 'git-config-exec',
@@ -287,6 +293,8 @@ function gitConfigHits(file: string, label: string): RepoExecHit[] {
     if (!isGitExecKey(key)) continue;
     if (/^core\.fsmonitor$/i.test(key) && isBoolean(value)) continue;
     const include = /^include(if)?\./i.test(key);
+    if (include || (key === 'core.hookspath' && (isAbsolute(value) || /[~$`]/.test(value))))
+      io.parseGap?.(file);
     hits.push({
       kind: include ? 'git-config-include' : 'git-config-exec',
       file: label,
@@ -304,20 +312,21 @@ function gitAttributesHits(
   root: string,
   configs: readonly string[],
   attributes: readonly string[],
+  io: SurfaceReadContext,
 ): RepoExecHit[] {
   const defined = new Set(
     configs
-      .flatMap((file) => gitConfigEntries(readTextOr(file)))
+      .flatMap((file) => gitConfigEntries(readTextOr(file, '', io)))
       .map((e) => e.key.replace(/\.(clean|smudge|process|textconv|command|driver)$/i, ''))
       .filter((k) => /^(filter|diff|merge)\./i.test(k)),
   );
   const hits: RepoExecHit[] = [];
   for (const file of attributes) {
     const drivers = new Set<string>();
-    for (const m of readTextOr(file).matchAll(/(?:^|\s)(filter|diff|merge)=([\w.-]+)/g)) {
+    for (const m of readTextOr(file, '', io).matchAll(/(?:^|\s)(filter|diff|merge)=([\w.-]+)/g)) {
       drivers.add(`${m[1]}.${m[2]}`);
     }
-    const label = relative(root, file).split(sep).join('/');
+    const label = labelOf(root, file, io);
     for (const what of drivers)
       if (defined.has(what)) hits.push({ kind: 'gitattributes-driver', file: label, what });
   }
@@ -337,9 +346,9 @@ function gitAttributesHits(
  * strictly narrower than the platform's own behaviour rather than a relaxation of
  * the POSIX one, which is untouched.
  */
-function runsAsGitHook(file: string, plat: NodeJS.Platform): boolean {
+function runsAsGitHook(file: string, plat: NodeJS.Platform, io: SurfaceReadContext): boolean {
   try {
-    const stat = statSync(file);
+    const stat = io.stat(file);
     if (!stat.isFile()) return false;
     return plat === 'win32' || (stat.mode & 0o111) !== 0;
   } catch {
@@ -354,9 +363,9 @@ const UNREAD_HOOK = '\u0000';
  * A hook is ordinary only when it is one of the commit hooks, by its name as a forgiving disk
  * opens it, and its text was read and does not download and run code.
  */
-function gitHookHit(dir: string, name: string): RepoExecHit {
-  const file = `.git/hooks/${name}`;
-  const text = readTextOr(join(dir, name), UNREAD_HOOK);
+function gitHookHit(dir: string, name: string, io: SurfaceReadContext): RepoExecHit {
+  const file = io.label?.(join(dir, name)) ?? `.git/hooks/${name}`;
+  const text = readTextOr(join(dir, name), UNREAD_HOOK, io);
   const outcome = hookOutcome(name, text === UNREAD_HOOK ? undefined : text);
   if (outcome === 'routine') return { kind: 'git-hook-routine', file, what: name };
   if (outcome === 'unsafe')
@@ -368,14 +377,15 @@ function gitHookHit(dir: string, name: string): RepoExecHit {
   return { kind: 'git-hook', file, what: name };
 }
 
-function gitHookHits(root: string, plat: NodeJS.Platform): RepoExecHit[] {
-  const dir = join(root, '.git', 'hooks');
-  if (!existsSync(dir)) return [];
+function gitHookHits(dir: string, plat: NodeJS.Platform, io: SurfaceReadContext): RepoExecHit[] {
+  if (!io.exists(dir)) return [];
   try {
-    return readdirSync(dir)
+    return io
+      .entries(dir)
+      .map((entry) => entry.name)
       .filter((name) => !name.endsWith('.sample'))
-      .filter((name) => runsAsGitHook(join(dir, name), plat))
-      .map((name) => gitHookHit(dir, name));
+      .filter((name) => runsAsGitHook(join(dir, name), plat, io))
+      .map((name) => gitHookHit(dir, name, io));
   } catch {
     return [];
   }
@@ -395,17 +405,17 @@ const DEVCONTAINER_KEYS = [
   'updateContentCommand',
 ] as const;
 
-function devcontainerHits(root: string): RepoExecHit[] {
+function devcontainerHits(root: string, io: SurfaceReadContext): RepoExecHit[] {
   const candidates = [
     join(root, '.devcontainer', 'devcontainer.json'),
     join(root, '.devcontainer.json'),
   ];
   const hits: RepoExecHit[] = [];
   for (const file of candidates) {
-    const text = readTextOr(file);
+    const text = readTextOr(file, '', io);
     if (text === '') continue;
     // With `/` between the parts on every system, as every path this reports.
-    const rel = labelOf(root, file);
+    const rel = labelOf(root, file, io);
     // Read as text rather than JSON: devcontainer.json is jsonc, comments and all,
     // and a parse failure must not hide the key it was looking for.
     for (const key of DEVCONTAINER_HOST_KEYS) {
@@ -421,8 +431,8 @@ function devcontainerHits(root: string): RepoExecHit[] {
 }
 
 /** The scripts of the folder's package.json, by name; none when it has none or does not parse. */
-function packageScripts(root: string): Readonly<Record<string, unknown>> {
-  const text = readTextOr(join(root, 'package.json'));
+function packageScripts(root: string, io: SurfaceReadContext): Readonly<Record<string, unknown>> {
+  const text = readTextOr(join(root, 'package.json'), '', io);
   if (text === '') return {};
   try {
     const scripts: unknown = (JSON.parse(text) as Record<string, unknown>)['scripts'];
@@ -430,12 +440,13 @@ function packageScripts(root: string): Readonly<Record<string, unknown>> {
       ? (scripts as Record<string, unknown>)
       : {};
   } catch {
+    io.parseGap?.(join(root, 'package.json'));
     return {};
   }
 }
 
-function packageScriptHits(root: string): RepoExecHit[] {
-  const scripts = packageScripts(root);
+function packageScriptHits(root: string, io: SurfaceReadContext): RepoExecHit[] {
+  const scripts = packageScripts(root, io);
   return INSTALL_SCRIPT_NAMES.filter((name) => Object.hasOwn(scripts, name)).map((what) => ({
     kind: 'package-install-script' as const,
     file: 'package.json',
@@ -443,18 +454,19 @@ function packageScriptHits(root: string): RepoExecHit[] {
   }));
 }
 
-function envrcHits(root: string): RepoExecHit[] {
-  return existsSync(join(root, '.envrc'))
-    ? [{ kind: 'envrc', file: '.envrc', what: '.envrc' }]
-    : [];
+function envrcHits(root: string, io: SurfaceReadContext): RepoExecHit[] {
+  const file = join(root, '.envrc');
+  const present = io.exists(file);
+  if (present) io.capturePresence?.(file, MAX_CONFIG_BYTES);
+  return present ? [{ kind: 'envrc', file: '.envrc', what: '.envrc' }] : [];
 }
 
 /** Why a file that only points git elsewhere is reported. */
 const POINTS_ELSEWHERE = 'which points git at the folder of another repository';
 
 /** A path under `root`, with `/` between its parts, for a report: `.` for `root` itself. */
-const labelOf = (root: string, abs: string): string =>
-  relative(root, abs).split(sep).join('/') || '.';
+const labelOf = (root: string, abs: string, io: SurfaceReadContext): string =>
+  io.label?.(abs) ?? (relative(root, abs).split(sep).join('/') || '.');
 
 /**
  * The commands of a folder git takes for a repository: its `config` and `config.worktree`, and,
@@ -467,28 +479,29 @@ function gitDirConfigHits(
   root: string,
   dir: string,
   names: ReadonlyMap<string, readonly string[]>,
+  io: SurfaceReadContext,
 ): RepoExecHit[] {
   const hits: RepoExecHit[] = [];
   const read = (folder: string, found: ReadonlyMap<string, readonly string[]>) => {
     for (const name of [...(found.get('config') ?? []), ...(found.get('config.worktree') ?? [])]) {
       const file = join(folder, name);
-      hits.push(...gitConfigHits(file, labelOf(root, file)));
+      hits.push(...gitConfigHits(file, labelOf(root, file, io), io));
     }
   };
   read(dir, names);
   for (const commondir of names.get('commondir') ?? []) {
-    const target = readTextOr(join(dir, commondir)).trim();
+    const target = readTextOr(join(dir, commondir), '', io).trim();
     if (target === '') continue;
     const common = resolve(dir, target);
     if (!isWithin(common, root)) {
       hits.push({
         kind: 'nested-bare-repo',
-        file: labelOf(root, dir),
+        file: labelOf(root, dir, io),
         what: 'its commondir file points out of this folder, at a config that was not read',
       });
       continue;
     }
-    read(common, namesIn(common));
+    read(common, namesIn(common, io));
   }
   return hits;
 }
@@ -520,9 +533,9 @@ function namesOf(entries: readonly Dirent[]): Map<string, string[]> {
   return names;
 }
 
-function namesIn(dir: string): Map<string, string[]> {
+function namesIn(dir: string, io: SurfaceReadContext): Map<string, string[]> {
   try {
-    return namesOf(readdirSync(dir, { withFileTypes: true }));
+    return namesOf(io.entries(dir));
   } catch {
     return new Map();
   }
@@ -541,6 +554,7 @@ function nestedBareRepos(
   root: string,
   withRoot = false,
   folder = false,
+  io: SurfaceReadContext = LEGACY_SURFACE_IO,
 ): { hits: RepoExecHit[]; capped: boolean } {
   const hits: RepoExecHit[] = [];
   const queue: string[] = [root];
@@ -551,9 +565,10 @@ function nestedBareRepos(
     visited += 1;
     let entries: Dirent[];
     try {
-      entries = readdirSync(dir, { withFileTypes: true }).sort((a, b) =>
-        a.name < b.name ? -1 : a.name > b.name ? 1 : 0,
-      );
+      entries = io
+        .entries(dir)
+        .filter((entry) => !io.skipDirectory?.(join(dir, entry.name)))
+        .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     } catch {
       continue;
     }
@@ -563,10 +578,10 @@ function nestedBareRepos(
     if (isBare && (dir !== root || withRoot)) {
       hits.push({
         kind: 'nested-bare-repo',
-        file: labelOf(root, dir),
+        file: labelOf(root, dir, io),
         what: 'HEAD, objects, refs',
       });
-      hits.push(...gitDirConfigHits(root, dir, names));
+      hits.push(...gitDirConfigHits(root, dir, names, io));
       // The root is walked on: what is under it is all this check reads.
       if (dir !== root) continue;
     }
@@ -576,16 +591,21 @@ function nestedBareRepos(
       if (!isBare && !isDir && (folded === 'commondir' || folded === 'gitdir'))
         hits.push({
           kind: 'nested-bare-repo',
-          file: labelOf(root, join(dir, entry.name)),
+          file: labelOf(root, join(dir, entry.name), io),
           what: `a ${folded} file, ${POINTS_ELSEWHERE}`,
         });
       // The repository's own is not read here; in a folder with no `.git`, one deeper in came with it.
-      if (entry.name === '.git' && !folder) continue;
+      // In a repository, one deeper in (a nested clone, a submodule's `.git` file) was made on this
+      // machine, as git checks none out; it is not read either, and a capture records that it was not.
+      if (!folder && folded === '.git' && (entry.name === '.git' || !isDir)) {
+        if (dir !== root) io.nestedRepository?.(join(dir, entry.name));
+        continue;
+      }
       if (folder && folded === '.git') {
         if (!isDir)
           hits.push({
             kind: 'nested-bare-repo',
-            file: labelOf(root, join(dir, entry.name)),
+            file: labelOf(root, join(dir, entry.name), io),
             what: `a .git file, ${POINTS_ELSEWHERE}`,
           });
         else queue.push(join(dir, entry.name));
@@ -609,61 +629,70 @@ const split = (all: readonly RepoExecHit[], capped: boolean, isRepo: boolean): R
  * What the files of a folder make run whether or not it is a repository: husky hooks, dev
  * container commands, a `.envrc`, install scripts. Both a repository and a plain folder read these.
  */
-const workingTreeHits = (root: string, hooksPaths: readonly string[] = []): RepoExecHit[] => [
-  ...plainHookHits(root, hooksPaths, packageScripts(root)),
-  ...devcontainerHits(root),
-  ...envrcHits(root),
-  ...packageScriptHits(root),
+const workingTreeHits = (
+  root: string,
+  hooksPaths: readonly string[] = [],
+  io: SurfaceReadContext = LEGACY_SURFACE_IO,
+): RepoExecHit[] => [
+  ...plainHookHits(root, hooksPaths, packageScripts(root, io), io),
+  ...devcontainerHits(root, io),
+  ...envrcHits(root, io),
+  ...packageScriptHits(root, io),
 ];
 
-/**
- * `plat` defaults to the real platform, so every caller keeps working unchanged; a
- * test overrides it to exercise the Windows rules on a machine that cannot run them.
- */
-export function repoSurface(cwd: string, plat: NodeJS.Platform = process.platform): RepoSurface {
-  if (!existsSync(join(cwd, '.git'))) {
+/** Existing callers keep legacy IO; capture callers supply a bound metadata layout. */
+export function repoSurface(
+  cwd: string,
+  plat: NodeJS.Platform = process.platform,
+  io: SurfaceReadContext = LEGACY_SURFACE_IO,
+): RepoSurface {
+  if (
+    io.gitMetadata?.isRepo === false ||
+    (io.gitMetadata === undefined && !io.exists(join(cwd, '.git')))
+  )
     return { isRepo: false, preTrust: [], onOpen: [], capped: false };
-  }
-  const bare = nestedBareRepos(cwd);
-  const config = join(cwd, '.git', 'config');
+  const bare = nestedBareRepos(cwd, false, false, io);
+  const configs = io.gitMetadata?.configs ?? [join(cwd, '.git', 'config')];
+  const hooks =
+    io.gitMetadata?.hooks === undefined ? join(cwd, '.git', 'hooks') : io.gitMetadata.hooks;
+  const attributes = io.gitMetadata?.attributes ?? [
+    join(cwd, '.gitattributes'),
+    join(cwd, '.git', 'info', 'attributes'),
+  ];
   const all = [
-    ...gitConfigHits(config, '.git/config'),
-    ...gitAttributesHits(
-      cwd,
-      [config],
-      [join(cwd, '.gitattributes'), join(cwd, '.git', 'info', 'attributes')],
-    ),
+    ...configs.flatMap((config) => gitConfigHits(config, labelOf(cwd, config, io), io)),
+    ...gitAttributesHits(cwd, configs, attributes, io),
     ...bare.hits,
-    ...gitHookHits(cwd, plat),
+    ...(hooks === null ? [] : gitHookHits(hooks, plat, io)),
     ...workingTreeHits(
       cwd,
-      parseGitConfig(readTextOr(config))
-        .entries.filter((e) => e.key === 'core.hookspath')
-        .map((e) => e.value),
+      configs.flatMap((config) =>
+        parseGitConfig(readTextOr(config, '', io))
+          .entries.filter((e) => e.key === 'core.hookspath')
+          .map((e) => e.value),
+      ),
+      io,
     ),
   ];
   return split(all, bare.capped, true);
 }
 
-/**
- * A folder with no `.git`: a zip download, an unpacked tarball. Git still runs in it. When the
- * folder itself holds `HEAD` with `objects` and `refs`, or with a `commondir` file, git takes it
- * for a bare repository and reads its config, so the first `git status` there runs what that
- * config names, and routes paths through the drivers its attributes name; a bare repository or a
- * `.git` deeper in does the same for a git command run inside it. The rest is read as it is in a
- * repository.
- */
-export function folderSurface(cwd: string): RepoSurface {
-  const bare = nestedBareRepos(cwd, true, true);
+/** A plain folder retains the same shared execution-surface detectors. */
+export function folderSurface(
+  cwd: string,
+  io: SurfaceReadContext = LEGACY_SURFACE_IO,
+): RepoSurface {
+  const bare = nestedBareRepos(cwd, true, true, io);
   const rootIsBare = bare.hits.some((h) => h.file === '.' && h.what === 'HEAD, objects, refs');
   const attributes = rootIsBare
     ? gitAttributesHits(
         cwd,
         [join(cwd, 'config'), join(cwd, 'config.worktree')],
         [join(cwd, '.gitattributes'), join(cwd, 'info', 'attributes')],
+        io,
       )
     : [];
-  return split([...bare.hits, ...attributes, ...workingTreeHits(cwd)], bare.capped, false);
+  return split([...bare.hits, ...attributes, ...workingTreeHits(cwd, [], io)], bare.capped, false);
 }
 
 /** Why each kind of pre-trust execution is a finding; also the SARIF rule text. */

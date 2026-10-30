@@ -1,0 +1,43 @@
+# One-use task access
+
+A fresh Task Lock refusal can be reviewed from its finding and granted one use. The operator reviews the complete available redacted operation, the existing task and the fixed expiry, then acknowledges temporary access and use of the existing signing key. Issuance does not run or resume an action. The agent must make a new matching attempt; the original broker request has already been refused.
+
+## Authority and review
+
+New task launches retain a signing callback in their trusted parent controller. The private key is not copied into the agent environment, isolated home or hook configuration. For an extendable refusal, the core gate supplies the verified permit's canonical body digest, key identity, selected missing fingerprint, fingerprint family and complete set of required fingerprints. Invalid permits, terminal markers, hard-set classes, policy denies and calls requiring more than sixteen fingerprints cannot produce an eligible approval request.
+
+The engine prepares a bounded JSON review of the tool, input, working directory and classified resources. It applies the existing known-secret and structural redaction before hashing the final review. Missing call/session identity, unavailable secret lookup, oversized or incomplete review, and a cloaked audit input differing from actual tool input withhold approval evidence. The refusal remains a refusal. Review is not an execution input and the server never reconstructs authority from redacted arguments.
+
+The parent signs a domain-separated access request binding the review digest, exact permit body digest, task/key identity, operation fingerprint and family, required fingerprints, session/call hashes and a short validity window. A new signature does not make the entire audit journal independently authentic. The existing full-chain, exact raw-line, sequence/time and source-continuity checks remain necessary; tail truncation remains undetectable by chain consistency alone. The older finding-to-current-task lookup remains an ID association and is never upgraded into issuance authority.
+
+This attests that the parent evaluated the proposed operation under that task. It does not authenticate a native host event: code in the child's process tree inherits the broker token and can submit hook-shaped proposals. The operator still decides from the complete available review, and every granted retry remains subject to the real gate and existing OS boundary.
+
+## Fingerprint scope
+
+- `read-target` binds the read tool, operation and file target, using its resolved path when available. It does not bind every offset, limit or input argument. The review makes this scope explicit.
+- `whole-call` binds the tool input, working directory and classified resources. Shell, MCP, mutations, recursive operations and policy asks require this form.
+- A call may need several one-use extensions. Issuing the selected missing fingerprint does not promise that all other requirements have been satisfied.
+
+An extension cannot lift a hard-set denial, a policy deny or an invalid/terminal task. It does not expand the task's existing OS sandbox. `hook-only` remains advisory. Existing task brokers keep their launch-time policy; the console refuses issuance when today's policy cannot be verified as matching the permit.
+
+## Preview and signing
+
+The browser submits only the finding ID and expected evidence fingerprint. The parent reselects its exact metadata; the worker validates the full bounded journal and signed request against the current signed permit, public key, bound session and actual freshness. Old records without this evidence cannot receive browser-issued access.
+
+The review screen shows the decoded review written out again as indented JSON, which writes any control character in a value as a visible escape. Before preview and again before issue, the worker refuses a review whose shown text would hold a character that shows nothing or changes how the text around it reads: a C1 control, a line or paragraph separator, a bidi embedding, override, isolate or mark (U+202A–U+202E, U+2066–U+2069, U+200E, U+200F), a zero-width or other invisible format character (U+200B–U+200D, U+2060–U+2064, U+FEFF and a few more) or a tag character, in a key or a value, raw or spelled as a JSON escape. The refusal names the character by code point (`hidden-character-202e`), and no access can be issued from that record. Variation selectors are shown as they are; homoglyphs and other visible look-alikes are not detected. The client applies the same check, but the worker is the boundary.
+
+Preview reads only private-key file metadata. It neither reads key bytes nor creates keys, directories, permissions or history. A transient preview expires after at most two minutes; its candidate uses a fixed issue time and expiry capped at five minutes from preview creation and the remaining permit lifetime. Waiting does not extend the candidate's authority window. Retention is bounded to eight plans and 8 MiB of parent memory.
+
+Issue requires both acknowledgements before consuming the preview or reading private-key bytes. Under the shared configuration lock, the worker rechecks source, root, runtime, permit, key and terminal identities. It reads only the existing private key through a bounded, no-follow descriptor, verifies ownership, private mode, single link and complete before/after identity, parses an Ed25519 key and confirms that its derived public key matches the verified current key. It never creates, repairs or changes key permissions. Temporary key buffers are cleared where possible; JavaScript and cryptographic runtime memory are not promised to be zeroized.
+
+The native signed extension is staged privately, synchronized and published exclusively at its fixed fingerprint path. Any existing destination, including an expired, consumed or invalid record, refuses issuance; this version does not replace earlier grants. Readback verifies the exact candidate and native consumed-marker identity without evaluating a consuming gate against the real store. The parent retains the shared lock until the worker has terminated. The legacy CLI writer and running gate do not acquire this lock, so exact no-replace publication and post-write checks still matter.
+
+A receipt records issuance and `unused` or `consumed` state. A safe candidate-specific marker may appear immediately after publication. If the gate consumed this exact candidate and the launcher then added a safe native `ended` marker, readback can confirm `consumed` while retaining all original source/key/permit checks. An ended task before publication remains ineligible. Consumption precedes a gate's allow result and can occur before another required extension fails; it does not prove tool execution. A post-write timeout or identity conflict remains uncertain. The client never automatically repeats issue or rolls back somebody else's changes; it offers a read-only permissions recheck.
+
+## Existing permissions and retention
+
+The task detail has an explicit bounded read of existing native extensions. It distinguishes unused, consumed, expired and invalid records; coverage accounts for unsupported entries, unsafe files, limits and unmatched used markers. Unused means not consumed, not that the task is active or that a host will execute an action. The parent task's current standing and validity remain separate.
+
+There is no additional console approval history. Signed refusal evidence and complete redacted review remain in the existing private, unencrypted audit journal; native extension bodies and used markers remain in the existing task store without automatic expiry deletion. The access review intentionally exposes local redacted tool input, working directory and resource context to the authenticated local operator. This differs from the compact task metadata projection, which withholds raw task/session IDs, nonces, signatures, private keys and external paths. Redaction removes recognized values and shapes; it is not a promise that unknown credentials or all sensitive application text are removed. The browser does not receive the signed request envelope, raw nonce or private key.
+
+The fixed authenticated operations are `POST /api/task-locks/access/preview`, `POST /api/task-locks/access/issue` and `GET /api/task-locks/access/<opaque-task-id>/<expected-permit-sha>`. Browser input cannot select paths, commands, arguments, fingerprints, lifetimes or signing material. POSIX filesystem safeguards apply; Windows remains unsupported. Provider-free fixtures can verify the real core gate's deny → explicit issue → one matching allow → repeated deny lifecycle. They do not establish adoption or blocking by an unmeasured real client.

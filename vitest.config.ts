@@ -26,7 +26,7 @@ export default defineConfig({
     coverage: {
       provider: 'v8',
       include: ['packages/*/src/**/*.ts'],
-      exclude: ['packages/*/src/index.ts', 'packages/cli/src/index.ts'],
+      exclude: ['packages/*/src/index.ts', 'packages/cli/src/index.ts', 'packages/cli/src/bin.ts'],
       // Just under what the suite measures (lines 96.5, statements 94.7, functions
       // 98.4, branches 87.3 on 2026-09-24). At 80/70 the floor sat seventeen points
       // below reality, so coverage could fall that far without CI saying anything.

@@ -1,0 +1,275 @@
+.agent-grid.agent-rows {
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+}
+.agent-rows .agent-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 4px 14px;
+  padding: 10px 16px;
+  min-width: 0;
+}
+.agent-row-main {
+  grid-column: 1/-1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  min-width: 0;
+}
+.agent-row-identity {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-width: 0;
+}
+.agent-row-identity > div {
+  min-width: 0;
+}
+.agent-row .agent-glyph {
+  flex: 0 0 40px;
+  width: 40px;
+  height: 40px;
+  border-radius: 9px;
+}
+.agent-row .agent-brand {
+  width: 30px;
+  height: 30px;
+}
+.agent-row-title {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+}
+.agent-row-title h2 {
+  font-size: 20px;
+  line-height: 26px;
+  font-weight: 600;
+  margin: 0;
+}
+.agent-row-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0 14px;
+  color: var(--muted-foreground);
+  font-size: var(--text-secondary);
+  line-height: 24px;
+}
+.agent-row-summary a {
+  text-decoration: underline;
+  text-underline-offset: 3px;
+}
+.agent-row-summary .agent-row-warning {
+  color: var(--st-amber);
+}
+.agent-row-actions,
+.agent-row-detail-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.agent-row-actions {
+  flex: 0 0 auto;
+  justify-content: flex-end;
+}
+.agent-rows .agent-row-actions .button,
+.agent-rows .agent-row-detail-actions .button {
+  min-height: 44px;
+  white-space: nowrap;
+}
+.agent-row-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 20px;
+  min-width: 0;
+}
+.agent-row-controls:empty {
+  display: none;
+}
+.agent-row-controls .codex-network-entry,
+.agent-row-controls .codex-path-entry,
+.agent-row-controls .codex-source-entry,
+.agent-row-controls .credential-filter-row {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px 12px;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-height: 44px;
+  min-width: 0;
+  font-size: var(--text-ui);
+}
+.agent-row-controls .codex-network-entry .control-meta,
+.agent-row-controls .codex-path-entry .control-meta {
+  display: none;
+}
+.agent-row-controls .codex-network-entry > div,
+.agent-row-controls .codex-path-entry > div,
+.agent-row-controls .credential-filter-row > div {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+.agent-rows .agent-row-controls button {
+  min-height: 44px;
+}
+.agent-row-details {
+  align-self: start;
+  grid-column: 2;
+  font-size: var(--text-ui);
+  min-width: 0;
+}
+.agent-row-details > summary {
+  display: list-item;
+  min-height: 44px;
+  line-height: 44px;
+  cursor: pointer;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+.agent-row-details[open] {
+  grid-column: 1/-1;
+}
+.agent-row-detail-body {
+  padding: 8px 0 14px;
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+.agent-row-detail-body .operations-agent-status {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+.agent-row-detail-body .operations-agent-status > div {
+  display: grid;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+}
+.agent-row-detail-body .operations-agent-status strong {
+  max-width: none;
+  text-align: left;
+}
+.agent-row-detail-body .agent-card-description,
+.agent-row-detail-body .control-meta {
+  margin: 0;
+}
+.agent-row-evidence {
+  margin: 0;
+  display: grid;
+  gap: 8px;
+  font-size: var(--text-secondary);
+}
+.agent-row-evidence > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 20px;
+}
+.agent-row-evidence dt {
+  color: var(--muted-foreground);
+}
+.agent-row-evidence dd {
+  margin: 0;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+.agent-rows > .operations-agent-card:not(.agent-row) {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  padding: 16px;
+}
+.agent-rows > .operations-agent-card:not(.agent-row) .agent-card-top {
+  margin: 0;
+}
+.agent-rows > .operations-agent-card:not(.agent-row) .supported-agent-footer {
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+@media (max-width: 850px) {
+  .agent-row-main {
+    align-items: flex-start;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  .agent-row-actions {
+    justify-content: flex-start;
+  }
+  .agent-rows .agent-row {
+    gap: 8px 12px;
+  }
+  .agent-row-controls {
+    gap: 0 16px;
+  }
+}
+@media (max-width: 520px) {
+  .agent-rows .agent-row {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 14px;
+  }
+  .agent-row-main {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .agent-row-identity {
+    align-items: flex-start;
+    gap: 10px;
+  }
+  .agent-row-title h2 {
+    font-size: var(--text-ui);
+  }
+  .agent-row .agent-glyph {
+    flex-basis: 34px;
+    width: 34px;
+    height: 34px;
+  }
+  .agent-row .agent-brand {
+    width: 26px;
+    height: 26px;
+  }
+  .agent-row-actions {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: 100%;
+  }
+  .agent-row-controls {
+    grid-column: 1;
+    display: grid;
+    gap: 4px;
+  }
+  .agent-row-controls .codex-network-entry,
+  .agent-row-controls .codex-path-entry,
+  .agent-row-controls .codex-source-entry,
+  .agent-row-controls .credential-filter-row {
+    justify-content: space-between;
+  }
+  .agent-row-details {
+    grid-column: 1;
+  }
+  .agent-row-detail-body .operations-agent-status {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 12px;
+  }
+  .agent-row-evidence > div {
+    display: grid;
+    gap: 4px;
+  }
+  .agent-row-evidence dd {
+    text-align: left;
+  }
+  .agent-rows > .operations-agent-card:not(.agent-row) {
+    flex-wrap: wrap;
+  }
+}

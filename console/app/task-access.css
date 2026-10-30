@@ -1,0 +1,15 @@
+.task-access-review {
+  max-height: 300px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 16px;
+}
+.task-access-review pre {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  margin: 0;
+  font-family: var(--font-mono), monospace;
+  font-size: var(--text-secondary);
+  line-height: 1.6;
+}

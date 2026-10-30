@@ -19,17 +19,28 @@ import { replacesCredential } from './json-edit.js';
 import {
   entriesFor,
   readManifest,
+  readManifestSnapshot,
+  assertManifestSnapshot,
   removeManifest,
   withManifestLock,
   writeManifest,
   type Manifest,
   type ManifestEntry,
+  type ManifestSnapshot,
 } from './manifest.js';
 import { linkNotice, linkTarget } from './plan-support.js';
 import { readTargetBytes, sameBytes } from './read.js';
 import { assertUnchanged } from './recheck.js';
 import { verifyPlan } from './replay.js';
 import { HardenError, sha256Text, type HardenEnv, type Plan } from './types.js';
+import {
+  assertPreparedBinding,
+  assertPreparedInputs,
+  capturePreparedState,
+  stalePrepared,
+  type HardenPreparedBinding,
+  type PreparedOperationOptions,
+} from './prepared-state.js';
 
 /**
  * Applying a plan: the operation that changes an owner's file.
@@ -146,7 +157,11 @@ const withEntry = (manifest: Manifest, real: string, entry: ManifestEntry): Mani
   files: { ...manifest.files, [real]: [...entriesFor(manifest, real), entry] },
 });
 
-async function applyLocked(plan: Plan, env: HardenEnv): Promise<ApplyResult> {
+async function applyLocked(
+  plan: Plan,
+  env: HardenEnv,
+  guard?: PreparedOperationOptions & { readonly binding: HardenPreparedBinding },
+): Promise<ApplyResult> {
   const now = env.now();
   const bytes = currentBytes(plan);
   const fs = env.fs ?? nodeFs;
@@ -154,6 +169,7 @@ async function applyLocked(plan: Plan, env: HardenEnv): Promise<ApplyResult> {
   const manifest = readManifest(env);
   let backup: BackupResult | null = null;
   let recorded = false;
+  let ownManifest: ManifestSnapshot | undefined;
   const createdDirs = plan.existed ? [] : await missingDirsTo(fs, dirname(plan.real));
   try {
     // The copy is of the bytes just read, and the last look below compares with those same bytes:
@@ -175,14 +191,24 @@ async function applyLocked(plan: Plan, env: HardenEnv): Promise<ApplyResult> {
       stroqVersion: env.version,
       appliedAt: now.toISOString(),
     };
-    await writeManifest(env, withEntry(manifest, plan.real, entry));
+    await writeManifest(env, withEntry(manifest, plan.real, entry), guard?.binding.manifest);
     recorded = true;
+    if (guard) ownManifest = readManifestSnapshot(env);
+    const recheck = async (): Promise<void> => {
+      await guard?.assertCurrent?.();
+      if (guard) {
+        assertPreparedInputs(guard.binding, env);
+        if (!ownManifest) stalePrepared();
+        assertManifestSnapshot(env, ownManifest!);
+      }
+      assertUnchanged(plan.file, plan.real, bytes);
+    };
     assertUnchanged(plan.file, plan.real, bytes);
     await writeFileAtomic(plan.file, plan.after, {
       ...rulesOf(plan.root),
       ...(plan.newFileMode === undefined ? {} : { mode: plan.newFileMode }),
       ...(env.fs === undefined ? {} : { fs: env.fs }),
-      beforeRename: () => assertUnchanged(plan.file, plan.real, bytes),
+      beforeRename: recheck,
     });
     // Only now: an older copy is dropped to make room for this one once the change has been made.
     // It never throws, which matters here: a failure after the file was replaced must not undo
@@ -191,20 +217,78 @@ async function applyLocked(plan: Plan, env: HardenEnv): Promise<ApplyResult> {
     return { changed: true, real: plan.real, diff: plan.diff, backup, entry };
   } catch (err) {
     // Take back what was done, and never let a failure to do so hide the failure that matters.
-    if (recorded) {
-      if (Object.keys(manifest.files).length === 0) {
+    // A prepared operation must not roll a foreign manifest or a completed source replacement back.
+    let cleanup = true;
+    if (guard && recorded) {
+      try {
+        if (!ownManifest) stalePrepared();
+        assertManifestSnapshot(env, ownManifest!);
+        cleanup = sameBytes(readTargetBytes(plan.real), bytes);
+      } catch {
+        cleanup = false;
+      }
+    }
+    if (recorded && cleanup) {
+      if (guard) {
+        try {
+          if (Object.keys(manifest.files).length === 0) await removeManifest(env, ownManifest);
+          else await writeManifest(env, manifest, ownManifest);
+        } catch {
+          cleanup = false;
+        } // Keep recovery copies whenever its record could still exist.
+      } else if (Object.keys(manifest.files).length === 0) {
         await removeManifest(env).catch(() => undefined);
       } else {
         await writeManifest(env, manifest).catch(() => undefined);
       }
     }
-    if (backup?.stored === true)
+    if (cleanup && backup?.stored === true)
       await removeBackup(env, plan.real, backup.id).catch(() => undefined);
-    if (createdDirs.length > 0) {
+    if (cleanup && createdDirs.length > 0) {
       await removeEmptyDirs(createdDirs, { ...rulesOf(plan.root), fs });
     }
     throw err;
   }
+}
+
+export interface PreparedApply {
+  /** Private engine plan; do not return its before/after/diff to a public API. */
+  readonly plan: Plan;
+  readonly binding: HardenPreparedBinding;
+}
+
+/** Read-only, exact source/manifest/backup binding. Does not acquire/create the manifest lock. */
+export function prepareApply(plan: Plan, env: HardenEnv): PreparedApply {
+  if (plan.refused !== undefined)
+    throw new HardenError('plan-refused', 'the prepared plan was refused');
+  verifyPlan(plan);
+  assertWriteAllowed(plan.file, rulesOf(plan.root));
+  currentBytes(plan);
+  const { binding } = capturePreparedState(
+    env,
+    plan.file,
+    plan.root ?? null,
+    sha256Text(plan.after),
+  );
+  return { plan, binding };
+}
+
+/** Caller MUST hold withManifestLock until this promise settles (including worker termination). */
+export async function applyPreparedPlanUnderManifestLock(
+  prepared: PreparedApply,
+  env: HardenEnv,
+  options: ApplyOptions & PreparedOperationOptions = {},
+): Promise<ApplyResult> {
+  const fresh = prepareApply(prepared.plan, env);
+  assertPreparedBinding(prepared.binding, fresh.binding);
+  const { reformats } = verifyPlan(fresh.plan);
+  await options.assertCurrent?.();
+  assertPreparedBinding(prepared.binding, prepareApply(fresh.plan, env).binding);
+  if (!fresh.plan.changed)
+    return { changed: false, real: fresh.plan.real, diff: '', backup: null, entry: null };
+  assertOwnerTold(fresh.plan, reformats, options);
+  assertLinkAcknowledged(fresh.plan, options);
+  return applyLocked(fresh.plan, env, { ...options, binding: fresh.binding });
 }
 
 /**

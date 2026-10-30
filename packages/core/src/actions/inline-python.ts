@@ -34,7 +34,17 @@ type Kind = 'name' | 'num' | 'str' | 'op' | 'nl';
 interface Tok {
   readonly kind: Kind;
   readonly text: string;
+  /**
+   * What a string is, when it is written out: no backslash in it, and no prefix but `r` or `u`. A
+   * string that is made (an f-string), bytes, or one with an escape in it has none.
+   */
+  readonly value?: string;
+  /** The text between a string's quotes, as it is written (escapes and the fields of an f-string kept). */
+  readonly body?: string;
 }
+
+/** A word of a Python program as the interpreter reads it. */
+export type PythonToken = Tok;
 
 // -------------------------------------------------------------------------------------------
 // What a program may name
@@ -315,14 +325,20 @@ class Reader {
       if (this.fields >= MAX_FIELD_DEPTH) return -1;
       const inner = fieldsOf(body, prefix.includes('r'), quote, this.fields + 1);
       if (inner === null) return -1;
-      this.tokens.push({ kind: 'str', text: '' }, ...inner);
-    } else this.tokens.push({ kind: 'str', text: '' });
+      this.tokens.push({ kind: 'str', text: '', body }, ...inner);
+    } else if (/^[ru]?$/.test(prefix) && !body.includes('\\')) {
+      this.tokens.push({ kind: 'str', text: '', value: body, body });
+    } else this.tokens.push({ kind: 'str', text: '', body });
     return end + open;
   }
 }
 
-/** What may stand in the format specification of a field: no name, no call. */
-const FORMAT_SPEC = /^[<>=^+\- #0-9.,_bcdeEfFgGnosxX%]*$/;
+/**
+ * What may stand in the format specification of a field, once its nested fields are taken out: the
+ * specification is a string handed to the value's `__format__` (`{now:%H:%M}`), not code, so anything
+ * but a backslash or a line break, which this reader does not follow there.
+ */
+const FORMAT_SPEC = /^[^\\\n]*$/;
 
 /**
  * The tokens of the expressions in the fields of an f-string body, each in parentheses, or null
@@ -654,12 +670,17 @@ function judge(tokens: readonly Tok[]): ProgramVerdict {
   return out.exec ? 'exec' : out.unknown ? 'unknown' : 'data';
 }
 
+/** The words of a program given to `python -c`, or null when it is too long or cannot be read. */
+export function readPythonTokens(program: string): readonly PythonToken[] | null {
+  if (program.length > MAX_PROGRAM_CHARS || CONTROL.test(program)) return null;
+  const reader = new Reader(program);
+  return reader.run() ? reader.tokens : null;
+}
+
 /** What a program given to `python -c` does: only handles data, runs code, or cannot be told. */
 export function judgePythonProgram(program: string): ProgramVerdict {
-  if (program.length > MAX_PROGRAM_CHARS || CONTROL.test(program)) return 'unknown';
-  const reader = new Reader(program);
-  if (!reader.run()) return 'unknown';
-  return judge(reader.tokens);
+  const tokens = readPythonTokens(program);
+  return tokens === null ? 'unknown' : judge(tokens);
 }
 
 /**

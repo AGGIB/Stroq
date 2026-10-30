@@ -102,6 +102,41 @@ function firstStop(parts: readonly string[], tree: ReadonlyMap<string, TreeEntry
   return { at: -1, path };
 }
 
+interface StopNode {
+  readonly children: Map<string, StopNode>;
+  path?: string;
+}
+
+/** Segment keys avoid hashing each growing whole-path prefix. */
+function stopIndex(tree: ReadonlyMap<string, TreeEntry>): StopNode {
+  const root: StopNode = { children: new Map() };
+  for (const [path, entry] of tree) {
+    if (entry.mode !== SYMLINK && entry.mode !== GITLINK) continue;
+    let node = root;
+    for (const part of path.split('/')) {
+      let next = node.children.get(part);
+      if (next === undefined) {
+        next = { children: new Map() };
+        node.children.set(part, next);
+      }
+      node = next;
+    }
+    node.path = path;
+  }
+  return root;
+}
+
+function indexedStop(parts: readonly string[], index: StopNode) {
+  let node = index;
+  for (let i = 0; i < parts.length; i += 1) {
+    const next = node.children.get(parts[i] as string);
+    if (next === undefined) break;
+    node = next;
+    if (node.path !== undefined) return { at: i, path: node.path };
+  }
+  return { at: -1, path: parts.join('/') };
+}
+
 /** What is at `path`, a path with no link or submodule on the way to it. */
 function landed(path: string, links: readonly string[], view: TreeView): Resolved {
   const entry = view.tree.get(path);
@@ -115,11 +150,15 @@ function landed(path: string, links: readonly string[], view: TreeView): Resolve
  * `path` as a host on disk would open it: each link on the way replaced by where it points, as
  * long as that stays inside the tree. `links` are the link paths passed through.
  */
-export function resolve(path: string, view: TreeView): Resolved {
+function resolveWith(
+  path: string,
+  view: TreeView,
+  stopAt: (parts: readonly string[]) => { at: number; path: string },
+): Resolved {
   let parts = path === '' ? [] : path.split('/');
   const links: string[] = [];
   for (let hops = 0; hops <= MAX_LINK_HOPS; hops += 1) {
-    const stop = firstStop(parts, view.tree);
+    const stop = stopAt(parts);
     if (stop.at === -1) return landed(stop.path, links, view);
     const entry = view.tree.get(stop.path) as TreeEntry;
     if (entry.mode === GITLINK)
@@ -133,6 +172,28 @@ export function resolve(path: string, view: TreeView): Resolved {
   }
   // More links in a row than a host follows: it gives up there, and so does this.
   return { kind: 'dangling', link: links.at(-1) as string, missing: undefined, links };
+}
+
+/**
+ * A single lookup keeps the small ordinary-path fast path. Its depth bound limits prefix-hash
+ * work, not resolution: deeper paths use the complete stop index and retain every outcome.
+ */
+export function resolve(path: string, view: TreeView): Resolved {
+  let index: StopNode | undefined;
+  return resolveWith(path, view, (parts) =>
+    parts.length <= 32
+      ? firstStop(parts, view.tree)
+      : indexedStop(parts, (index ??= stopIndex(view.tree))),
+  );
+}
+
+/**
+ * Reuse only within one synchronous operation whose readonly tree does not change. The index
+ * is local, never cached on a mutable Map; later operations build it again. Targets stay live.
+ */
+export function createTreeResolver(view: TreeView): (path: string) => Resolved {
+  const index = stopIndex(view.tree);
+  return (path) => resolveWith(path, view, (parts) => indexedStop(parts, index));
 }
 
 /** A link whose target decides what an agent or editor loads. */
@@ -187,13 +248,14 @@ export interface Paths {
  * bounds the entries walked through links.
  */
 export function openedPaths(view: TreeView, maxSteps: number): Paths {
+  const resolvePath = createTreeResolver(view);
   const paths = new Set(view.sorted.filter((path) => wanted(path, view.tree.get(path))));
   const queue = view.sorted.filter((p) => view.tree.get(p)?.mode === SYMLINK && linkMatters(p));
   const expanded = new Map<string, string>();
   let steps = 0;
   for (let next = 0; next < queue.length; next += 1) {
     const virtual = queue[next] as string;
-    const at = resolve(virtual, view);
+    const at = resolvePath(virtual);
     if (at.kind !== 'folder') {
       if (at.kind !== 'blob') paths.add(virtual);
       continue;

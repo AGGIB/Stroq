@@ -36,18 +36,19 @@ describe('undoFile: the copy', () => {
   });
 
   // The copy is a file in a directory anyone who is the owner can write; it is trusted only if it
-  // is exactly the bytes the manifest says were there.
-  it('does not use a copy that is not the file it was made from', async () => {
+  // is exactly the bytes the signed manifest says were there. One that is not is refused, and undo
+  // writes nothing rather than quietly doing something else.
+  it('does not use a copy that is not the file it was made from, and refuses', async () => {
     const e = engine();
     const before = jsonText({ model: 'm' });
     const { result: made, real, path } = await applied(e, 'settings.json', before, [addDeny('a')]);
+    const after = readFileSync(path, 'utf8');
     writeFileSync(backupPath(e.home, made.backup?.id ?? '', real), jsonText({ planted: 'bytes' }));
 
-    const result = await undo(e, real);
+    await expect(undo(e, real)).rejects.toMatchObject({ code: 'backup-mismatch' });
 
-    expect(readFileSync(path, 'utf8')).toBe(before);
-    expect(readFileSync(path, 'utf8')).not.toContain('planted');
-    expect(result.status).toBe('surgical');
+    expect(readFileSync(path, 'utf8')).toBe(after);
+    expect(readManifest(e.env).files[real]).toHaveLength(1);
   });
 });
 

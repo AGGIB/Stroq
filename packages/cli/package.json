@@ -1,6 +1,6 @@
 {
   "name": "@stroq/cli",
-  "version": "0.28.0",
+  "version": "0.29.0",
   "description": "Find known secrets in local Claude Code, Codex and Cursor sessions; trace risky AI agent actions and guard future tool calls",
   "license": "Apache-2.0",
   "type": "module",
@@ -9,6 +9,7 @@
   },
   "files": [
     "dist",
+    "platform",
     "openclaw-plugin",
     "README.md",
     "LICENSE",
@@ -46,7 +47,7 @@
   },
   "scripts": {
     "build": "tsup",
-    "prepack": "pnpm -w run build",
+    "prepack": "node ../../scripts/prepack-platform.mjs",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {

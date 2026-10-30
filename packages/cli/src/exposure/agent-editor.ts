@@ -35,7 +35,7 @@ import { autoApproves } from './privilege-surface.js';
  * checked for its type first.
  */
 // ---------------------------------------------------------------------------------------------
-// VS Code: tasks that run on folder open, and the settings that let them.
+// VS Code: tasks that run on folder open or worktree creation, and their settings.
 
 /** The most tasks a folder-open task's `dependsOn` is followed through. */
 const MAX_DEPENDS = 16;
@@ -157,10 +157,12 @@ function taskRuns(task: Obj, ctx: TaskContext, seen: Set<string>, charged: boole
   return join();
 }
 
-const runsOnFolderOpen = (task: Obj): boolean => {
+const automaticTrigger = (task: Obj): 'folderOpen' | 'worktreeCreated' | undefined => {
   const options = ownObject(task, 'runOptions');
   const runOn = options === undefined ? undefined : ownString(options, 'runOn');
-  return runOn !== undefined && runOn.toLowerCase() === 'folderopen';
+  if (runOn?.toLowerCase() === 'folderopen') return 'folderOpen';
+  if (runOn?.toLowerCase() === 'worktreecreated') return 'worktreeCreated';
+  return undefined;
 };
 
 /**
@@ -190,7 +192,7 @@ export function folderOpenTasks(
   const opening = firstEntries(
     f.path,
     'folder-open tasks',
-    tasks.flatMap((task, i) => (runsOnFolderOpen(task) ? [[task, i] as const] : [])),
+    tasks.flatMap((task, i) => (automaticTrigger(task) ? [[task, i] as const] : [])),
   );
   const ctx: TaskContext = {
     byLabel,
@@ -206,7 +208,7 @@ export function folderOpenTasks(
       f.path,
       line,
       label ?? `task ${i + 1}`,
-      `${taskRuns(task, ctx, seen, false)}${shared}`,
+      `${taskRuns(task, ctx, seen, false)}${shared}${automaticTrigger(task) === 'worktreeCreated' ? ' | runOn: worktreeCreated' : ''}`,
     );
   });
   // What was left out of the values could run: the cut fails, with a digest of every task.

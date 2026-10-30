@@ -94,8 +94,11 @@ async function deriveBench(): Promise<string> {
     '',
     '## Method',
     '',
-    'The bench declares the surface it is scanning — `repo_content`, because the corpus ' +
-      'is documentation — and rules scoped to a different surface are not counted ' +
+    'The bench declares the surface it is scanning — `web_content`, because the corpus ' +
+      'is documentation somebody else wrote, read the way an agent meets a fetched page ' +
+      '(it was `repo_content` until 2026-10-28, when fetched pages got a surface of their ' +
+      "own; nine rules now read the web and not the developer's own code, and they all " +
+      'still read this corpus) — and rules scoped to a different surface are not counted ' +
       'against it. **This changed what the number means.** Before the surface was ' +
       'declared, every rule the bundle ships was measured against documentation, ' +
       'including any rule written to read something else; now the rate is a rate for the ' +

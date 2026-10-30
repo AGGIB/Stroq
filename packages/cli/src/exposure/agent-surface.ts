@@ -58,9 +58,9 @@ type Fallback = (path: string, raw: string, stripped: string) => AgentHit[];
  * it: a host's own reader may recover what this one rejects (VS Code's reads past a missing comma
  * and decodes the `\u` escapes a key can be spelled with), so its text proves nothing.
  */
-const json =
-  (read: (f: JsonFile) => AgentHit[], fallback: Fallback): Reader =>
-  (path, raw) => {
+const JSON_READERS = new WeakSet<Reader>();
+const json = (read: (f: JsonFile) => AgentHit[], fallback: Fallback): Reader => {
+  const reader: Reader = (path, raw) => {
     const stripped = stripJsonc(raw);
     let value: unknown;
     try {
@@ -70,6 +70,9 @@ const json =
     }
     return isPlainObject(value) ? read({ path, text: stripped, value }) : [];
   };
+  JSON_READERS.add(reader);
+  return reader;
+};
 
 /**
  * A file that could not be read, reported whatever it holds; `keys` only place it on a line. One
@@ -414,8 +417,16 @@ export const guarded =
   };
 
 /** The hits of one file's text, in the order of their lines. */
-export function scanFile(path: string, text: string): readonly AgentHit[] {
-  return byLine(readersFor(path).flatMap((read) => guarded(read)(path, text)));
+export function scanFile(path: string, text: string, onParseGap?: () => void): readonly AgentHit[] {
+  const readers = readersFor(path);
+  if (onParseGap !== undefined && readers.some((reader) => JSON_READERS.has(reader))) {
+    try {
+      if (!isPlainObject(JSON.parse(stripJsonc(text)))) onParseGap();
+    } catch {
+      onParseGap();
+    }
+  }
+  return byLine(readers.flatMap((read) => guarded(read)(path, text)));
 }
 
 /** What a source found at a path. */
@@ -438,7 +449,11 @@ export const MAX_FILE_BYTES = 1024 * 1024;
 /** What a Git LFS pointer starts with: the file a checkout writes here is fetched from elsewhere. */
 const LFS_POINTER = 'version https://git-lfs.github.com/spec/';
 
-export function hitsForRead(path: string, read: SourceRead): readonly AgentHit[] {
+export function hitsForRead(
+  path: string,
+  read: SourceRead,
+  onParseGap?: () => void,
+): readonly AgentHit[] {
   if (read.kind === 'text') {
     // What git holds here is not what a checkout with Git LFS writes, so it was not read.
     if (read.text.startsWith(LFS_POINTER) && readersFor(path).length > 0)
@@ -451,7 +466,7 @@ export function hitsForRead(path: string, read: SourceRead): readonly AgentHit[]
           `a Git LFS pointer: a checkout fills it in from elsewhere (${digestOf(read.text)})`,
         ),
       ];
-    return scanFile(path, read.text);
+    return scanFile(path, read.text, onParseGap);
   }
   if (read.kind === 'unreadable') return [];
   if (read.kind === 'outside') return [hit('config-link-outside', path, 1, 'link', read.target)];

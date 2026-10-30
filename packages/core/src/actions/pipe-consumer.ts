@@ -68,7 +68,7 @@ type Source =
   /** No program on the command line: it reads one from its input. */
   | { readonly kind: 'stdin' }
   /** A program on the command line, as the shell hands it over, or null if the shell makes it. */
-  | { readonly kind: 'inline'; readonly text: string | null }
+  | { readonly kind: 'inline'; readonly text: string | null; readonly word?: Word }
   /** `python -m json.tool`, with options that make it only a pretty-printer. */
   | { readonly kind: 'data' }
   /** A script, a module or an option that is not read: what it does with its input is not known. */
@@ -112,6 +112,7 @@ function pythonSource(words: readonly Word[]): Source {
         return {
           kind: 'inline',
           text: text.expands ? null : attached !== '' ? attached : text.value,
+          word: text,
         };
       }
       if (flag === 'm') {
@@ -189,6 +190,27 @@ function sourceOf(name: string, words: readonly Word[]): Source | null {
   if (PYTHON_NAME.test(name)) return pythonSource(operands(words));
   if (NODE_NAME.test(name)) return nodeSource(operands(words));
   return null;
+}
+
+/** The program a stage gives Python with `-c`, and the word that holds it as it is written. */
+export interface InlinePython {
+  /** The program as Python is handed it, or null when the shell makes it as it runs (`-c "$code"`). */
+  readonly text: string | null;
+  /** The word that holds it, quotes and all (`"import os; …"`, `-c'print(1)'`), when a text holds it. */
+  readonly raw: string | undefined;
+}
+
+/**
+ * The program a stage gives Python with `-c`, or undefined when the stage is not a Python given one,
+ * or what the stage runs is not read (wrappers nested too deep, `eval`).
+ */
+export function inlinePython(stage: string): InlinePython | undefined {
+  const found = resolve(stage);
+  if (found === null || found.deep || found.evalProgram !== null) return undefined;
+  if (!PYTHON_NAME.test(found.name)) return undefined;
+  const source = pythonSource(operands(found.args));
+  if (source.kind !== 'inline') return undefined;
+  return { text: source.text, raw: source.word?.raw };
 }
 
 /** What the rest of the command says about how its stages are read. */

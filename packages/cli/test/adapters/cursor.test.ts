@@ -297,7 +297,8 @@ describe('handleCursorHook', () => {
   it('denies reading a credential file once the session is tainted', async () => {
     await run({
       hook_event_name: 'beforeReadFile',
-      file_path: `${cwd}/README.md`,
+      // A dependency's file: a flag on one of the project's own would not taint.
+      file_path: `${cwd}/node_modules/helper/README.md`,
       content: POISONED,
     });
     const out = await run({
@@ -376,7 +377,8 @@ describe('handleCursorHook', () => {
   it('taints then asks for a padded MCP tool name, same as its collapsed form (R2)', async () => {
     await run({
       hook_event_name: 'beforeReadFile',
-      file_path: `${cwd}/README.md`,
+      // A dependency's file: a flag on one of the project's own would not taint.
+      file_path: `${cwd}/node_modules/helper/README.md`,
       content: POISONED,
     });
     const out = await run({

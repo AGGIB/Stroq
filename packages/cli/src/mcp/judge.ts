@@ -1,5 +1,5 @@
 import type { Decision, ProvenanceHit, SecretHit, StroqEngine } from '@stroq/core';
-import { MAX_SCAN_CHARS } from '@stroq/core';
+import { MAX_SCAN_CHARS, mcpIdentityFromServer } from '@stroq/core';
 import { withEvidence } from '../adapters/claude-code.js';
 import { describeToolInput } from '../adapters/codex-input.js';
 import { mcpToolName } from '../adapters/cursor-mcp-name.js';
@@ -263,6 +263,7 @@ export async function judgeToolCall(
     toolName,
     toolInput,
     cwd: ctx.cwd,
+    mcpIdentity: mcpIdentityFromServer('mcp-proxy', ctx.server),
     ...(sentParams === params ? {} : { auditInput: mcpCallInput(sentParams) }),
   };
   const { decision, provenance, secrets } = await decidePre(ctx.engine, event, [toolInput]);
@@ -281,7 +282,12 @@ export async function judgeToolCall(
  * a call Stroq cannot address is a call Stroq cannot judge.
  */
 export const batchHasToolCall = (items: readonly unknown[]): boolean =>
-  items.some((item) => isRecord(item) && item['method'] === 'tools/call');
+  items.some(
+    (item) =>
+      isRecord(item) &&
+      typeof item['method'] === 'string' &&
+      item['method'].toLowerCase() === 'tools/call',
+  );
 
 /**
  * One reply per addressable request in the batch, in the order the batch listed them:

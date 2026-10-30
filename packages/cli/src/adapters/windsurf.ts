@@ -1,8 +1,10 @@
 import type { Decision, ProvenanceHit, SecretHit, StroqEngine } from '@stroq/core';
+import { mcpIdentityFromServer } from '@stroq/core';
 import { z } from 'zod';
 import { NO_OUTPUT, withEvidence, type HookOutput } from './claude-code.js';
 import { scanReadCandidates } from './file-scan.js';
 import { preCandidatesFor, unreadableGuard } from './kind-input.js';
+import { toolInputRecord } from './tool-input.js';
 import {
   MAX_PATCH_PATHS,
   decideWithGuards,
@@ -215,6 +217,14 @@ export async function handleWindsurfHook(engine: StroqEngine, raw: unknown): Pro
     sessionId: input.trajectory_id,
     toolName: windsurfToolName(action, input.tool_info),
     toolInput,
+    ...(action === 'pre_mcp_tool_use' || action === 'post_mcp_tool_use'
+      ? {
+          mcpIdentity: mcpIdentityFromServer(
+            'windsurf',
+            toolInputRecord(input.tool_info)['mcp_server_name'],
+          ),
+        }
+      : {}),
     // The hook's OWN directory, which Windsurf sets to the workspace root (the
     // default of the `working_directory` Stroq deliberately does not write), and
     // never `tool_info.cwd`: that field is the directory Cascade chose, i.e.

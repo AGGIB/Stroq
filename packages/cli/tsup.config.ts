@@ -1,8 +1,27 @@
-import { copyFileSync } from 'node:fs';
-import { defineConfig } from 'tsup';
+import { copyFileSync, readFileSync } from 'node:fs';
+import { defineConfig, type Options } from 'tsup';
+import { runtimeBundle } from '../core/src/rules/runtime-rule.js';
+
+type Plugin = NonNullable<Options['esbuildPlugins']>[number];
+
+/**
+ * The rule bundle as the engine reads it (`core/src/rules/runtime-rule.ts`): about a quarter of the
+ * file the corpus is vendored in. Every hook call parsed and built the rest, and read none of it.
+ */
+const runtimeRules: Plugin = {
+  name: 'stroq-runtime-rules',
+  setup(build) {
+    build.onLoad({ filter: /[\\/]core[\\/]src[\\/]rules\.bundle\.json$/ }, (args) => ({
+      contents: JSON.stringify(runtimeBundle(JSON.parse(readFileSync(args.path, 'utf8')))),
+      loader: 'json',
+    }));
+  },
+};
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  // `dist/index.js` is what every hook line, the plugin wrapper and `bin` start. It is built from
+  // `bin.ts`, which turns on the compile cache and then loads `index.ts` (see `bin.ts` for why).
+  entry: { index: 'src/bin.ts' },
   format: ['esm'],
   platform: 'node',
   target: 'node22',
@@ -12,6 +31,7 @@ export default defineConfig({
   // unpacked package size for no benefit.
   sourcemap: false,
   noExternal: ['@stroq/core'],
+  esbuildPlugins: [runtimeRules],
   // tsup strips `node:` from builtin imports by default. `fs` still resolves without
   // it; `sqlite` does not exist at all, so the Cursor reader loaded nothing in the
   // published CLI and blamed the user's Node version for it.

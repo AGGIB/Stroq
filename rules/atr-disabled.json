@@ -3,7 +3,7 @@
   "ATR-2026-00228": "slow on letter-a@8192 (relative perf gate)",
   "ATR-2026-00233": "slow on letter-a@8192 (relative perf gate)",
   "ATR-2026-00264": "slow on line-breaks@8192 (relative perf gate)",
-  "ATR-2026-00149": "slow on line-breaks@8192 (relative perf gate)",
+  "ATR-2026-00149": "slow on urls@32768 (relative perf gate)",
   "ATR-2026-00220": "slow on base64-alphabet@2048 (relative perf gate)",
   "ATR-2026-00223": "slow on base64-alphabet@8192 (relative perf gate)",
   "ATR-2026-02261": "slow on letter-a@8192 (relative perf gate)",

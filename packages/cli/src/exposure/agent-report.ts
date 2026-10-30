@@ -190,7 +190,9 @@ function sentence(h: AgentHit & { readonly status?: ChangeStatus }, q: Quote): s
       if (unparsed) return 'a task runs when the folder opens (the file could not be fully read)';
       return h.name === 'task.allowAutomaticTasks'
         ? 'tasks run when the folder opens, without asking (task.allowAutomaticTasks is on)'
-        : `task ${name} runs when the folder opens: ${value}`;
+        : h.value.endsWith(' | runOn: worktreeCreated')
+          ? `task ${name} is configured to run automatically when an Agent Session worktree is created: ${value}`
+          : `task ${name} runs when the folder opens: ${value}`;
     case 'agent-definition-hook':
       return `${name} hook in an agent definition runs: ${value}`;
     case 'instruction-hidden-text':

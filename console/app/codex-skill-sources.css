@@ -1,0 +1,238 @@
+.codex-source-entry,
+.codex-source-heading,
+.codex-source-candidate-heading,
+.codex-source-candidate-status,
+.codex-source-report-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 10px 14px;
+  min-width: 0;
+}
+.codex-source-entry {
+  justify-content: space-between;
+  border-top: 1px solid var(--border);
+  padding-block: 16px;
+  font-size: var(--text-secondary);
+}
+.codex-source-trigger {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-width: 0;
+}
+.codex-source-tabs,
+.codex-skill-control-actions,
+.codex-skill-control-heading,
+.codex-skill-control-entry {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px 14px;
+  min-width: 0;
+}
+.codex-source-tabs {
+  margin-bottom: 20px;
+}
+.codex-source-tabs .button[aria-pressed='true'] {
+  color: var(--foreground);
+  border-color: var(--foreground);
+}
+.codex-skill-control-entry {
+  margin-block: 8px;
+}
+.codex-skill-control-heading {
+  justify-content: space-between;
+}
+.codex-skill-control-heading h3 {
+  margin: 0;
+  font-size: 1rem;
+  font-weight: 550;
+}
+.codex-skill-control-preview,
+.codex-skill-control-record,
+.codex-skill-control-unresolved {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+  padding: 20px;
+  margin-block: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+.codex-skill-control-preview {
+  border-color: var(--primary);
+  background: var(--muted);
+}
+.codex-skill-control-record[data-selected] {
+  border-color: var(--primary);
+}
+.codex-skill-control-preview p,
+.codex-skill-control-unresolved p {
+  margin: 0;
+}
+.codex-source-dialog .codex-skill-control-preview > p {
+  margin: 0;
+}
+.codex-source-dialog .codex-skill-control-preview > .artifact-section:not([open]) {
+  padding-top: 0;
+}
+.codex-source-dialog .codex-skill-control-preview > .artifact-section:not([open]) > summary {
+  padding-bottom: 0;
+}
+.codex-skill-control-consent {
+  display: grid;
+  gap: 16px;
+  margin-block: 6px;
+}
+.codex-skill-control-consent label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+  font-size: var(--text-secondary);
+  line-height: 1.5;
+  cursor: pointer;
+}
+.codex-skill-control-consent input {
+  flex: 0 0 18px;
+  width: 18px;
+  height: 18px;
+  margin: 3px 0 0;
+  accent-color: var(--primary);
+}
+.codex-skill-control-consent span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+@media (max-width: 520px) {
+  .codex-skill-control-preview,
+  .codex-skill-control-record,
+  .codex-skill-control-unresolved {
+    padding: 14px;
+  }
+  .codex-skill-control-actions .button {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+.codex-source-dialog .dialog-header h2 {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.codex-source-dialog code {
+  white-space: normal;
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.codex-source-dialog strong {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.codex-source-dialog .inventory-review-body,
+.codex-source-chain > li,
+.codex-source-candidate,
+.codex-source-candidate > * {
+  min-width: 0;
+}
+.codex-source-refresh {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 20px;
+}
+.codex-source-report-tools {
+  margin-bottom: 20px;
+  justify-content: space-between;
+}
+.codex-source-context > div {
+  align-items: baseline;
+}
+.codex-source-title {
+  margin-block: 24px 12px;
+  font-weight: 550;
+}
+.codex-source-chain {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.codex-source-chain > li {
+  padding-block: 12px;
+  border-top: 1px solid var(--border);
+}
+.codex-source-heading {
+  justify-content: space-between;
+  margin-bottom: 6px;
+}
+.codex-source-items > summary {
+  margin-top: 8px;
+  cursor: pointer;
+  font-size: var(--text-secondary);
+}
+.codex-source-candidate {
+  display: grid;
+  gap: 6px;
+  padding: 12px 0 4px 16px;
+  border-left: 2px solid var(--border);
+  margin-block: 12px;
+}
+.codex-source-candidate-heading {
+  justify-content: space-between;
+}
+.codex-source-dialog .codex-source-heading > .badge,
+.codex-source-dialog .codex-source-candidate-heading > .badge,
+.codex-source-dialog .codex-source-chain > li > .control-meta,
+.codex-source-dialog .codex-source-candidate > .control-meta {
+  margin: 0;
+}
+.codex-source-candidate > code,
+.codex-source-candidate-status {
+  font-size: var(--text-secondary);
+  color: var(--muted-foreground);
+}
+.codex-source-candidate .artifact-section {
+  margin-block: 0;
+  padding-top: 8px;
+}
+.codex-source-candidate .artifact-section > summary {
+  padding-block: 0;
+  font-size: var(--text-secondary);
+}
+.codex-source-matches,
+.codex-source-limits ul {
+  padding-left: 20px;
+  margin-block: 14px;
+  font-size: var(--text-secondary);
+}
+.codex-source-matches li,
+.codex-source-limits li {
+  margin-block: 10px;
+  overflow-wrap: anywhere;
+}
+.codex-source-matches li > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  align-items: baseline;
+}
+.codex-source-capabilities dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  font-size: var(--text-secondary);
+}
+@media (max-width: 520px) {
+  .codex-source-dialog .codex-source-context > div {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+  .codex-source-dialog .codex-source-context dd {
+    max-width: none;
+    text-align: left;
+  }
+  .codex-source-candidate {
+    padding-left: 10px;
+  }
+}

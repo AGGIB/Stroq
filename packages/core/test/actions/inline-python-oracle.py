@@ -16,6 +16,11 @@ Reads a request on standard input and answers with JSON on standard output:
       Answers the names of the interpreter's builtins, for the test that compares them with the list
       the reader keeps.
 
+  {"mode": "spawns", "programs": [...]}
+      Runs each program under an audit hook that records every process it starts and refuses it
+      before it starts, and answers what each would have run: a line handed to a shell, the words of
+      a program, or another way of starting one. For the test of `readPythonProcesses`.
+
 It runs the programs it is given: it is a test fixture, and it is run only by that test.
 """
 
@@ -199,6 +204,90 @@ def run(programs, stdins):
     return results
 
 
+_spawned = []
+_spawn_armed = False
+SHELLS = ("/bin/sh", "/system/bin/sh")
+OTHER_STARTS = ("os.exec", "os.spawn", "os.posix_spawn", "os.fork", "os.forkpty", "pty.")
+
+
+def _text(value):
+    return os.fsdecode(value) if isinstance(value, bytes) else str(value)
+
+
+def _spawn_hook(event, args):
+    """Records a process a program starts, and refuses it, so that none is ever started."""
+    if not _spawn_armed:
+        return
+    if event == "os.system":
+        _spawned.append({"kind": "shell", "line": _text(args[0])})
+    elif event == "subprocess.Popen":
+        argv = [_text(word) for word in args[1]] if isinstance(args[1], (list, tuple)) else [_text(args[1])]
+        if len(argv) == 3 and argv[0] in SHELLS and argv[1] == "-c":
+            _spawned.append({"kind": "shell", "line": argv[2]})
+        else:
+            words = ["python3" if word == sys.executable else word for word in argv]
+            _spawned.append({"kind": "argv", "words": words})
+    elif event.startswith(OTHER_STARTS):
+        _spawned.append({"kind": "other", "event": event})
+    else:
+        return
+    raise RuntimeError("blocked: " + event)
+
+
+def _snapshot():
+    """What a program can change in the modules it shares with the programs after it."""
+    import shutil
+    import subprocess
+
+    modules = [os, sys, subprocess, shutil, builtins]
+    if "posix" in sys.modules:
+        modules.append(sys.modules["posix"])
+    return [(module, dict(vars(module))) for module in modules], list(sys.path)
+
+
+def _restore(snapshot):
+    """Puts back what a program changed (`os.system = print`), so that it does not change the next."""
+    saved, path = snapshot
+    for module, attributes in saved:
+        current = vars(module)
+        for name in [name for name in current if name not in attributes]:
+            del current[name]
+        for name, value in attributes.items():
+            if current.get(name, _restore) is not value:
+                current[name] = value
+    sys.path[:] = path
+
+
+def spawns(programs):
+    results = []
+    global _spawn_armed
+    for program in programs:
+        del _spawned[:]
+        snapshot = _snapshot()
+        try:
+            code = _REAL_COMPILE(program, "<snippet>", "exec")
+        except BaseException as err:  # a program that is not Python
+            results.append({"spawned": [], "error": "compile: " + type(err).__name__})
+            continue
+        real_in, real_out, real_err = sys.stdin, sys.stdout, sys.stderr
+        sys.stdin, sys.stdout, sys.stderr = io.StringIO(""), io.StringIO(), io.StringIO()
+        signal.signal(signal.SIGALRM, _alarm)
+        signal.alarm(2)
+        error = None
+        try:
+            _spawn_armed = True
+            _REAL_EXEC(code, {"__name__": "__main__", "__builtins__": builtins})
+        except BaseException as err:
+            error = type(err).__name__
+        finally:
+            _spawn_armed = False
+            signal.alarm(0)
+            sys.stdin, sys.stdout, sys.stderr = real_in, real_out, real_err
+            _restore(snapshot)
+        results.append({"spawned": list(_spawned), "error": error})
+    return results
+
+
 def reach(attributes, allowed_builtins, module_names):
     import collections
     import csv
@@ -291,6 +380,9 @@ def main():
         answer = reach(request["attributes"], set(request["builtins"]), request["modules"])
     elif mode == "builtins":
         answer = sorted(dir(builtins))
+    elif mode == "spawns":
+        sys.addaudithook(_spawn_hook)
+        answer = spawns(request["programs"])
     else:
         raise SystemExit("unknown mode")
     sys.stdout.write(json.dumps(answer))

@@ -82,6 +82,26 @@ describe('stroq why', () => {
     expect(text).toContain('taint:   none');
   });
 
+  it('names the note of flags on the own text, and does not say nothing untrusted was involved', async () => {
+    await seed();
+    const store = new FileSessionStore(sessionsDir());
+    await store.clear('s');
+    await store.markFlagged('s', {
+      tool: 'Read',
+      ruleIds: ['STROQ-2026-00001'],
+      at: new Date().toISOString(),
+      source: 'README.md',
+    });
+    const out = capture();
+    expect(await runWhy(['--seq', '1'])).toBe(0);
+    out.restore();
+    const text = out.lines.join('');
+    expect(text).toContain('taint:   none');
+    expect(text).toContain("flagged: 1 time in the project's own files or command output since ");
+    expect(text).toContain('last:  Read README.md — STROQ-2026-00001');
+    expect(text).not.toContain('no untrusted content was involved');
+  });
+
   it('fails when there is nothing to explain', async () => {
     let out = capture();
     expect(await runWhy([])).toBe(1);

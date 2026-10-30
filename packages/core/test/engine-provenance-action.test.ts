@@ -37,8 +37,8 @@ function fixture() {
   const post = (text: string, session = 's1') =>
     engine.post({
       sessionId: session,
-      toolName: 'Read',
-      toolInput: { file_path: 'README.md' },
+      toolName: 'WebFetch',
+      toolInput: { url: 'https://docs.example/README.md', prompt: 'setup' },
       toolResultText: text,
       cwd,
     });
@@ -424,8 +424,8 @@ describe('text the user trusted', () => {
     const post = (text: string) =>
       engine.post({
         sessionId: 's1',
-        toolName: 'Read',
-        toolInput: { file_path: 'docs/SECURITY.md' },
+        toolName: 'WebFetch',
+        toolInput: { url: 'https://docs.example/SECURITY.md', prompt: 'setup' },
         toolResultText: text,
         cwd,
       });

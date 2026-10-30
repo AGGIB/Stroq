@@ -4,7 +4,14 @@
  * field, so `rules.3.when.classes.1` is a class name wherever it is.
  */
 const HINTS: readonly (readonly [pattern: RegExp, fix: string])[] = [
-  [/^version$/, 'set version: 1'],
+  [
+    /^version$/,
+    'set version: 1 for a legacy policy, or version: 2 with an MCP governance allowlist',
+  ],
+  [
+    /^mcpGovernance(?:\.|$)/,
+    'use version: 2 with mcpGovernance.allowed containing at most 64 unique exact channel/name pairs; an empty list denies every MCP call',
+  ],
   [/^threshold$/, 'set threshold to a number from 0 to 1 (the default policy uses 0.6)'],
   [/^default$/, 'set default to allow, deny or ask'],
   [/^rules$/, 'rules must be a list of rules'],

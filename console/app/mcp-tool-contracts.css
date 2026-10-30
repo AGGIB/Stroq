@@ -1,0 +1,177 @@
+.mcp-tool-registrations {
+  min-width: 680px;
+}
+.mcp-tool-table-scroll {
+  position: relative;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.mcp-tool-table-scroll:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
+.dialog-content.mcp-tool-contract-dialog {
+  width: min(860px, calc(100% - 32px));
+  max-height: calc(100dvh - 40px);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 0;
+}
+.mcp-tool-contract-dialog .dialog-header {
+  padding: 24px;
+  margin: 0;
+}
+.mcp-tool-contract-dialog .inventory-review-body {
+  padding: 0 24px 24px;
+}
+.mcp-tool-definition {
+  margin: 20px 0;
+}
+.mcp-tool-definition h3,
+.mcp-tool-decision h3 {
+  margin-bottom: 12px;
+  font-size: var(--text-ui);
+}
+.mcp-tool-definition pre,
+.mcp-tool-contract-json {
+  max-height: 55dvh;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--background);
+  color: var(--foreground);
+  font: 16px/1.6 var(--font-mono);
+  tab-size: 2;
+}
+.mcp-tool-history {
+  margin: 20px;
+}
+.mcp-tool-history ol {
+  display: grid;
+  gap: 14px;
+  margin-top: 16px;
+  list-style: none;
+}
+.mcp-tool-history li {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  align-items: center;
+  font-size: var(--text-secondary);
+}
+.mcp-tool-history code {
+  overflow-wrap: anywhere;
+}
+.mcp-tool-comparison {
+  margin: 22px 0;
+}
+.mcp-tool-comparison-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  margin-bottom: 14px;
+}
+.mcp-tool-comparison-heading h3 {
+  margin: 0;
+  font-size: var(--text-ui);
+}
+.mcp-tool-change-counts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  font-size: var(--text-secondary);
+  color: var(--muted-foreground);
+}
+.mcp-tool-changes {
+  border-block: 1px solid var(--border);
+}
+.mcp-tool-change + .mcp-tool-change {
+  border-top: 1px solid var(--border);
+}
+.mcp-tool-change > summary {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  padding: 14px 0;
+  cursor: pointer;
+  list-style: none;
+}
+.mcp-tool-change > summary::before {
+  content: '+';
+  color: var(--muted-foreground);
+  width: 12px;
+  flex: 0 0 12px;
+}
+.mcp-tool-change[open] > summary::before {
+  content: '−';
+}
+.mcp-tool-change > summary:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+.mcp-tool-change-kind {
+  color: var(--muted-foreground);
+  font-size: var(--text-secondary);
+  text-transform: capitalize;
+  min-width: 72px;
+}
+.mcp-tool-change > summary code {
+  font: 16px/1.5 var(--font-mono);
+  overflow-wrap: anywhere;
+  min-width: 0;
+}
+.mcp-tool-change-values {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  padding-bottom: 18px;
+}
+.mcp-tool-change-value {
+  min-width: 0;
+}
+.mcp-tool-change-value h4 {
+  margin-bottom: 8px;
+  font-size: var(--text-secondary);
+  font-weight: 500;
+}
+.mcp-tool-change-value .mcp-tool-contract-json {
+  margin: 0;
+  max-height: 32dvh;
+}
+.mcp-tool-value-absent {
+  color: var(--muted-foreground);
+  font-size: var(--text-secondary);
+  padding: 16px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+.mcp-tool-full-contracts {
+  margin-top: 18px;
+}
+@media (max-width: 640px) {
+  .dialog-content.mcp-tool-contract-dialog {
+    width: calc(100% - 20px);
+    max-height: calc(100dvh - 24px);
+  }
+  .mcp-tool-contract-dialog .dialog-header {
+    padding: 20px;
+  }
+  .mcp-tool-contract-dialog .inventory-review-body {
+    padding: 0 20px 20px;
+  }
+  .mcp-tool-change-values {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .mcp-tool-change > summary {
+    gap: 8px;
+  }
+  .mcp-tool-change-kind {
+    min-width: 68px;
+  }
+}

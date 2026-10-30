@@ -1,6 +1,7 @@
 import bundleJson from '../rules.bundle.json' with { type: 'json' };
 import { AtrRuleSchema, type AtrRule } from './atr-types.js';
 import { compileRules, type CompiledRule } from './compile.js';
+import { runtimeBundle } from './runtime-rule.js';
 
 export interface RuleBundle {
   readonly version: 1;
@@ -19,7 +20,8 @@ export function parseBundle(raw: unknown): RuleBundle {
 
 export function loadBundledRules(): CompiledRule[] {
   if (cache) return cache;
-  const bundle = parseBundle(bundleJson);
+  // The shipped CLI already holds only this projection; from source it is the whole file.
+  const bundle = parseBundle(runtimeBundle(bundleJson));
   const disabled = new Set(bundle.disabled);
   cache = compileRules(bundle.rules.filter((r) => !disabled.has(r.id))).compiled;
   return cache;

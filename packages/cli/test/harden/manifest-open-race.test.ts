@@ -3,7 +3,7 @@ import { mkdirSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readManifest } from '../../src/harden/manifest.js';
-import { entry, setup, thrownBy } from './manifest-fixtures.js';
+import { entry, setup, signedText, thrownBy } from './manifest-fixtures.js';
 import { removeTempDirs, tempDir } from './helpers.js';
 
 const race = vi.hoisted(() => ({
@@ -66,7 +66,10 @@ afterEach(() => {
 function planted() {
   const made = setup();
   mkdirSync(join(made.manifestFile, '..'), { recursive: true });
-  writeFileSync(made.manifestFile, JSON.stringify({ version: 1, files: {} }));
+  writeFileSync(made.manifestFile, signedText(made.home, {}));
+  // Making the key opened, read and closed a file of its own: count only what the reader does.
+  race.reads = 0;
+  race.closes = 0;
   race.path = made.manifestFile;
   return made;
 }
@@ -130,9 +133,10 @@ describe('manifest descriptor validation without O_NOFOLLOW', () => {
         symlinkSync(target, manifestFile);
       };
 
-      expect(readManifest(env)).toEqual({ version: 1, files: {} });
-      expect(race.reads).toBe(1);
-      expect(race.closes).toBe(1);
+      expect(readManifest(env)).toEqual({ version: 2, files: {} });
+      // One read of the validated manifest descriptor, and one of the key that checks it.
+      expect(race.reads).toBe(2);
+      expect(race.closes).toBe(2);
     },
   );
 

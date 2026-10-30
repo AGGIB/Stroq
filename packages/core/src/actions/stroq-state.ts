@@ -18,6 +18,7 @@
  * from inside it.
  */
 import { optionTakesValue } from './shell-wrappers.js';
+import { ptyLaunchedLines, readsProgramFromInput } from './pty-launchers.js';
 import type { FunctionDefinition } from './inlined-functions.js';
 import { joinText } from './join-text.js';
 import { flattened } from './shell-names.js';
@@ -91,9 +92,54 @@ const namesStroq = (text: string): boolean =>
 function stateSignalsOf(segments: readonly string[], exempting: boolean): string[] {
   const assigned = assignments(segments);
   const reading: Reading = { depth: 0, exempting };
-  return segments.some((segment) => runsStateCommand(segment, assigned, reading))
+  return segments.some((segment) => runsStateCommand(segment, assigned, reading)) ||
+    inputProgramNamesStroq(segments, assigned)
     ? ['stroq-state-change']
     : [];
+}
+
+/** A segment that may start a program that reads its program from its input (`pty-launchers.ts`). */
+const MAY_READ_INPUT = /python|pypy|node|deno|bun|perl|ruby|php|lua|tclsh|wish|expect/i;
+
+/**
+ * Whether an interpreter, or expect, reads its program from its input while the command names Stroq as a
+ * program: `echo 'os.system("stroq untaint")' | python3`, `python3 - <<EOF`, `printf 'spawn stroq …' | expect`.
+ * The program is then the text of another segment (what is piped in, a document's lines folded into the
+ * line), and the segments do not say which feeds which: the whole command is looked at.
+ */
+function inputProgramNamesStroq(
+  segments: readonly string[],
+  assigned: ReadonlyMap<string, string>,
+): boolean {
+  if (!segments.some((segment) => programNamesStroq(segment, assigned))) return false;
+  return segments.some((segment) => {
+    if (!MAY_READ_INPUT.test(segment)) return false;
+    const found = resolve(segment);
+    return found !== null && readsProgramFromInput(found);
+  });
+}
+
+/** What cannot stand in the name or path of a program: where the text of a program is cut into words. */
+const PROGRAM_WORD_BREAK = /[^\w@./\\:~+-]+/;
+const VARIABLE_USE = /\$\{?([A-Za-z_]\w*)/g;
+
+/** Whether a text uses a variable that the command gives a name of Stroq (`S=stroq; … $S`). */
+function variableNamesStroq(text: string, assigned: ReadonlyMap<string, string>): boolean {
+  if (assigned.size === 0) return false;
+  for (const match of text.matchAll(VARIABLE_USE)) {
+    const value = assigned.get(match[1] as string);
+    if (value !== undefined && isStroq(value)) return true;
+  }
+  return false;
+}
+
+/**
+ * Whether the text of a program names Stroq as a program: a word of it is the name, a path to it, the
+ * package or the entry file (`"stroq"`, `/usr/local/bin/stroq`, `@stroq/cli`, `…/cli/dist/index.js`), or a
+ * variable holds one. A word that only holds the name (`stroq-notes.txt`, `s/stroq/x/`) is no program.
+ */
+function programNamesStroq(text: string, assigned: ReadonlyMap<string, string>): boolean {
+  return text.split(PROGRAM_WORD_BREAK).some(isStroq) || variableNamesStroq(text, assigned);
 }
 
 /**
@@ -307,7 +353,39 @@ function runsStateCommand(
   if (!namesStroq(segment) && !/[$`]/.test(segment)) return false;
   const found = resolve(segment, LAUNCHED_BY_STROQ);
   if (found === null || found.word === '') return false;
-  return changesState([found.word, ...argumentValues(found.args)], assigned, reading);
+  if (changesState([found.word, ...argumentValues(found.args)], assigned, reading)) return true;
+  return runsThroughPty(found, assigned, reading);
+}
+
+/**
+ * Whether a program that runs a command inside a pseudo-terminal (`pty-launchers.ts`) runs a command of
+ * Stroq that changes state. The command it runs is read again as a command line of its own, behind which no
+ * flag asks for help and which is followed only to `MAX_LAUNCHER_DEPTH`, as the operand of `stroq run --`
+ * is. Text the launcher hands to a program this cannot read with certainty is denied where it names Stroq,
+ * rather than read a program it cannot (`PtyLine.unread`); an interpreter's program names Stroq where a word
+ * of it is a program of Stroq's (`programNamesStroq`).
+ *
+ * The line is rebuilt from words whose quotes are gone, so its flags are not certainly the ones the program
+ * is handed: no flag in it asks for help, as none does behind `stroq run --`.
+ */
+function runsThroughPty(
+  found: ReturnType<typeof resolve>,
+  assigned: ReadonlyMap<string, string>,
+  reading: Reading,
+): boolean {
+  if (found === null) return false;
+  for (const inner of ptyLaunchedLines(found)) {
+    if (inner.unread || reading.depth >= MAX_LAUNCHER_DEPTH) {
+      const named = inner.code
+        ? programNamesStroq(inner.line, assigned)
+        : namesStroq(inner.line) || variableNamesStroq(inner.line, assigned);
+      if (named) return true;
+      continue;
+    }
+    const next: Reading = { depth: reading.depth + 1, exempting: false };
+    if (runsStateCommand(inner.line, assigned, next)) return true;
+  }
+  return false;
 }
 
 /**
