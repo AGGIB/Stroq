@@ -422,10 +422,17 @@ describe('reading what a command names stays linear on a word built to be slow',
     ['quotes', '"'],
     ['backslashes', '\\'],
   ])('a word of %s', (_name, unit) => {
-    const started = cpuNow();
-    classifyReferencedScripts([`bash x${unit.repeat(SIZE)}y`], dir);
-    classifyReferencedScripts([`./x${unit.repeat(SIZE)}y&`], dir);
-    expect(cpuNow() - started).toBeLessThan(1500);
+    // Measured against itself at a quarter of the length, not against a fixed budget: under coverage
+    // a CI runner took 1.52 s for the full word (130 ms here), but a reading that went back over the
+    // word would take sixteen times as long for four times the length, not four.
+    const read = (size: number): number => {
+      const started = cpuNow();
+      classifyReferencedScripts([`bash x${unit.repeat(size)}y`], dir);
+      classifyReferencedScripts([`./x${unit.repeat(size)}y&`], dir);
+      return cpuNow() - started;
+    };
+    const quarter = read(SIZE / 4);
+    expect(read(SIZE)).toBeLessThan(quarter * 8 + 200);
   });
 });
 

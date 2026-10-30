@@ -896,8 +896,12 @@ function limitHits(
 export function bareRepositories(paths: Iterable<string>): string[] {
   /** The number of each folder, by the number of the folder it is in and its folded name. */
   const ids = new Map<string, number>();
-  /** The first path each folder was seen by, and the names git looks for that it holds. */
-  const folders: string[] = [''];
+  /**
+   * Where each folder was first seen (a path and where its name ends in it), and the names git looks
+   * for that it holds. The folder's own path is cut from it only for the folders returned: a path of
+   * many parts makes as many folders, and a string for each kept them all alive at once.
+   */
+  const folders: (readonly [path: string, end: number])[] = [['', 0]];
   const names: (Set<string> | undefined)[] = [undefined];
   for (const path of paths) {
     let parent = 0;
@@ -918,7 +922,7 @@ export function bareRepositories(paths: Iterable<string>): string[] {
       if (id === undefined) {
         id = folders.length;
         ids.set(key, id);
-        folders.push(path.slice(0, end));
+        folders.push([path, end]);
         names.push(undefined);
       }
       parent = id;
@@ -930,6 +934,7 @@ export function bareRepositories(paths: Iterable<string>): string[] {
       const found = names[id];
       return found !== undefined && looksLikeGitDir(found);
     })
+    .map(([path, end]) => path.slice(0, end))
     .sort();
 }
 
