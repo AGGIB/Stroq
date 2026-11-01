@@ -5,6 +5,7 @@ import {
   mayMatch,
   MIN_LITERAL_LENGTH,
 } from '../../../src/rules/prefilter/prefilter.js';
+import { requiredLiterals } from '../../../src/rules/prefilter/requirements.js';
 import { TextIndex, TextIndexes } from '../../../src/rules/prefilter/text-index.js';
 
 describe('foldModeOf', () => {
@@ -35,6 +36,32 @@ describe('buildPrefilter', () => {
 
   it('joins literals the fold makes one', () => {
     expect(buildPrefilter(['Ignore', 'IGNORE'], 'i')?.literals).toEqual(['ignore']);
+  });
+
+  it('has none under `i` alone for a literal holding half of a surrogate pair', () => {
+    // Without `u` the engine matches a lone `\uDC00` against the second half of a pair in the
+    // text, while lower-casing the text turns that pair (U+10400) into another (U+10428).
+    for (const source of ['\\uDC00abc', '.\\uDC00abc', '[\\uD801]\\uDC00abc', 'abc\\uD801']) {
+      const regex = new RegExp(source, 'i');
+      expect(regex.test('\u{10400}abc') || regex.test('abc\u{10400}')).toBe(true);
+    }
+    expect(buildPrefilter(['\uDC00abc'], 'i')).toBeUndefined();
+    expect(buildPrefilter(['abc\uD801'], 'i')).toBeUndefined();
+    expect(buildPrefilter(['abc', 'x\uDC00yz'], 'i')).toBeUndefined();
+    // A whole pair is lower-cased the same way in the literal and in the text.
+    expect(buildPrefilter(['[\u{1F513}jailbreak]'], 'i')).toBeDefined();
+    // Case-sensitive literals are compared as code units, unfolded.
+    expect(buildPrefilter(['\uDC00abc'], '')).toBeDefined();
+  });
+
+  it('never rules out a text a lone-surrogate regex under `i` matches', () => {
+    const text = '\u{10400}abc';
+    for (const source of ['\\uDC00abc', '.\\uDC00abc', '[\\uD801]\\uDC00abc']) {
+      const regex = new RegExp(source, 'i');
+      expect(regex.test(text)).toBe(true);
+      const prefilter = buildPrefilter(requiredLiterals(regex.source, regex.flags), regex.flags);
+      if (prefilter !== undefined) expect(mayMatch(prefilter, text, new TextIndexes())).toBe(true);
+    }
   });
 
   it('has none when a literal is too short to be worth looking for', () => {

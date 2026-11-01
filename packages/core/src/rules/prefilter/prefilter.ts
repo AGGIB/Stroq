@@ -25,6 +25,9 @@ export type RuleLiterals = readonly (readonly string[] | null)[];
 /** Rule id to the literals of its conditions. See `prefilterTable`. */
 export type PrefilterTable = Readonly<Record<string, RuleLiterals>>;
 
+/** Half of a surrogate pair without its other half. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
 /** How the engine will compare case for a regex compiled with `flags`. */
 export function foldModeOf(flags: string): FoldMode {
   if (!flags.includes('i')) return 'none';
@@ -41,6 +44,10 @@ export function buildPrefilter(
 ): Prefilter | undefined {
   if (required === null || required.length === 0) return undefined;
   const fold = foldModeOf(flags);
+  // Under `i` without `u` the engine reads code units, so a literal's lone half of a surrogate
+  // pair matches half of a pair in the text; lower-casing the text changes that pair as a whole
+  // (U+10400 to U+10428), and the folded literal would no longer be found in it.
+  if (fold === 'i' && required.some((literal) => LONE_SURROGATE.test(literal))) return undefined;
   const literals = [...new Set(required.map((literal) => foldText(fold, literal)))];
   if (literals.some((literal) => literal.length < MIN_LITERAL_LENGTH)) return undefined;
   return { fold, literals };
