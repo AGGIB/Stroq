@@ -61,7 +61,11 @@ export async function runCard(args: readonly string[]): Promise<number> {
     progress?.end();
   }
   try {
-    writeLastCard(state, data, data.moments);
+    writeLastCard(
+      state,
+      { version: data.version, generated: data.generated, days: data.days },
+      data.moments,
+    );
   } catch (err) {
     process.stderr.write(
       `stroq: the moments could not be saved for \`stroq show\`: ${(err as Error).message}\n`,

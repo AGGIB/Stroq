@@ -51,9 +51,18 @@ export interface BuildEnv {
   readonly open?: () => Channel<CardJob, CardResult>;
 }
 
-/** `min(6, cpus - 1)`, and at least one. */
-export const defaultWorkers = (cpus: number = availableParallelism()): number =>
-  Math.max(1, Math.min(6, cpus - 1));
+/**
+ * `min(6, cpus - 1)`, and at least one; `STROQ_CARD_WORKERS` (1 to 16) names another number, for
+ * a machine where more threads do not help or for measuring.
+ */
+export function defaultWorkers(
+  cpus: number = availableParallelism(),
+  named: string | undefined = process.env['STROQ_CARD_WORKERS'],
+): number {
+  const asked = named !== undefined && /^\d{1,2}$/.test(named) ? Number(named) : 0;
+  if (asked >= 1 && asked <= 16) return asked;
+  return Math.max(1, Math.min(6, cpus - 1));
+}
 
 const isDirectory = (path: string): boolean => {
   try {

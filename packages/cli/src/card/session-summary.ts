@@ -10,6 +10,7 @@ import { replayTranscript } from '../commands/replay.js';
 import { readCodexRollout } from '../sent/codex.js';
 import { readTranscript, type Transcript } from '../replay/transcript.js';
 import { declaredPackages } from './declared-packages.js';
+import { leanTranscript } from './lean.js';
 import type { DeclaredPackages } from './package-claims.js';
 import {
   MAX_TOLD_PER_SESSION,
@@ -26,6 +27,8 @@ export interface SummaryDeps {
   readonly replay?: Replayer;
   /** The packages the session's folder declares; read only when a package link needs it. */
   readonly declared?: (cwd: string | null) => DeclaredPackages;
+  /** Judge every result in full, and not only those that could matter (see `lean.ts`). */
+  readonly full?: boolean;
 }
 
 /** A time a record gave, as ISO 8601, or null: a record can put any text where a time goes. */
@@ -89,7 +92,7 @@ export async function summarizeTranscript(
   };
   if (commands === 0) return { ...base, told: 0, moments: [] };
   const replay = deps.replay ?? replayTranscript;
-  const entries = await replay(transcript);
+  const entries = await replay(deps.full === true ? transcript : leanTranscript(transcript));
   const declared = lazily(() =>
     deps.declared === undefined ? declaredPackages(transcript.cwd) : deps.declared(transcript.cwd),
   );
