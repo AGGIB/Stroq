@@ -1,5 +1,12 @@
 import type { Severity } from '../types.js';
 import { SCAN_TARGETS, type AtrCondition, type AtrRule, type ScanTarget } from './atr-types.js';
+import {
+  buildPrefilter,
+  type Prefilter,
+  type PrefilterTable,
+  type RuleLiterals,
+} from './prefilter/prefilter.js';
+import { requiredLiterals } from './prefilter/requirements.js';
 
 export interface CompiledTest {
   readonly field: string;
@@ -8,6 +15,11 @@ export interface CompiledTest {
   readonly value: string;
   /** When set, the only surfaces this condition is evaluated on (see `ruleMatches`). */
   readonly surfaces?: readonly ScanTarget[];
+  /**
+   * For a regex: a test that is false only for texts it cannot match, so that it need not run on
+   * them (see `rules/prefilter`). Absent when nothing worth looking for could be proved.
+   */
+  readonly prefilter?: Prefilter;
 }
 
 export interface CompiledRule {
@@ -143,10 +155,28 @@ export function translatePcre(pattern: string): { source: string; flags: string 
   return { source, flags };
 }
 
-function compileTest(c: AtrCondition): CompiledTest {
+/** The RegExp a rule's pattern compiles to. Throws if it is not one. */
+export function compileRegex(pattern: string): RegExp {
+  const { source, flags } = translatePcre(pattern);
+  return new RegExp(source, flags);
+}
+
+/**
+ * `known` is what `prefilterTable` worked out for this condition when the CLI was built: the
+ * literals the pattern requires, or null for none. Without it they are worked out here.
+ */
+function compileTest(c: AtrCondition, known: readonly string[] | null | undefined): CompiledTest {
   if (c.operator !== 'regex') return { field: c.field, kind: c.operator, value: c.value };
-  const { source, flags } = translatePcre(c.value);
-  return { field: c.field, kind: 'regex', regex: new RegExp(source, flags), value: c.value };
+  const regex = compileRegex(c.value);
+  const required = known === undefined ? requiredLiterals(regex.source, regex.flags) : known;
+  const prefilter = buildPrefilter(required, regex.flags);
+  return {
+    field: c.field,
+    kind: 'regex',
+    regex,
+    value: c.value,
+    ...(prefilter === undefined ? {} : { prefilter }),
+  };
 }
 
 /**
@@ -195,13 +225,18 @@ function conditionSurfaces(rule: AtrRule): readonly (readonly ScanTarget[] | und
  * mistake in the rule's scoping, and a scoping mistake that only disables the rule
  * is the silent failure the vocabulary exists to prevent. It propagates.
  */
-export function compileRule(rule: AtrRule): { compiled?: CompiledRule; error?: string } {
+export function compileRule(
+  rule: AtrRule,
+  known: RuleLiterals = [],
+): { compiled?: CompiledRule; error?: string } {
   const scanTarget = resolveScanTarget(rule);
   const surfaces = resolveSurfaces(rule);
   const perCondition = conditionSurfaces(rule);
+  // A table made for other conditions than this rule has is not read.
+  const literals = known.length === rule.detection.conditions.length ? known : [];
   try {
     const tests = rule.detection.conditions.map((c, i) => {
-      const test = compileTest(c);
+      const test = compileTest(c, literals[i]);
       const only = perCondition[i];
       return only === undefined ? test : { ...test, surfaces: only };
     });
@@ -222,14 +257,29 @@ export function compileRule(rule: AtrRule): { compiled?: CompiledRule; error?: s
   }
 }
 
-export function compileRules(rules: readonly AtrRule[]): {
+/**
+ * The rule with its prefilters taken off, so that every regex runs on every text. For the gates that
+ * measure the regexes themselves: a prefilter that rules a blob out would hide a slow pattern from
+ * them, and the prefilter cannot be counted on for a text that does hold the literal.
+ */
+export function withoutPrefilters(rule: CompiledRule): CompiledRule {
+  return {
+    ...rule,
+    tests: rule.tests.map(({ prefilter: _prefilter, ...test }) => test),
+  };
+}
+
+export function compileRules(
+  rules: readonly AtrRule[],
+  table: PrefilterTable = {},
+): {
   compiled: CompiledRule[];
   errors: Array<{ id: string; error: string }>;
 } {
   const compiled: CompiledRule[] = [];
   const errors: Array<{ id: string; error: string }> = [];
   for (const rule of rules) {
-    const result = compileRule(rule);
+    const result = compileRule(rule, Object.hasOwn(table, rule.id) ? table[rule.id] : undefined);
     if (result.compiled) compiled.push(result.compiled);
     else errors.push({ id: rule.id, error: result.error ?? 'unknown' });
   }

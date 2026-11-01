@@ -19,6 +19,7 @@
     "build": "pnpm -r --filter \"./packages/*\" build",
     "build:rules": "tsx scripts/build-rules.ts",
     "check:rules": "tsx scripts/build-rules.ts --check",
+    "build:case-fold": "tsx scripts/build-case-fold.ts",
     "build:atlas": "tsx scripts/build-atlas.ts",
     "check:atlas": "tsx scripts/build-atlas.ts --check",
     "fetch:bench-corpus": "tsx scripts/fetch-bench-corpus.ts",

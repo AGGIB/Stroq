@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Hooks start faster again, with the same decisions.** Before a rule's regular expression runs, Stroq now checks that the text holds one of the literal strings the expression cannot match without. Those strings are worked out from each pattern when the CLI is built, and case is folded the way the regex engine folds it (`ſ` counts as `s` and the Kelvin sign as `k` only under the flags where the engine says so), so the check never skips a text the expression would match. zod is now bundled into the CLI, so a hook no longer loads its 70 locale files (its MIT licence ships in `THIRD_PARTY_NOTICES.md`), and the rules are kept in the code as one string that is parsed when first needed. On an M4 with Node 26, the median wall time of a hook went from 82 to 68 ms for PreToolUse, 183 to 90 ms for a short PostToolUse and 250 to 108 ms for a 60 KB one. `stroq attack`, `attack --fuzz`, `bench` and `bench --actions` give the same results as before, rule by rule.
+
 ## [0.29.0] - 2026-10-29
 
 ### Added

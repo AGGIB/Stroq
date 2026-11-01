@@ -1,19 +1,35 @@
 import { copyFileSync, readFileSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import { defineConfig, type Options } from 'tsup';
+import { withPrefilterTable } from '../core/src/rules/prefilter/embed.js';
 import { runtimeBundle } from '../core/src/rules/runtime-rule.js';
 
 type Plugin = NonNullable<Options['esbuildPlugins']>[number];
 
 /**
  * The rule bundle as the engine reads it (`core/src/rules/runtime-rule.ts`): about a quarter of the
- * file the corpus is vendored in. Every hook call parsed and built the rest, and read none of it.
+ * file the corpus is vendored in.
  */
-const runtimeRules: Plugin = {
-  name: 'stroq-runtime-rules',
+const runtimeRules = (path: string): string =>
+  JSON.stringify(withPrefilterTable(runtimeBundle(JSON.parse(readFileSync(path, 'utf8')))));
+
+/**
+ * The rules go into the code as text, parsed when they are first asked for. As an object in the
+ * code, 900 KB of them were built by every hook call as the code loaded, and a PreToolUse call never
+ * looks at a rule; as one string they cost a copy. The text is inside the code, so the rules cannot
+ * be missing or older than it. `core/src/rules/bundle-source.ts` is the source tree's version of
+ * this, which imports the whole file.
+ */
+const embeddedRules: Plugin = {
+  name: 'stroq-embedded-rules',
   setup(build) {
-    build.onLoad({ filter: /[\\/]core[\\/]src[\\/]rules\.bundle\.json$/ }, (args) => ({
-      contents: JSON.stringify(runtimeBundle(JSON.parse(readFileSync(args.path, 'utf8')))),
-      loader: 'json',
+    build.onLoad({ filter: /[\\/]core[\\/]src[\\/]rules[\\/]bundle-source\.ts$/ }, () => ({
+      contents: `const text = ${JSON.stringify(
+        runtimeRules(fileURLToPath(new URL('../core/src/rules.bundle.json', import.meta.url))),
+      )};
+export const bundledRulesJson = () => JSON.parse(text);
+`,
+      loader: 'js',
     }));
   },
 };
@@ -30,8 +46,13 @@ export default defineConfig({
   // library other bundlers resolve stack traces through), and it roughly doubled the
   // unpacked package size for no benefit.
   sourcemap: false,
-  noExternal: ['@stroq/core'],
-  esbuildPlugins: [runtimeRules],
+  // zod is bundled too. Its package entry loads one module for each of its 70 locales and the hook
+  // uses one, so a PreToolUse read about a hundred files of zod before it began; bundled, the
+  // locales that are not used are dropped. `yaml` is not on the hook's path and stays a dependency.
+  // zod's licence notice is in THIRD_PARTY_NOTICES.md beside package.json, not in dist/: the
+  // console's runtime digest admits only .js and .json files there.
+  noExternal: ['@stroq/core', 'zod'],
+  esbuildPlugins: [embeddedRules],
   // tsup strips `node:` from builtin imports by default. `fs` still resolves without
   // it; `sqlite` does not exist at all, so the Cursor reader loaded nothing in the
   // published CLI and blamed the user's Node version for it.

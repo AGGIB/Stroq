@@ -52,7 +52,12 @@ export function runtimeRule(rule: unknown): unknown {
   return kept;
 }
 
-/** The bundle with each rule projected; its other keys (`version`, `disabled`, …) as they are. */
+/**
+ * The bundle with each rule projected; its other keys (`version`, `disabled`, `prefilters`, …) as
+ * they are. The literal table is added by `withPrefilterTable` (`prefilter/embed.ts`), not here:
+ * this module imports nothing, because the console's build loads it on its own
+ * (`console/scripts/build-engine.mjs`).
+ */
 export function runtimeBundle(bundle: unknown): unknown {
   if (!isObject(bundle) || !Array.isArray(bundle['rules'])) return bundle;
   return { ...bundle, rules: bundle['rules'].map(runtimeRule) };

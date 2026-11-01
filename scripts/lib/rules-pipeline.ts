@@ -7,7 +7,11 @@ import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { parse as parseYaml } from 'yaml';
 import { loadRulesFromDir, type SkippedRule } from '../../packages/core/src/rules/atr-loader.js';
-import { compileRules, type CompiledRule } from '../../packages/core/src/rules/compile.js';
+import {
+  compileRules,
+  withoutPrefilters,
+  type CompiledRule,
+} from '../../packages/core/src/rules/compile.js';
 import { SCAN_TARGETS, type AtrRule } from '../../packages/core/src/rules/atr-types.js';
 import {
   canFire,
@@ -475,6 +479,8 @@ export function measureRuleTimings(
   stages: readonly number[] = DEFAULT_STAGES,
 ): readonly RuleTiming[] {
   return rules.map((rule) => {
+    // The regexes are what is measured: the prefilter would skip them on blobs that lack a literal.
+    const bare = withoutPrefilters(rule);
     let worst: RuleTiming = { ruleId: rule.id, ms: -1, blob: '', size: 0 };
     for (const blob of blobs) {
       for (const size of stages) {
@@ -483,7 +489,7 @@ export function measureRuleTimings(
         // Every field Stroq supplies is the text, as it is in production: a condition on the
         // response of a tool or on a tool's description is timed too, and was not when only
         // `content` was given.
-        matchRules([rule], text, { tool_response: text, tool_description: text });
+        matchRules([bare], text, { tool_response: text, tool_description: text });
         const ms = performance.now() - started;
         if (ms > worst.ms) worst = { ruleId: rule.id, ms, blob: blob.name, size };
         if (ms > thresholdMs) return worst;
