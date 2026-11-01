@@ -1,7 +1,7 @@
 // What a person reads before typing the digest of an MCP server, in the order that they read it.
 import { confirmationScreen } from '../commands/vet-render.js';
 import { entryRunsStrict } from '../commands/mcp-config.js';
-import { reconfirmCommand } from '../mcp/pin-argument.js';
+import { commandLine } from '../shell-quote.js';
 import { outsideLine } from '../ui/layout.js';
 import type { Terminal } from '../ui/terminal.js';
 import type { PreparedMcp } from './mcp-prepare.js';
@@ -30,7 +30,7 @@ export function showMcpScreen(terminal: Pick<Terminal, 'write'>, prepared: Prepa
     );
   else if (entryRunsStrict(current))
     terminal.write(
-      `Note: the current entry runs with --strict, but that flag is not confirmed in the lock; the replacement below does not. To enable it with confirmation: ${reconfirmCommand(name, { strict: true })}\n`,
+      `Note: the current entry runs with --strict, but that flag is not confirmed in the lock; the replacement below does not. To enable it with confirmation: ${reconfirmCommand(name)}\n`,
     );
   terminal.write(
     `Starts node ${outsideLine(JSON.stringify(entrypoint))} from a verified private copy; environment passed: ${passEnv.length === 0 ? 'none' : passEnv.join(', ')}\n`,
@@ -39,3 +39,15 @@ export function showMcpScreen(terminal: Pick<Terminal, 'write'>, prepared: Prepa
   terminal.write(screen);
   terminal.write(`Client entry: ${outsideLine(JSON.stringify(written))}\n`);
 }
+
+/** The line that confirms a wrapper again with `--strict`: the install path's, which `stroq add` ran, and 0.30 removed. */
+const reconfirmCommand = (name: string): string =>
+  commandLine([
+    'stroq',
+    'add',
+    { positional: name, what: 'name' },
+    '--kind',
+    'mcp',
+    '--strict',
+    '--force',
+  ]);

@@ -7,7 +7,7 @@ import { readDirTree, READ_DIR_BLIND_SPOTS } from '../install/read-dir.js';
 import { buildTree, treeDigest } from '../install/tree.js';
 import type { Tree, TreeEntry } from '../install/types.js';
 import { passportsFileIn, runDirIn, storeDirIn, stroqHome } from '../paths.js';
-import { MCP_PIN, PIN_SANDBOX_PHRASES, reconfirmCommand } from './pin-argument.js';
+import { MCP_PIN, PIN_SANDBOX_PHRASES, unpinCommand } from './pin-argument.js';
 import { assertBound, PinBindError, type Launch } from './pin-binding.js';
 
 export interface PinOptions {
@@ -215,7 +215,7 @@ export async function inspectPin(
     if (error instanceof PinBindError)
       return {
         ok: false,
-        detail: `${error.message}; start refused (to confirm it again run: ${reconfirmCommand(options.server)})`,
+        detail: `${error.message}; start refused (to take the pin out run: ${unpinCommand()})`,
       };
     if (error instanceof Error && error.message === 'cannot verify a linked store folder')
       return {

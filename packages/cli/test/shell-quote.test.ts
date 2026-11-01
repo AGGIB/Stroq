@@ -7,34 +7,13 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { UNTAINT_OPTIONS } from '../src/commands/untaint.js';
 import { VET_OPTIONS } from '../src/commands/vet.js';
 import { unknownOption, wantsHelp } from '../src/help.js';
-import { keptNote } from '../src/commands/init-mcp.js';
 import { openclawInstallCommands } from '../src/commands/openclaw-plugin.js';
 import { renderCard } from '../src/commands/vet-card.js';
 import { CONFIRM_SENSITIVE_MAX, confirmationScreen } from '../src/commands/vet-render.js';
 import { wrongCallLines } from '../src/commands/why.js';
 import { inspectTree } from '../src/install/inspect/index.js';
-import { reconfirmCommand } from '../src/mcp/pin-argument.js';
 import { commandLine, quoteWord, tryCommandLine, unprintableSentence } from '../src/shell-quote.js';
 import { treeOf } from './helpers/install-tree.js';
-
-/**
- * The options of `stroq add`, which 0.30 removed. The lines that confirm a wrapper again still name it, and
- * are held to the way it read them until the next step changes what they say.
- */
-const ADD_OPTIONS = {
-  user: { type: 'boolean' },
-  restore: { type: 'boolean' },
-  rollback: { type: 'boolean' },
-  kind: { type: 'string' },
-  client: { type: 'string' },
-  config: { type: 'string' },
-  entrypoint: { type: 'string' },
-  'pass-env': { type: 'string' },
-  name: { type: 'string' },
-  cwd: { type: 'string' },
-  force: { type: 'boolean' },
-  strict: { type: 'boolean' },
-} as const;
 
 /**
  * Every command line that Stroq prints for a person to paste has values in it that somebody else wrote: the name of a
@@ -196,8 +175,6 @@ function parsedBy(argv: readonly string[]): Parsed | null {
   expect(wantsHelp(command, rest), argv.join(' ')).toBe(false);
   expect(unknownOption(command, rest), argv.join(' ')).toBeNull();
   switch (command) {
-    case 'add':
-      return parseArgs({ args: rest, allowPositionals: true, options: ADD_OPTIONS });
     case 'untaint':
       return parseArgs({ args: rest, options: UNTAINT_OPTIONS });
     case 'vet':
@@ -230,28 +207,7 @@ const emptyPassport = () =>
     rulesId: 'test',
   });
 
-const reconfirm = {
-  argv: (shown: string) => ['add', shown, '--kind', 'mcp', '--force'],
-  parsed: (shown: string): Parsed => ({
-    positionals: [shown],
-    values: { kind: 'mcp', force: true },
-  }),
-};
-
 const printers: readonly Printer[] = [
-  {
-    name: 'the line that confirms a wrapper again (init, the proxy, doctor)',
-    positional: true,
-    print: (value) => ({ text: reconfirmCommand(value), ...reconfirm }),
-  },
-  {
-    name: 'the note init prints for a wrapper it kept',
-    positional: true,
-    print: (value) => ({
-      text: keptNote(value, false).split('confirm it again: ')[1]!,
-      ...reconfirm,
-    }),
-  },
   {
     name: 'the refusal of a screen with too many sensitive lines',
     print: (value) => {
@@ -556,7 +512,7 @@ describe('the parsers of the commands that print lines', () => {
     const { positionals } = parseArgs({
       args: ['@file', '~/x'],
       allowPositionals: true,
-      options: ADD_OPTIONS,
+      options: UNTAINT_OPTIONS,
     });
     expect(positionals).toEqual(['@file', '~/x']);
     expect(quoteWord('~/x', 'linux')).toBe("'~/x'");

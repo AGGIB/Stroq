@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { initMcp } from '../../src/commands/init-mcp.js';
 import { addMcp } from '../../src/install/mcp-install.js';
 import { configPinStatus } from '../../src/mcp/pin-status.js';
-import { reconfirmCommand } from '../../src/mcp/pin-argument.js';
+import { unpinCommand } from '../../src/mcp/pin-argument.js';
 import { mcpFixture } from '../helpers/mcp-install.js';
 
 /**
@@ -32,8 +32,8 @@ async function run(
   return { code, out: out.join(''), err: err.join('') };
 }
 
-describe('stroq init --agent mcp and a wrapper that add confirmed', () => {
-  it('leaves the entry as add wrote it, byte for byte, and keeps the other servers wrapped', async () => {
+describe('stroq init --agent mcp and a pinned wrapper that the lock confirms', () => {
+  it('leaves the entry as it was written, byte for byte, and keeps the other servers wrapped', async () => {
     const f = await mcpFixture();
     await addMcp(f.dir, f.mcpOptions);
     const before = await readFile(f.config, 'utf8');
@@ -44,20 +44,21 @@ describe('stroq init --agent mcp and a wrapper that add confirmed', () => {
     expect(code).toBe(0);
     const after = await f.servers();
     expect(after['demo']).toEqual(written);
-    // the entry that no add wrote is wrapped as ever
+    // the entry that was never pinned is wrapped as ever
     expect(after['other'].args).toEqual(expect.arrayContaining(['mcp', '--server', 'other']));
     expect(await readFile(f.config, 'utf8')).not.toBe(before);
     expect(out).toMatch(/kept demo/);
   });
 
-  it('prints the exact command that confirms a changed wrapper', async () => {
+  it('prints the exact command that takes the pin out, and does not name stroq add', async () => {
     const f = await mcpFixture();
     await addMcp(f.dir, f.mcpOptions);
 
     const { out } = await run(f);
 
-    expect(out).toContain('stroq add demo --kind mcp --force');
-    expect(out).toContain(reconfirmCommand('demo'));
+    expect(out).toContain('stroq init --agent mcp --unwrap');
+    expect(out).toContain(unpinCommand());
+    expect(out).not.toContain('stroq add');
   });
 
   it('keeps it when --cloak is asked for, and says the cloak is not on for it', async () => {
@@ -69,7 +70,7 @@ describe('stroq init --agent mcp and a wrapper that add confirmed', () => {
 
     expect((await f.servers())['demo']).toEqual(written);
     expect(out).toMatch(/--cloak/);
-    expect(out).toContain('stroq add demo --kind mcp --force');
+    expect(out).toContain(unpinCommand());
   });
 
   it('shows the same on a dry run: the preview keeps the entry and the lines go to stderr', async () => {
@@ -82,7 +83,7 @@ describe('stroq init --agent mcp and a wrapper that add confirmed', () => {
 
     expect(await readFile(f.config, 'utf8')).toBe(before);
     expect(JSON.parse(out).mcpServers.demo).toEqual(written);
-    expect(err).toContain('stroq add demo --kind mcp --force');
+    expect(err).toContain(unpinCommand());
   });
 
   it('keeps a confirmed wrapper when strict is requested, and names the confirmed opt-in', async () => {
@@ -92,7 +93,7 @@ describe('stroq init --agent mcp and a wrapper that add confirmed', () => {
     const { out } = await run(f, false, false, true);
     expect((await f.servers())['demo']).toEqual(written);
     expect(out).toContain('--strict was not changed by this run');
-    expect(out).toContain('stroq add demo --kind mcp --strict --force');
+    expect(out).toContain(unpinCommand());
     expect((await f.servers())['other'].args).toContain('--strict');
     expect(out).toContain('entries kept as confirmed are unchanged');
   });
@@ -137,51 +138,13 @@ describe('stroq init --agent mcp and a wrapper that add confirmed', () => {
     const after = (await f.servers())['demo'];
     expect(after.command).toBe('/other/node');
     expect(after.args).toContain(pin);
-    expect(out.join('')).not.toContain('--kind mcp --force');
+    // the note of a pinned wrapper that was kept is not printed: nothing here is pinned and confirmed
+    expect(out.join('')).not.toContain('take the pin out');
   });
 });
 
-describe('the command that confirms a wrapper again', () => {
-  const refused =
-    'the name has characters that cannot be quoted safely for a shell, so no command is shown, and stroq doctor lists the installed names';
-  it.each([
-    ['demo', 'stroq add demo --kind mcp --force'],
-    ['weather-2_a', 'stroq add weather-2_a --kind mcp --force'],
-  ])('is the plain line for %s', (name, line) => {
-    expect(reconfirmCommand(name)).toBe(line);
-  });
-
-  it.each([
-    ['a b', "stroq add 'a b' --kind mcp --force", 'stroq add "a b" --kind mcp --force'],
-    ['$(touch x)', "stroq add '$(touch x)' --kind mcp --force", null],
-    ["it's", null, 'stroq add "it\'s" --kind mcp --force'],
-    ['a\\b', null, 'stroq add a\\b --kind mcp --force'],
-  ] as const)(
-    'quotes %j for this platform, or prints no command',
-    (name, posixLine, windowsLine) => {
-      const line = process.platform === 'win32' ? windowsLine : posixLine;
-      expect(reconfirmCommand(name)).toBe(line ?? refused);
-    },
-  );
-
-  it.each([
-    ['a bang', 'a!b'],
-    ['a newline', 'a\nb'],
-    ['escape', 'a\u001b[2Jb'],
-    ['a right-to-left override', 'a\u202eb'],
-    ['too many characters', 'x'.repeat(5000)],
-  ])('prints no command for a name with %s, only a sentence', (_what, name) => {
-    const text = reconfirmCommand(name);
-
-    expect(text).toBe(refused);
-    expect(text).toMatch(/^[A-Za-z ,.]+$/);
-  });
-
-  it('prints the empty name as an empty argument', () => {
-    expect(reconfirmCommand('')).toBe(
-      process.platform === 'win32'
-        ? 'stroq add "" --kind mcp --force'
-        : "stroq add '' --kind mcp --force",
-    );
+describe('the command that takes a pin out', () => {
+  it('is the unwrap of the mcp config, a plain line with no name in it', () => {
+    expect(unpinCommand()).toBe('stroq init --agent mcp --unwrap');
   });
 });

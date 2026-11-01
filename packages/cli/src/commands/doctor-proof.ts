@@ -35,13 +35,13 @@ function installRecordedAt(agent: string): Date | null {
 function proofText(agent: string, installed: InstallStatus, now: number): string {
   const stored = readHostResult(stroqHome(), agent, new Date(now));
   if (stored.problem !== null)
-    return `the stored result cannot be read (${plainText(stored.problem, 60)}); run stroq prove`;
-  if (stored.result === null) return 'no live check yet (stroq prove)';
+    return `the stored result cannot be read (${plainText(stored.problem, 60)}); run the live check in stroq console`;
+  if (stored.result === null) return 'no live check yet (run it in stroq console)';
   let digest: string;
   try {
     digest = policySha256(loadPolicy());
   } catch {
-    return 'the policy cannot be read, so the stored check cannot be compared with it; mend it and run stroq prove';
+    return 'the policy cannot be read, so the stored check cannot be compared with it; mend it and run the live check in stroq console';
   }
   const shown = displayState({
     capabilities: capabilitiesFor(agent),
@@ -66,7 +66,7 @@ function unavailableText(agent: string): string {
   const capability = capabilitiesFor(agent);
   if (capability !== undefined && !capability.headless)
     return `unsupported (${plainText(capability.reason ?? 'no headless mode', 80)})`;
-  return `not available yet (stroq prove has no driver for ${plainText(agent, 32)})`;
+  return `not available yet (the live check has no driver for ${plainText(agent, 32)})`;
 }
 
 /** The line of an install that is whole, with what the last live check found on the end of it. */

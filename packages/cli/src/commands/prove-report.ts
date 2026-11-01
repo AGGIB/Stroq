@@ -58,45 +58,45 @@ const ADVICE_BY_REASON: ReadonlyArray<readonly [reason: string, line: string]> =
   ],
   [
     REASONS.hostNotFound,
-    'Install the agent CLI and make sure its executable is on your PATH, then run stroq prove again.',
+    'Install the agent CLI and make sure its executable is on your PATH, then run the check again.',
   ],
-  [REASONS.auth, 'Log in to the agent CLI with your subscription, then run stroq prove again.'],
+  [REASONS.auth, 'Log in to the agent CLI with your subscription, then run the check again.'],
   [
     REASONS.limit,
-    'Your plan hit a usage limit or moved on to paid usage. Wait for it to reset, then run stroq prove again.',
+    'Your plan hit a usage limit or moved on to paid usage. Wait for it to reset, then run the check again.',
   ],
   [
     REASONS.apiBilling,
-    'The host said it is paid for by an API key or a cloud account. Stroq never spends that on this check: use your subscription login, then run stroq prove again.',
+    'The host said it is paid for by an API key or a cloud account. Stroq never spends that on this check: use your subscription login, then run the check again.',
   ],
   [
     REASONS.billingUnknown,
-    'The host did not confirm how it is paid for. Update the agent CLI and check your subscription login, then run stroq prove again.',
+    'The host did not confirm how it is paid for. Update the agent CLI and check your subscription login, then run the check again.',
   ],
   [
     REASONS.budget,
     'The budget for live checks is spent (STROQ_LIVE_LEDGER names the file that counts it).',
   ],
-  [REASONS.timeout, 'The host did not answer in time. Run stroq prove again.'],
+  [REASONS.timeout, 'The host did not answer in time. Run the check again.'],
   [
     REASONS.hostError,
-    'The host failed. Check the installed agent CLI and your subscription login, then run stroq prove again.',
+    'The host failed. Check the installed agent CLI and your subscription login, then run the check again.',
   ],
   [
     REASONS.unparsableStream,
-    'The output of the host could not be read, which an update of the agent CLI can cause. Run stroq prove again, and report it if it keeps happening.',
+    'The output of the host could not be read, which an update of the agent CLI can cause. Run the check again, and report it if it keeps happening.',
   ],
   [
     REASONS.cwdMismatch,
-    'The host ran in another directory than the check made for it. Run stroq prove again.',
+    'The host ran in another directory than the check made for it. Run the check again.',
   ],
   [
     REASONS.notIssued,
-    'The model did not issue the command it was given. That says nothing either way: run stroq prove again.',
+    'The model did not issue the command it was given. That says nothing either way: run the check again.',
   ],
   [
     REASONS.probeNotArmed,
-    'The host did not run the command even with the hook out of the way, so its stop proves nothing. Run stroq prove again.',
+    'The host did not run the command even with the hook out of the way, so its stop proves nothing. Run the check again.',
   ],
   [
     REASONS.maxRequests,
@@ -104,7 +104,7 @@ const ADVICE_BY_REASON: ReadonlyArray<readonly [reason: string, line: string]> =
   ],
 ];
 
-const GENERIC_ADVICE = 'Nothing was proven either way. Run stroq prove again.';
+const GENERIC_ADVICE = 'Nothing was proven either way. Run the check again.';
 
 const VERIFIED_ADVICE = [
   'Run it again after a host upgrade: stroq doctor marks the proof stale for Stroq, policy or install changes, but cannot detect a host update (the host version is not re-read).',
@@ -112,8 +112,8 @@ const VERIFIED_ADVICE = [
 
 const FAILED_ADVICE = [
   'Do not rely on the hook with this host until this is fixed.',
-  'Run stroq doctor, put the hook in again with stroq init, and run stroq prove again.',
-  'If it fails again, report it with the output of stroq prove --json.',
+  'Run stroq doctor, put the hook in again with stroq init, and run the check again.',
+  'If it fails again, report it with the output of the check (its --json form).',
 ];
 
 /**
@@ -125,7 +125,7 @@ const DECLINED_ADVICE =
   'The model itself declined the secret-egress command, which looks like credential exfiltration to it. That probe is optional: no action is needed when the other probes verify the host.';
 
 const STAND_IN_ADVICE = [
-  'A double of the host answered, so nothing is known of the real host itself. Run stroq prove against the real host.',
+  'A double of the host answered, so nothing is known of the real host itself. Run the check against the real host.',
 ];
 
 /** The secret-egress probe, when the model would not issue its command. */
@@ -234,7 +234,7 @@ export const declinedReport = (agent: string, hostVersion: string | null): Prove
 
 export const dryRunReport = (agent: string, hostVersion: string | null): ProveReport =>
   notRunReport(agent, 'not-attempted', hostVersion, 'dry run: no request was made', [
-    'Run stroq prove --yes to make the check.',
+    'Run the check with --yes to make it.',
   ]);
 
 /** 0 for a live check that verified, 1 for one that failed, 3 for every other way of not knowing. */

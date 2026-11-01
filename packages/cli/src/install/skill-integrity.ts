@@ -4,7 +4,6 @@ import { join, resolve } from 'node:path';
 import { readRegularFile } from '@stroq/core';
 import { assertWriteAllowed } from '../harden/atomic.js';
 import { passportsFileIn, stroqHome } from '../paths.js';
-import { commandLine } from '../shell-quote.js';
 import { readPassports, SKILL_NAME, type Passports, type SkillRecord } from './lock.js';
 import { readDirTree, READ_DIR_BLIND_SPOTS, ReadDirError } from './read-dir.js';
 import { checkEntryPath, quotePath } from './safe-path.js';
@@ -101,6 +100,9 @@ async function verifyStoreManifest(
   return { ok: true };
 }
 
+/** What to do about a skill whose bytes are not the ones that were confirmed: `stroq add` is gone, so the agent's way. */
+const REINSTALL = "install it again with your agent's own command";
+
 /**
  * Inspects the integrity of a single installed skill record without modifying the filesystem,
  * lockfile, receipts, or store.
@@ -110,15 +112,6 @@ export async function checkSingleSkillIntegrity(
   record: SkillRecord,
   context: { isUser: boolean; home: string; platform?: NodeJS.Platform },
 ): Promise<SkillIntegrityCheck> {
-  const scope = context.isUser ? ['--user'] : [];
-  const restore = commandLine([
-    'stroq',
-    'add',
-    { positional: name, what: 'name' },
-    ...scope,
-    '--restore',
-  ]);
-  const remove = commandLine(['stroq', 'remove', { positional: name, what: 'name' }, ...scope]);
   const checkName = `skill ${quotePath(name)}`;
 
   // Validate lock record structure and digest
@@ -177,7 +170,7 @@ export async function checkSingleSkillIntegrity(
       name: checkName,
       status: 'unverifiable',
       ok: false,
-      detail: `unverifiable at ${quotePath(record.installedTo)}: ${storeCheck.reason}; restore with "${restore}"`,
+      detail: `unverifiable at ${quotePath(record.installedTo)}: ${storeCheck.reason}; ${REINSTALL}`,
     };
   }
 
@@ -191,7 +184,7 @@ export async function checkSingleSkillIntegrity(
         name: checkName,
         status: 'missing',
         ok: false,
-        detail: `missing at ${quotePath(record.installedTo)}; restore with "${restore}" or remove with "${remove}"`,
+        detail: `missing at ${quotePath(record.installedTo)}; ${REINSTALL}`,
       };
     }
     return {
@@ -207,7 +200,7 @@ export async function checkSingleSkillIntegrity(
       name: checkName,
       status: 'unverifiable',
       ok: false,
-      detail: `unverifiable at ${quotePath(record.installedTo)}: symbolic links are not permitted; inspect with "stroq vet --from <source>" or restore with "${restore}"`,
+      detail: `unverifiable at ${quotePath(record.installedTo)}: symbolic links are not permitted; inspect with "stroq vet --from <source>" or ${REINSTALL}`,
     };
   }
 
@@ -216,7 +209,7 @@ export async function checkSingleSkillIntegrity(
       name: checkName,
       status: 'unverifiable',
       ok: false,
-      detail: `unverifiable at ${quotePath(record.installedTo)}: path exists and is not a directory; inspect with "stroq vet --from <source>" or restore with "${restore}"`,
+      detail: `unverifiable at ${quotePath(record.installedTo)}: path exists and is not a directory; inspect with "stroq vet --from <source>" or ${REINSTALL}`,
     };
   }
 
@@ -271,7 +264,7 @@ export async function checkSingleSkillIntegrity(
       name: checkName,
       status: 'unverifiable',
       ok: false,
-      detail: `unverifiable at ${quotePath(record.installedTo)}: contains symbolic links; inspect with "stroq vet --from <source>" or restore with "${restore}"`,
+      detail: `unverifiable at ${quotePath(record.installedTo)}: contains symbolic links; inspect with "stroq vet --from <source>" or ${REINSTALL}`,
     };
   }
 
@@ -294,7 +287,7 @@ export async function checkSingleSkillIntegrity(
     name: checkName,
     status: 'changed',
     ok: false,
-    detail: `changed at ${quotePath(record.installedTo)}; restore with "${restore}"`,
+    detail: `changed at ${quotePath(record.installedTo)}; ${REINSTALL}`,
   };
 }
 

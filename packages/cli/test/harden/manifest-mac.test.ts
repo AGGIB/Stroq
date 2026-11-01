@@ -163,7 +163,7 @@ describe('the signed harden manifest', () => {
     const before = snapshotOf(e, path);
     expect(thrownBy(() => readManifest(e.env))).toMatchObject({
       code: 'manifest-unsigned',
-      message: expect.stringContaining('stroq harden apply'),
+      message: expect.stringContaining('apply the filter again'),
     });
     await expect(undo(e, real)).rejects.toMatchObject({ code: 'manifest-unsigned' });
     await expect(applied(e, 'other.json', BEFORE, [addDeny('b')])).rejects.toMatchObject({

@@ -60,7 +60,7 @@ const detailOf = async (name = 'hooks'): Promise<string> =>
 describe('the proof on the line of a whole install', () => {
   it('says there is no live check yet, and the command that makes one', async () => {
     install();
-    expect(await detailOf()).toContain(' · proof: no live check yet (stroq prove)');
+    expect(await detailOf()).toContain(' · proof: no live check yet (run it in stroq console)');
   });
 
   it('puts the proof before the time of the last call, so that the line still ends on the call', async () => {
@@ -90,7 +90,7 @@ describe('the proof on the line of a whole install', () => {
     store({ stroqVersion: '0.1.0' });
     const detail = await detailOf();
     expect(detail).toMatch(/proof: stale \(checked 2026-10-10, but Stroq 0\.1\.0 is now /);
-    expect(detail).toContain('run stroq prove again');
+    expect(detail).toContain('run the live check again');
   });
 
   it('says it is stale when the policy is not the policy that was checked', async () => {
@@ -142,7 +142,9 @@ describe('the proof on the line of a whole install', () => {
       '{"version":1,"hostVersion":"\\u001b[31mevil"',
     );
     const detail = await detailOf();
-    expect(detail).toMatch(/proof: the stored result cannot be read \(not JSON\); run stroq prove/);
+    expect(detail).toMatch(
+      /proof: the stored result cannot be read \(not JSON\); run the live check in stroq console/,
+    );
     expect(detail).not.toContain('evil');
   });
 
@@ -167,7 +169,7 @@ describe('where there is no proof to show', () => {
     const check = { name: 'future hooks', ok: true, detail: 'project: installed' };
     const shown = withProof(check, 'future', { installed: true, changed: false }, NOW);
     expect(shown.detail).toBe(
-      'project: installed · proof: not available yet (stroq prove has no driver for future)',
+      'project: installed · proof: not available yet (the live check has no driver for future)',
     );
   });
 

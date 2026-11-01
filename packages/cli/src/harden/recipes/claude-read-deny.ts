@@ -26,7 +26,7 @@ const NEW_SETTINGS_MODE = 0o600;
 const LIMITS: readonly string[] = [
   'Claude Code will then refuse to read these files with its Read tool, and with the simple shell readers it recognises, such as cat.',
   'This is a filter inside Claude Code, a best effort and not a guarantee: a program that reads the file itself, such as python -c, is not covered.',
-  'Only an operating system sandbox covers that; stroq run --sandbox starts an agent inside one.',
+  'Only an operating system sandbox covers that.',
   'The two project rules name the .env files at the top of the folder Claude Code is started in; Stroq has not checked whether Claude Code also applies them to a .env in a subfolder.',
   'The rule for .env.* also covers .env.example, because a deny rule cannot say "all but".',
   'Rules the file already has are kept as they are, and undo never removes one of them.',

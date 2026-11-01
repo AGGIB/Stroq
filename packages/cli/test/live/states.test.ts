@@ -136,7 +136,7 @@ describe('a host with a verified result stored', () => {
     );
     expect(shown.state).toBe('stale');
     expect(shown.reason).toMatch(/version of the host is not known/);
-    expect(shown.reason).toMatch(/stroq prove/);
+    expect(shown.reason).toMatch(/run the live check again/);
   });
 
   // A host-free check (the MCP proxy is run against a server of ours, with no client) has no host whose
@@ -173,7 +173,7 @@ describe('a host with a verified result stored', () => {
       );
       expect(shown.state).toBe('stale');
       expect(shown.reason).toMatch(/installed again/);
-      expect(shown.reason).toMatch(/stroq prove/);
+      expect(shown.reason).toMatch(/run the live check again/);
     });
 
     it('is stale when the install was recorded after a check that was made earlier on, by a millisecond', () => {
@@ -245,7 +245,7 @@ describe('a host with a verified result stored', () => {
     const shown = displayState(input({ stored: stored('verified'), ...over }));
     expect(shown.state).toBe('stale');
     for (const name of names) expect(shown.reason).toMatch(name);
-    expect(shown.reason).toMatch(/stroq prove/);
+    expect(shown.reason).toMatch(/run the live check again/);
   });
 
   it('is stale, and not verified, when the hook is no longer whole', () => {
@@ -319,7 +319,7 @@ describe('a host with a failed result stored', () => {
   it('says it is worth checking again when something has changed since', () => {
     const shown = displayState(input({ stored: stored('failed'), stroqVersion: '0.24.0' }));
     expect(shown.reason).toMatch(/changed since/);
-    expect(shown.reason).toMatch(/stroq prove/);
+    expect(shown.reason).toMatch(/run the live check again/);
   });
 });
 

@@ -1,6 +1,6 @@
 import { existsSync, statSync } from 'node:fs';
 import { basename, resolve } from 'node:path';
-import { reconfirmCommand } from '../mcp/pin-argument.js';
+import { unpinCommand } from '../mcp/pin-argument.js';
 import { outsideLine } from '../ui/layout.js';
 import { MAX_LINE_CHARS } from '../mcp/framing.js';
 import { DEFAULT_STRICT_MAX_WITHHELD, STRICT_MAX_BENIGN_WITHHELD } from '../mcp/strict-limits.js';
@@ -97,7 +97,7 @@ const MCP_CLOAK_NOTE =
   'Re-run this command WITHOUT --cloak to switch it back off.\n';
 
 /**
- * The servers of this config file that `add` confirmed. The lock reader is loaded here, when it is needed, and not
+ * The servers of this config file that were pinned and confirmed. The lock reader is loaded here, when it is needed, and not
  * with the rest of `init`, which the hooks load on every call and which must not pull in Safe Install.
  */
 async function confirmedNames(file: string): Promise<ReadonlySet<string>> {
@@ -105,11 +105,11 @@ async function confirmedNames(file: string): Promise<ReadonlySet<string>> {
   return new Set(confirmedEntries(file).keys());
 }
 
-/** Why a wrapper that `add` confirmed was not rewritten, and the one command that applies what this run would have changed. */
+/** Why a pinned wrapper was not rewritten, and the one command that takes the pin out so that a rewrite can apply. */
 export const keptNote = (name: string, cloak: boolean, strict = false): string =>
-  `  ${outsideLine(name)} is pinned by stroq add and the pin holds its wrapper exactly as add wrote it, so this run left it alone` +
+  `  ${outsideLine(name)} is pinned and the pin holds its wrapper exactly as it was written, so this run left it alone` +
   `${cloak ? ' (the cloak is not on for it)' : ''}` +
-  `${strict ? ' (--strict was not changed by this run)' : ''}. To rewrite it for this directory, node and flags, confirm it again: ${reconfirmCommand(name, { strict })}`;
+  `${strict ? ' (--strict was not changed by this run)' : ''}. To rewrite it for this directory, node and flags, take the pin out first: ${unpinCommand()}`;
 
 /**
  * Printed only when `--strict` was asked for, because what it costs is as much a part of
@@ -178,7 +178,7 @@ export async function initMcp(
   const outcomeStream = dryRun ? process.stderr : process.stdout;
   for (const outcome of rewrite.outcomes) {
     outcomeStream.write(`${formatOutcome(outcome)}\n`);
-    if (outcome.action === 'kept (confirmed by stroq add)')
+    if (outcome.action === 'kept (pinned)')
       outcomeStream.write(`${keptNote(outcome.name, options.cloak, options.strict === true)}\n`);
     const entry = (config.mcpServers as Record<string, unknown>)[outcome.name];
     if (

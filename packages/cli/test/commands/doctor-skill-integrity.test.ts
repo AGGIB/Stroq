@@ -47,7 +47,8 @@ describe('doctor skill integrity', () => {
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain('changed at');
     expect(check?.detail).not.toContain('reconfirm');
-    expect(check?.detail).toContain('restore with "stroq add demo --restore"');
+    expect(check?.detail).toContain("install it again with your agent's own command");
+    expect(check?.detail).not.toContain('stroq add');
 
     // Restore original file
     await writeFile(
@@ -81,11 +82,11 @@ describe('doctor skill integrity', () => {
     const check = report.checks.find((c) => c.name === 'skill "demo"');
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain('missing at');
-    expect(check?.detail).toContain('restore with "stroq add demo --restore"');
-    expect(check?.detail).toContain('remove with "stroq remove demo"');
+    expect(check?.detail).toContain("install it again with your agent's own command");
+    expect(check?.detail).not.toMatch(/stroq (add|remove)/);
   });
 
-  it('user-scope skill reports next actions with --user', async () => {
+  it('user-scope skill reports the same next action', async () => {
     const f = await setup();
     const added = await addSkill(f.source, { ...f.options, user: true });
     await rm(added.installedTo, { recursive: true, force: true });
@@ -97,8 +98,8 @@ describe('doctor skill integrity', () => {
     const check = report.checks.find((c) => c.name === 'skill "demo"');
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain('missing at');
-    expect(check?.detail).toContain('restore with "stroq add demo --user --restore"');
-    expect(check?.detail).toContain('remove with "stroq remove demo --user"');
+    expect(check?.detail).toContain("install it again with your agent's own command");
+    expect(check?.detail).not.toMatch(/stroq (add|remove)/);
   });
 
   it('reports unverifiable when installed directory or internal entry is a symlink', async () => {

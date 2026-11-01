@@ -54,7 +54,7 @@ export function verifyingKey(home: string, file: string): Buffer {
   if (key !== null) return key;
   throw new HardenError(
     'manifest-unverified',
-    `${file} is signed, but the key that checks it (${stateMacKeyFileIn(home)}) is missing, so Stroq does not use it and changed nothing. Put the key back, or move ${file} aside and run \`stroq harden apply\` again`,
+    `${file} is signed, but the key that checks it (${stateMacKeyFileIn(home)}) is missing, so Stroq does not use it and changed nothing. Put the key back, or move ${file} aside and apply the filter again`,
   );
 }
 
@@ -69,7 +69,7 @@ export function assertSigned(file: string, key: Buffer, files: unknown, mac: str
   if (found.length === expected.length && timingSafeEqual(found, expected)) return;
   throw new HardenError(
     'manifest-unverified',
-    `${file} does not match its signature: something other than Stroq changed it after Stroq wrote it, so Stroq does not use it and changed nothing. Look at what changed, then move it aside and run \`stroq harden apply\` again`,
+    `${file} does not match its signature: something other than Stroq changed it after Stroq wrote it, so Stroq does not use it and changed nothing. Look at what changed, then move it aside and apply the filter again`,
   );
 }
 
@@ -77,5 +77,5 @@ export function assertSigned(file: string, key: Buffer, files: unknown, mac: str
 export const unsignedManifest = (file: string): HardenError =>
   new HardenError(
     'manifest-unsigned',
-    `${file} was written by an earlier Stroq and is not signed, so Stroq no longer trusts it to say what to restore or remove, and changed nothing. Move it aside and run \`stroq harden apply\` again. What the earlier applies added stays in your files and \`stroq harden undo\` will not take it out; the old file lists it, if you want to remove it by hand`,
+    `${file} was written by an earlier Stroq and is not signed, so Stroq no longer trusts it to say what to restore or remove, and changed nothing. Move it aside and apply the filter again. What the earlier applies added stays in your files and an undo will not take it out; the old file lists it, if you want to remove it by hand`,
   );

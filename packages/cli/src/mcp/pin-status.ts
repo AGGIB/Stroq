@@ -1,13 +1,8 @@
 import { existsSync } from 'node:fs';
 import { isRecord } from '../adapters/tool-input.js';
 import { parseMcpArgv } from '../commands/mcp.js';
-import {
-  entryRunsStrict,
-  readMcpConfig,
-  wrappedEntryPath,
-  wrapperIndex,
-} from '../commands/mcp-config.js';
-import { reconfirmCommand } from './pin-argument.js';
+import { readMcpConfig, wrappedEntryPath, wrapperIndex } from '../commands/mcp-config.js';
+import { unpinCommand } from './pin-argument.js';
 
 export interface PinStatus {
   readonly name: string;
@@ -54,12 +49,12 @@ export async function configPinStatus(file: string): Promise<readonly PinStatus[
   for (const [name, entry] of Object.entries(servers)) {
     const label = `mcp pin ${quotePath(name)}`;
     if (!isWrapperWithPin(entry)) {
-      // The lock says `add` confirmed a pinned wrapper under this name, and what stands there has no pin.
+      // The lock says a pinned wrapper was confirmed under this name, and what stands there has no pin.
       if (confirmed.has(name))
         statuses.push({
           name: label,
           ok: false,
-          detail: `the pin was taken out of this entry, or it is not the one confirmed; start is not guarded (to confirm it again run: ${reconfirmCommand(name)})`,
+          detail: `the pin was taken out of this entry, or it is not the one confirmed; start is not guarded (to take the pin out run: ${unpinCommand()})`,
         });
       continue;
     }
@@ -82,7 +77,7 @@ export async function configPinStatus(file: string): Promise<readonly PinStatus[
       result.ok && entryPath !== null && !existsSync(entryPath)
         ? {
             ok: false,
-            detail: `the recorded Stroq entry ${quotePath(entryPath)} no longer exists; start will fail (to confirm it again run: ${reconfirmCommand(name, { strict: entryRunsStrict(entry) })})`,
+            detail: `the recorded Stroq entry ${quotePath(entryPath)} no longer exists; start will fail (to take the pin out run: ${unpinCommand()})`,
           }
         : result;
     statuses.push({ name: label, ...finalResult });

@@ -67,7 +67,7 @@ export const COMMANDS: readonly CommandHelp[] = [
       ],
       [
         '--strict',
-        'with --agent mcp: withhold any server message Stroq could not fully read and scan; keeps wrappers confirmed by add unchanged and prints the add --strict --force confirmation command',
+        'with --agent mcp: withhold any server message Stroq could not fully read and scan; keeps pinned wrappers unchanged and prints the command that takes a pin out',
       ],
     ],
   },

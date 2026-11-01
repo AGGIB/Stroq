@@ -342,31 +342,3 @@ export const srtArgv = (
 
 /** The program `--sandbox` looks for on `PATH`. */
 export const SRT_BIN = 'srt';
-
-/**
- * Said when the agent about to start has a terminal and the sandbox is macOS
- * Seatbelt.
- *
- * Measured against srt 0.0.77: inside its profile a child's `tcsetattr` fails with
- * `EPERM`, so `process.stdin.setRawMode` throws and `stty` cannot read the line
- * discipline. A permissive `sandbox-exec` profile allows both, so this is srt's
- * profile rather than Seatbelt in general — and it is not something Stroq can widen
- * from outside. Every full-screen agent UI needs raw mode, so this is the difference
- * between "the sandbox works" and "the sandbox works for the headless invocation".
- *
- * Said rather than refused: a headless run in the same shell is legitimate and
- * `isTTY` is a good but not perfect proxy for what the agent will try to do. An
- * unexplained crash a second after launch is the outcome this exists to prevent.
- */
-export const SRT_NO_RAW_MODE = [
-  'stroq run: --sandbox on macOS uses srt’s Seatbelt profile, which denies raw mode (tcsetattr).',
-  '  An interactive, full-screen agent UI will not work inside it. Measured against srt 0.0.77.',
-  '  Use the agent’s non-interactive mode under --sandbox, or drop --sandbox for an interactive session.',
-].join('\n');
-
-/** Refusal before preflight or launch preparation when required `srt` is absent. */
-export const SRT_MISSING = [
-  'stroq run: cannot start: --sandbox requires "srt", which is not on PATH.',
-  '  Nothing was started. --force does not bypass this requirement.',
-  '  Install it with: npm install -g @anthropic-ai/sandbox-runtime',
-].join('\n');

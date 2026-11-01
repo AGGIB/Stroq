@@ -171,7 +171,7 @@ export function unwrapArgs(args: readonly unknown[]): OriginalCommand | null {
 export type McpEntryAction =
   | 'wrapped'
   | 'already wrapped'
-  | 'kept (confirmed by stroq add)'
+  | 'kept (pinned)'
   | 'unwrapped'
   | 'not wrapped'
   | 'skipped (http)'
@@ -207,8 +207,8 @@ export interface WrapOptions {
    */
   readonly cloak?: boolean;
   /**
-   * The names of the servers whose wrapper `stroq add --kind mcp` wrote and the lock confirms. Such a wrapper is held
-   * to the command line `add` wrote, token for token, so a rewrite (a new `--cwd`, `--pass-env`, node path or
+   * The names of the servers whose wrapper was written with a pin (by `stroq add --kind mcp`, which 0.30 removed)
+   * and the lock confirms. Such a wrapper is held to the command line that was written, token for token, so a rewrite (a new `--cwd`, `--pass-env`, node path or
    * `--cloak`) would only make the pin refuse to start it: it is left as it is.
    */
   readonly confirmed?: ReadonlySet<string>;
@@ -265,7 +265,7 @@ function wrapEntry(name: string, entry: Record<string, unknown>, opts: WrapOptio
   if (hasInvalidArgs(entry)) return { entry, action: 'skipped (args is not an array)' };
   const original = unwrapArgs(argsOf(entry));
   if (original !== null && opts.confirmed?.has(name) === true)
-    return { entry, action: 'kept (confirmed by stroq add)' };
+    return { entry, action: 'kept (pinned)' };
   const command =
     original?.command ?? (typeof entry['command'] === 'string' ? entry['command'] : '');
   if (command === '') return { entry, action: 'skipped (no command)' };
