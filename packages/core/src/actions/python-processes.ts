@@ -8,6 +8,7 @@ import {
   type Bindings,
   type Names,
 } from './python-bindings.js';
+import { readNamedValues, type NamedValues } from './python-values.js';
 import {
   DISTINCT_RUNS,
   ENVIRONMENTS,
@@ -73,8 +74,9 @@ export interface PythonProcesses {
   /** A process is started in a way whose command is not read. */
   readonly unread: boolean;
   /**
-   * The program reaches names through strings, runs or loads code it makes, decodes data, or changes
-   * the environment its processes get.
+   * The program reaches names through strings, runs or loads code it makes, changes the environment
+   * its processes get, or decodes data that can go somewhere (to a process it starts, or to a file it
+   * writes). A program that decodes and has nowhere to send the result but its own output is not opaque.
    */
   readonly opaque: boolean;
   /** A string that is not a command the program starts holds a word that marks code: it may be run. */
@@ -170,6 +172,7 @@ class ProgramReader {
     private readonly match: ReadonlyMap<number, number>,
     private readonly names: Names,
     private readonly bindings: Bindings,
+    private readonly values: NamedValues,
   ) {}
 
   private add(process: Started): void {
@@ -209,9 +212,13 @@ class ProgramReader {
     );
   }
 
-  /** The words of a list or tuple written out as the command, or null when any is not known before it runs. */
-  private wordsOf([from, to]: readonly [number, number]): string[] | null {
+  /**
+   * The words of a list or tuple written out as the command, or of a name that is bound to one and
+   * touched nowhere else (`python-values.ts`), or null when any is not known before it runs.
+   */
+  private wordsOf(range: readonly [number, number]): string[] | null {
     const { tokens, match } = this;
+    const [from, to] = this.listOf(range);
     const open = tokens[from] as PythonToken;
     if (!(isOp(open, '[') || isOp(open, '(')) || match.get(from) !== to - 1) return null;
     const words: string[] = [];
@@ -241,6 +248,26 @@ class ProgramReader {
     // `('ls')` is a string in parentheses, not a tuple.
     if (isOp(open, '(') && commas === 0) return null;
     return words;
+  }
+
+  /** The range of the list a name stands for, or the range given when it is not such a name. */
+  private listOf(range: readonly [number, number]): readonly [number, number] {
+    const [from, to] = range;
+    const tok = this.tokens[from] as PythonToken;
+    if (to !== from + 1 || tok.kind !== 'name' || this.names.imported.has(tok.text)) return range;
+    return this.values.lists.get(tok.text) ?? range;
+  }
+
+  /**
+   * The variables a copy of the environment gets, as the words that put them before a command
+   * (`A=1 B='x y'`), for the name given as `env=`; null when it is anything else.
+   */
+  private environmentOf([from, to]: readonly [number, number]): string[] | null {
+    const tok = this.tokens[from] as PythonToken;
+    if (to !== from + 1 || tok.kind !== 'name') return null;
+    const variables = this.values.environments.get(tok.text);
+    if (variables === undefined) return null;
+    return variables.map(([key, value]) => `${key}=${quote(value)}`);
   }
 
   /** What `stdin=` gives the process: nothing (`DEVNULL`), what the program reads (`None`), or what it writes. */
@@ -280,8 +307,16 @@ class ProgramReader {
     }
     let stdin: PythonProcess['stdin'] = 'inherit';
     let cwd: string | undefined;
+    let environment: string[] = [];
     for (const [key, range] of call.keywords) {
-      if (key === 'input') stdin = 'fed';
+      if (key === 'env') {
+        const variables = this.environmentOf(range);
+        if (variables === null) {
+          this.unread = true;
+          return;
+        }
+        environment = variables;
+      } else if (key === 'input') stdin = 'fed';
       else if (key === 'stdin') stdin = stdin === 'fed' ? 'fed' : this.stdinOf(range);
       else if (key === 'cwd') {
         // A directory written out is where its scripts are read; a new temporary one has none.
@@ -305,7 +340,8 @@ class ProgramReader {
     const text = this.literal(first);
     const where = cwd === undefined ? {} : { cwd };
     if (shellValue === 'True') {
-      if (text === undefined) this.unread = true;
+      // The variables of `env=` belong to the whole line, and a prefix is only the first command's.
+      if (text === undefined || environment.length > 0) this.unread = true;
       else this.add({ command: text, stdin, ...where });
       return;
     }
@@ -315,7 +351,7 @@ class ProgramReader {
       this.unread = true;
       return;
     }
-    this.add({ command: words.join(' '), stdin, ...where });
+    this.add({ command: [...environment, ...words].join(' '), stdin, ...where });
   }
 
   /**
@@ -473,7 +509,8 @@ class ProgramReader {
     else if (DISTINCT_RUNS.has(word)) this.readRun(at, word);
     else if (OS_SHELLS.has(word)) this.readShell(at, word, false);
     else if (UNREAD_STARTS.has(word)) this.unread = true;
-    else if (ENVIRONMENTS.has(word)) this.opaque ||= !this.readsEnvironment(at);
+    else if (ENVIRONMENTS.has(word))
+      this.opaque ||= !this.readsEnvironment(at) && !this.values.copies.has(at);
     else if (OPAQUE_ATTRIBUTES.has(word) || isOpaqueDunder(word)) this.opaque = true;
   }
 
@@ -498,11 +535,19 @@ class ProgramReader {
   }
 }
 
-/** Whether a program may write a file: a writer's name (`write`, `copy`, …), or `open` in a mode that writes or is not written out. */
-function writesFiles(tokens: readonly PythonToken[], match: ReadonlyMap<number, number>): boolean {
+/**
+ * Whether a program may write a file: a writer's name (`write`, `copy`, …), or `open` in a mode that writes or
+ * is not written out. The `copy` of a copy of the environment (`copied`, the index of its `environ`) writes
+ * nothing.
+ */
+function writesFiles(
+  tokens: readonly PythonToken[],
+  match: ReadonlyMap<number, number>,
+  copied: ReadonlySet<number>,
+): boolean {
   return tokens.some((tok, i) => {
     if (tok.kind !== 'name') return false;
-    if (WRITES.has(tok.text)) return true;
+    if (WRITES.has(tok.text)) return !copied.has(i - 2);
     if (tok.text !== 'open' || !isOp(tokens[i + 1], '(')) return false;
     const call = argumentsOf(tokens, match, i + 1);
     if (call === null || call.starred) return true;
@@ -542,7 +587,8 @@ export function readPythonProcesses(program: string): PythonProcesses | null {
   for (const modules of [names.subprocess, names.os, names.sys])
     for (const name of [...modules])
       if (!names.imported.has(name) && (bindings.counts.get(name) ?? 0) > 0) modules.delete(name);
-  const reader = new ProgramReader(tokens, match, names, bindings);
+  const values = readNamedValues(tokens, match, names, inImport);
+  const reader = new ProgramReader(tokens, match, names, bindings, values);
   for (let i = 0; i < tokens.length; i += 1) {
     const tok = tokens[i] as PythonToken;
     if (tok.kind !== 'name' || inImport(i)) continue;
@@ -564,7 +610,8 @@ export function readPythonProcesses(program: string): PythonProcesses | null {
   );
   // A program that may write a file and starts a process may run what it wrote (`sh x.sh` after writing
   // `x.sh`): what runs is not on disk before it starts, so it is not read.
-  const writesAndRuns = reader.processes.length > 0 && writesFiles(tokens, match);
+  const writes = writesFiles(tokens, match, values.copies);
+  const writesAndRuns = reader.processes.length > 0 && writes;
   // And one that may fetch: what it starts may be what it fetched.
   const fetchesAndRuns =
     reader.processes.length > 0 &&
@@ -595,7 +642,13 @@ export function readPythonProcesses(program: string): PythonProcesses | null {
       writesAndRuns ||
       fetchesAndRuns ||
       (reader.movesUnread && processes.length > 0),
-    opaque: names.opaque || reader.opaque || rebound,
+    // Decoded data is run by what it is given to: a process (it may be the decoded text) or a file (it may
+    // be run later). A program with neither has nowhere to send it but its own output.
+    opaque:
+      names.opaque ||
+      reader.opaque ||
+      rebound ||
+      (names.decodes && (reader.processes.length > 0 || writes)),
     hiddenPayload,
   };
 }

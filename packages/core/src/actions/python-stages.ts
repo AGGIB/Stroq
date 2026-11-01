@@ -150,8 +150,11 @@ export function readPythonStages(context: PythonStageContext): PythonStages {
       const notRead =
         reading.unread ||
         reading.hiddenPayload ||
-        // Where the old pattern sees the program, it answers unless every module it imports is known.
-        (seen && reading.unknownModules) ||
+        // Where the old pattern sees the program, it answers unless every module it imports is known, or the
+        // program starts commands it writes out. A module of the project (`dvc.config`) runs what it holds when
+        // it is imported, as it does in `python -c 'import dvc.config'`, which no word of the pattern stops; what
+        // the pattern would stop is the commands, and those are read here and judged as the commands they are.
+        (seen && reading.unknownModules && reading.processes.length === 0) ||
         (reading.opaque && (reading.processes.length > 0 || seen)) ||
         !reading.processes.every((process) => readsOnly(process, input));
       if (notRead) {

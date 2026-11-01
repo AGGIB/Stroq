@@ -398,7 +398,7 @@ describe('a string that may be code', () => {
   });
 });
 
-describe('a program that reaches names through strings, runs code it makes, or decodes', () => {
+describe('a program that reaches names through strings, runs code it makes, or decodes to somewhere', () => {
   it.each([
     ['getattr', "import os\ngetattr(os, 'sys' + 'tem')('ls')"],
     ['__import__', "__import__('os')"],
@@ -420,7 +420,18 @@ describe('a program that reaches names through strings, runs code it makes, or d
     ['putenv', "import os\nos.putenv('PATH', '/tmp')"],
     ['environ by name', 'from os import environ'],
     ['a dunder', '().__class__.__base__.__subclasses__()'],
-    ['base64', "import base64\nbase64.b64decode('aGk=')"],
+    [
+      'base64, decoded into a file',
+      "import base64\nopen('x.sh', 'wb').write(base64.b64decode('bHM='))",
+    ],
+    [
+      'base64, decoded beside a process',
+      "import base64, os\nos.system('ls')\nprint(base64.b64decode('aGk='))",
+    ],
+    [
+      'binascii, decoded into a file',
+      "import binascii\nopen('x', 'wb').write(binascii.unhexlify('6869'))",
+    ],
     ['codecs', "import codecs\ncodecs.decode('x', 'rot13')"],
     ['fromhex', "bytes.fromhex('6869')"],
     ['importlib', "import importlib\nimportlib.import_module('os')"],
@@ -459,6 +470,36 @@ describe('a program that reaches names through strings, runs code it makes, or d
     const reading = readPythonProcesses(program);
     expect(reading?.opaque, program).toBe(program.includes('os = os.name'));
     expect(reading?.unread).toBe(false);
+  });
+});
+
+describe('a program that decodes data and has nowhere to send it', () => {
+  it('is unread, not opaque, where the decoded text is the command', () => {
+    const reading = readPythonProcesses(
+      "import base64, os\nos.system(base64.b64decode('bHM=').decode())",
+    );
+    expect(reading?.unread).toBe(true);
+    expect(reading?.processes).toEqual([]);
+  });
+
+  it.each([
+    ['base64 and print', "import base64\nprint(base64.b64decode('aGk='))"],
+    ['base64 by name', "from base64 import urlsafe_b64decode\nprint(urlsafe_b64decode('aGk='))"],
+    ['binascii', "import binascii\nprint(binascii.a2b_base64('aGk='))"],
+    ['base64 into JSON', "import base64, json\nprint(json.loads(base64.b64decode('e30=')))"],
+  ])('is not opaque, and says it decodes: %s', (_name, program) => {
+    const reading = readPythonProcesses(program);
+    expect(reading?.opaque).toBe(false);
+    expect(reading?.unread).toBe(false);
+  });
+
+  it.each([
+    ['codecs', "import codecs\nprint(codecs.decode('x', 'rot13'))"],
+    ['zlib', 'import zlib\nprint(zlib.decompress(b))'],
+    ['gzip', 'import gzip\nprint(gzip.decompress(b))'],
+    ['fromhex', "print(bytes.fromhex('6869'))"],
+  ])('and a decoder that is not one of those stays opaque: %s', (_name, program) => {
+    expect(readPythonProcesses(program)?.opaque).toBe(true);
   });
 });
 

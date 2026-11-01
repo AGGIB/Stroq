@@ -56,9 +56,15 @@ export const UNKNOWN_SUBMODULES = set('logging.config concurrent.futures.process
 /** Modules that run code given as a string, load code, decode data, or reach the interpreter's internals. */
 export const OPAQUE_MODULES = set(
   `importlib runpy code codeop pickle cPickle _pickle marshal shelve dill cloudpickle joblib ctypes
-   cffi builtins base64 codecs zlib binascii bz2 lzma gzip pydoc pdb bdb timeit cProfile profile
-   trace doctest pkgutil IPython yaml`,
+   cffi builtins codecs zlib bz2 lzma gzip pydoc pdb bdb timeit cProfile profile trace doctest
+   pkgutil IPython yaml`,
 );
+/**
+ * Modules that turn text into bytes and back and do nothing else (no file, no process, no name by a
+ * string). A program that decodes with one is opaque only where the decoded value has somewhere to go:
+ * a process it starts, or a file it writes (`python-processes.ts`). Decoding to print is not running.
+ */
+export const DECODER_MODULES = set('base64 binascii');
 /** Names through which a program reaches another name by a string, or runs code it makes. */
 export const OPAQUE_NAMES = set(
   'eval exec compile __import__ getattr setattr delattr globals locals vars breakpoint',
