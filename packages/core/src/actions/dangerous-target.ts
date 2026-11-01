@@ -7,6 +7,11 @@ import { expandBraces } from './brace-expansion.js';
  * it: `classify-bash.ts` applies it to `rm -rf`, `classify-powershell.ts` to
  * `Remove-Item -Recurse` and `rd /s`, and a second copy of this judgement would be
  * a target one reader called dangerous and the other did not.
+ *
+ * A path that holds `..` is read word by word against the directory it is judged from, so that
+ * `tmp/../../x` and `/work/project/../x` are the directory above the project, as `../x` is, and
+ * `build/../dist` is the folder it names. A name a shell expands beside a `..` (`a/$X/../..`) is not
+ * known to stay, and is not judged to.
  */
 
 /** `C:\…`, `c:/…`, and the bare drive on its own. */
@@ -26,6 +31,58 @@ function withoutTrailingSlashes(path: string): string {
   let end = path.length;
   while (end > 0 && path.charAt(end - 1) === '/') end -= 1;
   return path.slice(0, end);
+}
+
+/** Both separators: a path read here may be a PowerShell path as well as a POSIX one. */
+const SEPARATORS = /[\\/]+/;
+/** A name a shell replaces with words of its own: it may hold a slash or a `..`. */
+const EXPANDED = /[$`{(]/;
+/** A pattern; it matches one name and never a slash, but a dot-leading one may match `..`. */
+const PATTERN = /[*?[]/;
+
+const expands = (component: string): boolean =>
+  EXPANDED.test(component) || (component.startsWith('.') && PATTERN.test(component));
+
+/** Whether a path has a `..` of its own among its names. */
+const climbs = (path: string): boolean =>
+  path.includes('..') && path.split(SEPARATORS).includes('..');
+
+/**
+ * Whether a relative path that holds `..` climbs out of the directory it starts in, or comes back to it
+ * (`a/..` is the directory itself, as `.` is). A name that is expanded beside a `..` is not known to stay.
+ */
+function leavesStart(path: string): boolean {
+  let depth = 0;
+  for (const component of path.split(SEPARATORS)) {
+    if (component === '' || component === '.') continue;
+    if (expands(component)) return true;
+    if (component === '..') {
+      depth -= 1;
+      if (depth < 0) return true;
+    } else depth += 1;
+  }
+  return depth <= 0;
+}
+
+/**
+ * The names of an absolute path with its `..` taken out, or null when a name beside one is expanded. The
+ * first `keep` names stay (the drive of a Windows path), as `/..` is `/`.
+ */
+function resolvedNames(path: string, keep: number): string[] | null {
+  const names: string[] = [];
+  for (const component of path.split(SEPARATORS)) {
+    if (component === '' || component === '.') continue;
+    if (expands(component)) return null;
+    if (component !== '..') names.push(component);
+    else if (names.length > keep) names.pop();
+  }
+  return names;
+}
+
+/** An absolute POSIX path with its `..` taken out, or null when that cannot be told. */
+function absoluteNames(path: string): string | null {
+  const names = resolvedNames(path, 0);
+  return names === null ? null : `/${names.join('/')}`;
 }
 
 export function isDangerousRmTarget(target: string, cwd: string): boolean {
@@ -56,14 +113,19 @@ export function isDangerousRmTarget(target: string, cwd: string): boolean {
    * an outside target for a delete that is in fact inside the checkout.
    */
   if (WINDOWS_DRIVE_PATH.test(t)) {
-    const normalized = foldPath(t).toLowerCase();
+    const folded = foldPath(t).toLowerCase();
     const root = foldPath(cwd).toLowerCase();
-    return normalized === '' || !normalized.startsWith(`${root}/`);
+    // The drive stays: `C:\..` is `C:\`.
+    const normalized = climbs(folded) ? resolvedNames(folded, 1)?.join('/') : folded;
+    return normalized === undefined || normalized === '' || !normalized.startsWith(`${root}/`);
   }
-  if (!t.startsWith('/')) return false;
+  // A relative path is inside the working tree wherever it goes, unless it climbs out of it.
+  if (!t.startsWith('/')) return climbs(t) && leavesStart(t);
   const normalized = withoutTrailingSlashes(t);
   // `cwd` is compared without its trailing slashes, so `/repo/` holds `/repo/build`. A working tree
   // at `/` (or none) would then hold every path: none is inside it, for a recursive delete.
   const root = withoutTrailingSlashes(cwd);
-  return root === '' || !normalized.startsWith(`${root}/`);
+  if (root === '') return true;
+  const resolved = climbs(normalized) ? absoluteNames(normalized) : normalized;
+  return resolved === null || !resolved.startsWith(`${root}/`);
 }
