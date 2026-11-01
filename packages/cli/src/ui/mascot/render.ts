@@ -4,7 +4,7 @@
 // `play.ts`, and it writes through the unfiltered writers, because the lines made here hold escape
 // sequences that the safe-output filter (`terminal-safe.ts`) would write out as text.
 
-import { ansi16Code, hexToRgb, nearestAnsi16 } from './color.js';
+import { ansi16Code, hexToRgb, nearestAnsi16, nearestAnsi256 } from './color.js';
 import {
   DEFAULT_PALETTE,
   TRANSPARENT,
@@ -14,8 +14,8 @@ import {
   FRAMES,
 } from './sprites.js';
 
-/** The colours a terminal can show: 24-bit, or the 16 basic colours. */
-export type ColorDepth = 'truecolor' | 'ansi16';
+/** The colours a terminal can show: 24-bit, the xterm 256, or the 16 basic colours. */
+export type ColorDepth = 'truecolor' | 'ansi256' | 'ansi16';
 
 /** `none` is for a terminal that must not get colour, and draws no owl at all: the caller prints text only. */
 export type ColorMode = ColorDepth | 'none';
@@ -43,6 +43,10 @@ function paintFor(hex: string, depth: ColorDepth): Paint {
   if (depth === 'truecolor') {
     const rgb = hexToRgb(hex).join(';');
     return { fg: `38;2;${rgb}`, bg: `48;2;${rgb}` };
+  }
+  if (depth === 'ansi256') {
+    const index = nearestAnsi256(hex);
+    return { fg: `38;5;${index}`, bg: `48;5;${index}` };
   }
   const index = nearestAnsi16(hex);
   return { fg: String(ansi16Code(index, 'fg')), bg: String(ansi16Code(index, 'bg')) };

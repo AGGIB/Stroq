@@ -1,5 +1,5 @@
-// Colour for the owl: `#rrggbb` into numbers, and the nearest of the 16 basic terminal colours for
-// terminals that have nothing better.
+// Colour for the owl: `#rrggbb` into numbers, and the nearest colour in the two fixed palettes that
+// terminals without 24-bit colour have: the xterm 256 colours, and the 16 basic ones.
 
 export type Rgb = readonly [number, number, number];
 
@@ -92,4 +92,65 @@ export function nearestAnsi16(hex: string): number {
 export function ansi16Code(index: number, layer: 'fg' | 'bg'): number {
   const base = index < 8 ? 30 + index : 90 + (index - 8);
   return layer === 'fg' ? base : base + 10;
+}
+
+const CUBE_LEVELS: readonly number[] = Object.freeze([0, 95, 135, 175, 215, 255]);
+const CUBE_FIRST = 16;
+const GREY_FIRST = 232;
+const LAST_ANSI256 = 255;
+
+/**
+ * The colour xterm shows for entry `index` of its 256-colour palette: 16-231 are a 6x6x6 cube whose
+ * red, green and blue take the levels 0, 95, 135, 175, 215 and 255 (index = 16 + 36r + 6g + b), and
+ * 232-255 are a ramp of 24 greys from 8 to 238 in steps of 10. Entries 0-15 are the 16 basic colours,
+ * which a theme may change, so they are not part of this palette and asking for one throws.
+ */
+export function ansi256Rgb(index: number): Rgb {
+  if (!Number.isInteger(index) || index < CUBE_FIRST || index > LAST_ANSI256)
+    throw new RangeError(`not an xterm colour from 16 to 255: ${String(index)}`);
+  if (index >= GREY_FIRST) {
+    const grey = 8 + 10 * (index - GREY_FIRST);
+    return [grey, grey, grey];
+  }
+  const n = index - CUBE_FIRST;
+  const level = (step: number): number => CUBE_LEVELS[step] ?? 0;
+  return [level(Math.floor(n / 36)), level(Math.floor(n / 6) % 6), level(n % 6)];
+}
+
+const ANSI256_TABLE: readonly Rgb[] = Object.freeze(
+  Array.from({ length: LAST_ANSI256 - CUBE_FIRST + 1 }, (_, i) => ansi256Rgb(CUBE_FIRST + i)),
+);
+
+/**
+ * The index (16 to 255) of the xterm colour nearest to `hex` by squared distance in RGB, which is the
+ * same answer on every call. The cube comes before the grey ramp, so a tie goes to the cube, and
+ * within each to the lower index.
+ *
+ * For the orange palette (`sprites.ts`):
+ *
+ *   key  part           colour    index  xterm colour
+ *   K    outline        #0d0e10   233    (18,18,18)
+ *   B    body           #fe4813   202    (255,95,0)
+ *   L    wing edge      #ff7a4d   209    (255,135,95)
+ *   C    belly marks    #c93a0e   166    (215,95,0)
+ *   W    face disc      #f1f2f0   255    (238,238,238)
+ *   O    iris           #0d0e10   233    (18,18,18)
+ *   P    pupil          #0d0e10   233    (18,18,18)
+ *   H    eye highlight  #ffffff   231    (255,255,255)
+ *   Y    beak           #ffb627   214    (255,175,0)
+ *   y    beak shade     #d18208   172    (215,135,0)
+ *   F    feet           #ffb627   214    (255,175,0)
+ */
+export function nearestAnsi256(hex: string): number {
+  const rgb = hexToRgb(hex);
+  let best = CUBE_FIRST;
+  let bestDistance = Number.POSITIVE_INFINITY;
+  ANSI256_TABLE.forEach((reference, offset) => {
+    const d = distance(rgb, reference);
+    if (d < bestDistance) {
+      best = CUBE_FIRST + offset;
+      bestDistance = d;
+    }
+  });
+  return best;
 }

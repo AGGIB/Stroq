@@ -31,9 +31,46 @@ describe('mascotPlan: a person at a terminal, the first time', () => {
     expect(planFor({ COLORTERM: colorterm }).colorMode).toBe('ansi16');
   });
 
-  it('does not look at TERM for colour depth: only COLORTERM says truecolor', () => {
-    expect(planFor({ TERM: 'xterm-direct' }).colorMode).toBe('ansi16');
-    expect(planFor({ TERM: 'xterm-256color' }).colorMode).toBe('ansi16');
+  it.each([
+    'xterm-256color',
+    'screen-256color',
+    'tmux-256color',
+    'XTERM-256COLOR',
+    'rxvt-256color',
+  ])(
+    'animates in 256 colours when TERM is %s and COLORTERM says nothing (macOS Terminal.app)',
+    (term) => {
+      expect(planFor({ TERM: term })).toEqual({ kind: 'animate', colorMode: 'ansi256' });
+    },
+  );
+
+  it.each(['xterm', 'xterm-color', 'linux', 'screen', 'vt100', 'xterm-direct', ''])(
+    'stays at 16 colours when TERM is %j, which does not say 256color',
+    (term) => {
+      expect(planFor({ TERM: term }).colorMode).toBe('ansi16');
+    },
+  );
+
+  it('prefers 24-bit colour to 256 when COLORTERM says truecolor and TERM says 256color', () => {
+    expect(planFor({ COLORTERM: 'truecolor', TERM: 'xterm-256color' }).colorMode).toBe('truecolor');
+    expect(planFor({ COLORTERM: '24bit', TERM: 'screen-256color' }).colorMode).toBe('truecolor');
+  });
+
+  it('takes 256 colours from TERM, whatever else COLORTERM says', () => {
+    expect(planFor({ COLORTERM: 'yes', TERM: 'xterm-256color' }).colorMode).toBe('ansi256');
+    expect(planFor({ COLORTERM: '', TERM: 'xterm-256color' }).colorMode).toBe('ansi256');
+  });
+
+  it('does not take 256 colours from COLORTERM: only TERM says 256color', () => {
+    expect(planFor({ COLORTERM: '256color', TERM: 'xterm' }).colorMode).toBe('ansi16');
+  });
+
+  it('keeps 256 colours for a still frame', () => {
+    expect(planFor({ TERM: 'xterm-256color', CI: '1' })).toEqual({
+      kind: 'still',
+      colorMode: 'ansi256',
+    });
+    expect(planFor({ TERM: 'xterm-256color' }, { greeted: true }).colorMode).toBe('ansi256');
   });
 });
 
@@ -50,6 +87,13 @@ describe('mascotPlan: none (screen readers and plain output)', () => {
     expect(planFor({ NO_COLOR: 'anything' })).toEqual(NONE);
     expect(planFor({ NO_COLOR: '0' })).toEqual(NONE);
     expect(planFor({ NO_COLOR: '' }).kind).toBe('animate');
+  });
+
+  it('draws nothing when NO_COLOR is set, whatever colour the terminal could show', () => {
+    expect(planFor({ NO_COLOR: '1', TERM: 'xterm-256color' })).toEqual(NONE);
+    expect(planFor({ NO_COLOR: '1', COLORTERM: 'truecolor', TERM: 'xterm-256color' })).toEqual(
+      NONE,
+    );
   });
 
   it('draws nothing when TERM is dumb', () => {
@@ -126,7 +170,7 @@ describe('mascotPlan: still (one frame, no animation)', () => {
 describe('mascotPlan: the whole matrix', () => {
   const tty = [true, false];
   const noColor = [undefined, '1'];
-  const term = [undefined, 'dumb', 'xterm-256color'];
+  const term = [undefined, 'dumb', 'xterm', 'xterm-256color'];
   const ci = [undefined, '', '0', 'false', '1', 'true'];
   const noMascot = [undefined, '1'];
   const noAnimation = [undefined, '1'];
@@ -168,13 +212,18 @@ describe('mascotPlan: the whole matrix', () => {
                           ? { kind: 'none', colorMode: 'none' }
                           : {
                               kind: still ? 'still' : 'animate',
-                              colorMode: ct === 'truecolor' ? 'truecolor' : 'ansi16',
+                              colorMode:
+                                ct === 'truecolor'
+                                  ? 'truecolor'
+                                  : t?.includes('256color') === true
+                                    ? 'ansi256'
+                                    : 'ansi16',
                             };
                         expect(plan, JSON.stringify({ isTty, env, p, fna, g })).toEqual(expected);
                         combinations += 1;
                       }
 
-    expect(combinations).toBe(2 * 2 * 3 * 6 * 2 * 2 * 2 * 2 * 2 * 2);
+    expect(combinations).toBe(2 * 2 * 4 * 6 * 2 * 2 * 2 * 2 * 2 * 2);
   });
 });
 

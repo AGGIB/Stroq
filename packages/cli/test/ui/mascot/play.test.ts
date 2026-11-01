@@ -149,6 +149,19 @@ describe('playGreeting: a greeting that runs to the end', () => {
     expect(writes[1]?.split('\n')).toHaveLength(13 + 1);
   });
 
+  it('plays in 256 colours, drawing the same frames', async () => {
+    const { writes, options } = harness({ extra: { colorMode: 'ansi256' } });
+
+    await expect(playGreeting(options)).resolves.toBe('finished');
+
+    expect(writes).toHaveLength(1 + GREETING.length + 1);
+    GREETING.forEach((beat, i) => {
+      const card = renderCard(beat.frame, { colorMode: 'ansi256', textLines: TEXT }).join('\n');
+      expect(writes[1 + i]?.replace(UP_10, '')).toBe(`${card}\n`);
+    });
+    expect(writes[1]).toContain('\u001b[38;5;');
+  });
+
   it('listens for signals only while it plays', async () => {
     const before = listeners();
     const { options } = harness();

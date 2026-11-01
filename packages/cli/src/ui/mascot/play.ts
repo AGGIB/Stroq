@@ -50,6 +50,16 @@ const isTruecolor = (colorterm: string | undefined): boolean =>
   colorterm !== undefined && ['truecolor', '24bit'].includes(colorterm.toLowerCase());
 
 /**
+ * 24-bit colour when `COLORTERM` says `truecolor` or `24bit`; otherwise the xterm 256 colours when
+ * `TERM` contains `256color` (macOS Terminal.app is this: it sets `TERM=xterm-256color` and no
+ * `COLORTERM`); otherwise the 16 basic colours.
+ */
+function colorDepth(env: Env): ColorDepth {
+  if (isTruecolor(env['COLORTERM'])) return 'truecolor';
+  return /256color/iu.test(env['TERM'] ?? '') ? 'ansi256' : 'ansi16';
+}
+
+/**
  * What to do with the owl. In this order:
  *
  *  - `none` (screen readers, pipes, plain output): standard output is not a terminal, the terminal
@@ -59,8 +69,8 @@ const isTruecolor = (colorterm: string | undefined): boolean =>
  *    or the person has been greeted before.
  *  - otherwise `animate`.
  *
- * The colour depth is 24-bit only when `COLORTERM` says `truecolor` or `24bit`, and the 16 basic
- * colours otherwise. Pure: it reads nothing but its arguments.
+ * The colour depth is 24-bit when `COLORTERM` says `truecolor` or `24bit`, else 256 colours when
+ * `TERM` contains `256color`, else the 16 basic colours. Pure: it reads nothing but its arguments.
  */
 export function mascotPlan(
   facts: MascotFacts,
@@ -77,7 +87,7 @@ export function mascotPlan(
     env['TERM'] === 'dumb' ||
     isOn(env['STROQ_NO_MASCOT']);
   if (none) return { kind: 'none', colorMode: 'none' };
-  const colorMode: ColorDepth = isTruecolor(env['COLORTERM']) ? 'truecolor' : 'ansi16';
+  const colorMode = colorDepth(env);
   const still =
     isOn(env['CI']) ||
     isOn(env['STROQ_NO_ANIMATION']) ||

@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { ANSI16_REFERENCE, hexToRgb, nearestAnsi16 } from '../../../src/ui/mascot/color.js';
+import {
+  ANSI16_REFERENCE,
+  hexToRgb,
+  nearestAnsi16,
+  nearestAnsi256,
+} from '../../../src/ui/mascot/color.js';
 import {
   composeWithText,
   frameToSvg,
@@ -43,11 +48,18 @@ function decodeLine(line: string): Cell[] {
         fg = null;
         bg = null;
       } else if (code === 38 || code === 48) {
-        const rgb = `rgb(${params[i + 2]},${params[i + 3]},${params[i + 4]})`;
-        if (params[i + 1] !== 2) throw new Error('only 24-bit colour is expected');
-        if (code === 38) fg = rgb;
-        else bg = rgb;
-        i += 4;
+        const kind = params[i + 1];
+        if (kind === 5) {
+          const index = `ansi256(${params[i + 2]})`;
+          if (code === 38) fg = index;
+          else bg = index;
+          i += 2;
+        } else if (kind === 2) {
+          const rgb = `rgb(${params[i + 2]},${params[i + 3]},${params[i + 4]})`;
+          if (code === 38) fg = rgb;
+          else bg = rgb;
+          i += 4;
+        } else throw new Error(`unexpected colour kind ${kind}`);
       } else if ((code >= 30 && code <= 37) || (code >= 90 && code <= 97)) {
         fg = `ansi(${code >= 90 ? code - 90 + 8 : code - 30})`;
       } else if ((code >= 40 && code <= 47) || (code >= 100 && code <= 107)) {
@@ -92,6 +104,7 @@ const expectedPixels = (
 
 const truecolor = (hex: string): string => `rgb(${hexToRgb(hex).join(',')})`;
 const ansi16 = (hex: string): string => `ansi(${nearestAnsi16(hex)})`;
+const ansi256 = (hex: string): string => `ansi256(${nearestAnsi256(hex)})`;
 
 describe('renderFrame: truecolor', () => {
   it.each(FRAME_NAMES)('draws %s as 10 lines of 20 cells', (name) => {
@@ -197,6 +210,73 @@ describe('renderFrame: ansi16', () => {
 
   it('knows 16 reference colours', () => {
     expect(ANSI16_REFERENCE).toHaveLength(16);
+  });
+});
+
+describe('renderFrame: ansi256', () => {
+  it.each(FRAME_NAMES)('draws %s with the nearest of the 256 colours for every pixel', (name) => {
+    const lines = renderFrame(FRAMES[name], { colorMode: 'ansi256' });
+
+    expect(lines).toHaveLength(10);
+    for (const line of lines) expect(decodeLine(line)).toHaveLength(GRID_SIZE);
+    expect(decodePixels(lines)).toEqual(expectedPixels(FRAMES[name], PALETTES.orange, ansi256));
+  });
+
+  it('uses only the 38;5;n and 48;5;n codes, with n from 16 to 255, and the reset', () => {
+    const sequences = new Set<string>();
+    for (const name of FRAME_NAMES) {
+      for (const palette of Object.values(PALETTES)) {
+        for (const line of renderFrame(FRAMES[name], { colorMode: 'ansi256', palette })) {
+          for (const match of line.matchAll(SGR)) sequences.add(match[1] ?? '');
+        }
+      }
+    }
+
+    expect(sequences.size).toBeGreaterThan(3);
+    for (const params of sequences) {
+      expect(
+        params === '0' ||
+          /^38;5;(\d+)$/u.test(params) ||
+          /^38;5;(\d+);48;5;(\d+)$/u.test(params) ||
+          /^48;5;(\d+)$/u.test(params),
+        `SGR ${params}`,
+      ).toBe(true);
+      for (const n of params.matchAll(/;5;(\d+)/gu)) {
+        expect(Number(n[1])).toBeGreaterThanOrEqual(16);
+        expect(Number(n[1])).toBeLessThanOrEqual(255);
+      }
+    }
+  });
+
+  it('writes no 24-bit and no basic-colour code', () => {
+    for (const name of FRAME_NAMES) {
+      for (const line of renderFrame(FRAMES[name], { colorMode: 'ansi256' })) {
+        expect(line).not.toMatch(
+          /\u001b\[(?:[^m]*;)?(?:38;2|48;2|3[0-7]|4[0-7]|9[0-7]|10[0-7])[;m]/u,
+        );
+      }
+    }
+  });
+
+  it('draws the orange body as 38;5;202 over 48;5;202 and the outline as 233', () => {
+    const [line] = renderFrame(['KB', 'KB'], { colorMode: 'ansi256' });
+
+    expect(line).toBe(`${ESC}[38;5;233;48;5;233m▀${ESC}[0m${ESC}[38;5;202;48;5;202m▀${ESC}[0m`);
+  });
+
+  it('draws a half block with one pixel as the glyph that fills that half', () => {
+    expect(renderFrame(['K.', '..'], { colorMode: 'ansi256' })).toEqual([
+      `${ESC}[38;5;233m▀${ESC}[0m `,
+    ]);
+    expect(renderFrame(['..', '.K'], { colorMode: 'ansi256' })).toEqual([
+      ` ${ESC}[38;5;233m▄${ESC}[0m`,
+    ]);
+  });
+
+  it('is the same on every call', () => {
+    expect(renderFrame(FRAMES.happy, { colorMode: 'ansi256' })).toEqual(
+      renderFrame(FRAMES.happy, { colorMode: 'ansi256' }),
+    );
   });
 });
 
