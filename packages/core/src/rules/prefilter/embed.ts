@@ -36,17 +36,21 @@ function literalsOfCondition(condition: unknown): readonly string[] | null {
  * prefilter saves on a short text. The table lives in the same JSON as the patterns and is made from
  * them in the same step, so it cannot describe other patterns than the ones it ships with.
  *
- * Rules in `skip` (the disabled ones) are left out; the engine never compiles them.
+ * Rules in `skip` (the disabled ones) are left out; the engine never compiles them. So is an id
+ * that more than one rule has: the table is read by id, and one entry would be applied to the other
+ * rule's patterns. Those rules work their literals out when they are compiled.
  */
 export function prefilterTable(
   rules: readonly unknown[],
   skip: ReadonlySet<string> = new Set(),
 ): PrefilterTable {
-  const entries: [string, RuleLiterals][] = [];
+  const entries = new Map<string, RuleLiterals>();
+  const repeated = new Set<string>();
   for (const rule of rules) {
     const { id } = (rule ?? {}) as RuleLike;
     if (typeof id !== 'string' || skip.has(id)) continue;
-    entries.push([id, conditionsOf(rule as RuleLike).map(literalsOfCondition)]);
+    if (entries.has(id)) repeated.add(id);
+    entries.set(id, conditionsOf(rule as RuleLike).map(literalsOfCondition));
   }
-  return Object.fromEntries(entries);
+  return Object.fromEntries([...entries].filter(([id]) => !repeated.has(id)));
 }

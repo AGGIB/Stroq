@@ -153,6 +153,26 @@ describe('prefilterTable', () => {
     });
   });
 
+  it('leaves out an id that more than one rule has', () => {
+    // One entry per id would give the first rule the second one's literals, and a text that
+    // holds only the first pattern would be ruled out for it.
+    const rules = [
+      {
+        id: 'X-2026-00024',
+        detection: { conditions: [{ operator: 'regex', value: 'first_xyz' }] },
+      },
+      {
+        id: 'X-2026-00024',
+        detection: { conditions: [{ operator: 'regex', value: 'second_abc' }] },
+      },
+      {
+        id: 'X-2026-00025',
+        detection: { conditions: [{ operator: 'regex', value: 'third_def' }] },
+      },
+    ];
+    expect(prefilterTable(rules)).toEqual({ 'X-2026-00025': [['third_def']] });
+  });
+
   it('leaves out the rules it is told to', () => {
     const table = prefilterTable(
       [{ id: 'X-2026-00023', detection: { conditions: [] } }],
