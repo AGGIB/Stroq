@@ -25,7 +25,18 @@ describe('the built CLI', () => {
     expect(text).toContain('Invalid input');
   });
 
-  it('ships the licence of the zod it bundles', () => {
-    expect(readFileSync(join(dist, 'LICENSE.zod'), 'utf8')).toContain('MIT License');
+  it('ships the licence of the zod it bundles, beside package.json and listed in its files', () => {
+    const root = dirname(dist);
+    expect(readFileSync(join(root, 'THIRD_PARTY_NOTICES.md'), 'utf8')).toMatch(
+      /## zod [\s\S]*MIT License/,
+    );
+    const pkg = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8')) as { files: string[] };
+    expect(pkg.files).toContain('THIRD_PARTY_NOTICES.md');
+  });
+
+  it('holds only .js and .json files, the only ones the console admits in its runtime digest', () => {
+    // console/scripts/runtime-digest.mjs refuses a dist/ with any other name in it, and every
+    // console service that checks the engine then reports it unavailable.
+    expect(readdirSync(dist).filter((name) => !/^[\w.-]+\.(?:js|json)$/.test(name))).toEqual([]);
   });
 });

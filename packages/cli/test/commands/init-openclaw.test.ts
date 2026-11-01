@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  chmodSync,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
@@ -38,6 +45,15 @@ async function inDir<T>(dir: string, fn: () => Promise<T>): Promise<T> {
   }
 }
 
+/**
+ * A stand-in `openclaw` that prints its arguments. Not a link to /bin/echo: where echo is a
+ * multi-call binary (uutils coreutils on Ubuntu 26), it reads its name from argv[0] and, called as
+ * `openclaw`, prints "Security violation: Requested utility ..." instead.
+ */
+function echoAs(path: string): void {
+  writeFileSync(path, '#!/bin/sh\necho "$@"\n');
+  chmodSync(path, 0o755);
+}
 describe('hookArgv', () => {
   it('is the same command as hookCommand, as argv rather than one quoted line', () => {
     // The OpenClaw plugin spawns Stroq instead of shelling out, so it needs the parts.
@@ -135,7 +151,7 @@ describe('runInit --agent openclaw', () => {
       // what `initOpenClaw` relays to the user, so both commands are still verified
       // end to end.
       const bin = mkdtempSync(join(tmpdir(), 'stroq-openclaw-bin-'));
-      symlinkSync('/bin/echo', join(bin, 'openclaw'));
+      echoAs(join(bin, 'openclaw'));
 
       const home = mkdtempSync(join(tmpdir(), 'stroq-init-openclaw-'));
       const out = capture();
@@ -162,7 +178,7 @@ describe('runInit --agent openclaw', () => {
     'indents what each command printed under it, and not under a note of Stroq’s',
     async () => {
       const bin = mkdtempSync(join(tmpdir(), 'stroq-openclaw-bin-'));
-      symlinkSync('/bin/echo', join(bin, 'openclaw'));
+      echoAs(join(bin, 'openclaw'));
       const home = mkdtempSync(join(tmpdir(), 'stroq-init-openclaw-'));
       const out = capture();
       await inHome(home, () => withPath(bin, () => runInit(['--agent', 'openclaw'])));
