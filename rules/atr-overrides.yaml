@@ -83,15 +83,18 @@ ATR-2026-00113:
     Web content (2026-11-01): a fetched page is documentation far more often than an attack. Conditions 0, 2
     and 3 read a pattern of their own, `web:`, on a fetched page and nowhere else (every other surface reads
     what it read before), and it fails closed: an unknown phrasing is flagged and only a known documentation
-    shape is let through. Condition 0 reads every mention of the path except one in the first cell of a table row, after a
-    description of the file in the third person or the past ("stores", "is read from", "to create"), in a list
-    of places ("environment variables, `~/.aws/credentials`, or an IAM role"), in a variable assignment or in a
-    docker volume (`-v ~/.aws/credentials:/root/.aws/credentials`); and even in those it reads a mention with a
-    word that carries the file out after it ("paste", "send", "include", "contents"). Condition 2 (a keychain)
-    reads a verb that opens, prints, copies or sends one within a sentence of the word, the commands
+    shape is let through. Condition 0 reads every mention of the path except one in the first cell of a table row
+    (Graphify's table of environment variables) or in a list of places ("environment variables, `~/.aws/credentials`,
+    or an IAM role", TradingAgents), and even in those it reads the line when it holds a program that moves a file
+    (scp, rsync, ssh, tar, curl, nc ...) or a host (a URL, user@host, an address, a domain), before or after the path,
+    or, for a table row, on the next line, or a word that carries the file out after the path ("paste", "send",
+    "contents"). The shapes of 0.29.0+r3 that the docs bench does not need are gone: a description of the file ("stores",
+    "reads", "uses" ... within 60 characters), an assignment and a docker volume. Condition 2 (a keychain) reads a verb
+    that opens, prints, lists, inspects, copies or sends one within a sentence of the word, the commands
     (`security dump-keychain`, `chainbreaker`, a path under `Library/Keychains`) and the word-for-word credential
-    tools; "Keychain storage" and "Keychain Access" are nouns. Condition 3 reads /etc/passwd except alone on its
-    line (a listing). The five true_positives match on every surface.
+    tools; "Keychain storage" and "Keychain Access" are nouns. Condition 3 reads /etc/passwd as it always did (fd's
+    README, which lists it alone on a line, is a false flag: a request to include "the following file" stood there
+    as well). The five true_positives match on every surface.
   conditions:
     - index: 1
       from: |-
@@ -104,21 +107,19 @@ ATR-2026-00113:
       local: |-
         (?i)\b(?:cat|read|open|copy|cp|send|upload|post|dump|print|exfiltrat\w*|base64|scp|curl|load|extract|attach|share|paste|grab|steal|leak|include|pass|provide|forward|embed)\b[^\n|]{0,60}~/?\.(?:aws/credentials|ssh/id_(?:rsa|ed25519|ecdsa)|npmrc|netrc|docker/config\.json|kube/config)
       web: |-
-        (?im)(?<!(?:^[ \t]*\|[^|\n]{0,60}|\b(?:creates|created|generates|generated|writes|wrote|written|stores|stored|saves|saved|populates|populated|located|found|lives|kept|placed|reads|loads|uses|looks|checks|searches|finds|resolves|picks|takes|gets|obtains|requires|expects|supports|defaults|(?:is|are)\s+(?:read|loaded|used|taken)|to\s+(?:create|generate|write|store|save|populate))\b[^\n]{0,60}|\b(?:variables?|environment|env|chain|profiles?|sources?|locations?|order)\b[^\n]{0,20}[,(]\s*|(?<![-\w])\w+_\w+[ \t]*=[ \t]*|(?:^|\s)(?:-v|--volume)[ =][ \t]*)[`'\x22]?)~/?\.(?:aws/credentials|ssh/id_(?:rsa|ed25519|ecdsa)|npmrc|netrc|docker/config\.json|kube/config)|~/?\.(?:aws/credentials|ssh/id_(?:rsa|ed25519|ecdsa)|npmrc|netrc|docker/config\.json|kube/config)[^\n]{0,100}\b(?:paste|send|upload|post|includ|print|show|repl(?:y|ie)|shar|forward|attach|output|display|e-?mail|mail|exfil|submit|give|reveal|leak|expos|transmit|disclos|tell|report|curl|wget|nc\b|base64|contents?\b|results?\b|answer|response)\w*
+        (?im)(?<!(?:^[ \t]*\|[^|\n]{0,60}|\b(?:variables?|environment|env|chain|profiles?|sources?|locations?|order)\b[^\n]{0,20}[,(]\s*)[`'\x22]?)~/?\.(?:aws/credentials|ssh/id_(?:rsa|ed25519|ecdsa)|npmrc|netrc|docker/config\.json|kube/config)|~/?\.(?:aws/credentials|ssh/id_(?:rsa|ed25519|ecdsa)|npmrc|netrc|docker/config\.json|kube/config)[^\n]{0,100}\b(?:paste|send|upload|post|includ|print|show|repl(?:y|ie)|shar|forward|attach|output|display|e-?mail|mail|exfil|submit|give|reveal|leak|expos|transmit|disclos|tell|report|curl|wget|nc\b|base64|contents?\b|results?\b|answer|response)\w*|~/?\.(?:aws/credentials|ssh/id_(?:rsa|ed25519|ecdsa)|npmrc|netrc|docker/config\.json|kube/config)[^\n]{0,120}(?:\b(?:scp|rsync|ssh|sftp|tar|zip|gzip|7z|openssl|rclone|ftp|socat|mail|sendmail|swaks|gsutil|s3|aws\s+s3|nc|ncat|curl|wget)\b|(?:https?://|\b\d{1,3}(?:\.\d{1,3}){3}\b|\b[\w.-]{1,64}@[\w-]{1,63}\.[a-z]{2,}|\b(?:[\w-]{1,40}\.){1,6}(?:invalid|example|test|local|internal|com|net|org|io|dev|xyz|ru|cn|co|me|info|biz|site|online|top|app|ai|cc|ws|us|uk|de|fr|kz|tk|pw|cloud|link|club|space)\b))|(?:\b(?:scp|rsync|ssh|sftp|tar|zip|gzip|7z|openssl|rclone|ftp|socat|mail|sendmail|swaks|gsutil|s3|aws\s+s3|nc|ncat|curl|wget)\b|(?:https?://|\b\d{1,3}(?:\.\d{1,3}){3}\b|\b[\w.-]{1,64}@[\w-]{1,63}\.[a-z]{2,}|\b(?:[\w-]{1,40}\.){1,6}(?:invalid|example|test|local|internal|com|net|org|io|dev|xyz|ru|cn|co|me|info|biz|site|online|top|app|ai|cc|ws|us|uk|de|fr|kz|tk|pw|cloud|link|club|space)\b))[^\n]{0,80}~/?\.(?:aws/credentials|ssh/id_(?:rsa|ed25519|ecdsa)|npmrc|netrc|docker/config\.json|kube/config)|^[ \t]*\|[^\n]{0,200}~/?\.(?:aws/credentials|ssh/id_(?:rsa|ed25519|ecdsa)|npmrc|netrc|docker/config\.json|kube/config)[^\n]{0,200}\n[ \t\n]{0,50}[^\n]{0,200}(?:\b(?:scp|rsync|ssh|sftp|tar|zip|gzip|7z|openssl|rclone|ftp|socat|mail|sendmail|swaks|gsutil|s3|aws\s+s3|nc|ncat|curl|wget)\b|(?:https?://|\b\d{1,3}(?:\.\d{1,3}){3}\b|\b[\w.-]{1,64}@[\w-]{1,63}\.[a-z]{2,}|\b(?:[\w-]{1,40}\.){1,6}(?:invalid|example|test|local|internal|com|net|org|io|dev|xyz|ru|cn|co|me|info|biz|site|online|top|app|ai|cc|ws|us|uk|de|fr|kz|tk|pw|cloud|link|club|space)\b))
     - index: 2
       from: |-
         (?i)(?:keychain|credential-manager|secret-tool|security\s+find-(?:generic|internet)-password)
       local: |-
         (?i)(?:\bkeychain\b|\bcredential-manager\b|\bsecret-tool\b|security\s+find-(?:generic|internet)-password)
       web: |-
-        (?i)\b(?:print|show|list|display|dump|output|send|upload|paste|reveal|expose|include|export|exfiltrate|leak|cat|read|get|fetch|retrieve|copy|extract|steal|grab|collect|gather|pull|decrypt|query|unlock|open|search|tell|give|return|reply|post|attach|share|forward|email|report|save|write|encode|tar|zip)(?:ing)?\b[^\n]{0,80}(?:the\s+|your\s+|all\s+|my\s+|every\s+)?(?:(?:macos|system|login|user|mac)\s+)?keychains?\b|(?:the\s+|your\s+|all\s+|my\s+|every\s+)?(?:(?:macos|system|login|user|mac)\s+)?keychains?\b[^\n]{0,100}\b(?:print|show|list|display|dump|output|send|upload|paste|reveal|expose|include|export|exfiltrate|leak|cat|read|get|fetch|retrieve|copy|extract|steal|grab|collect|gather|pull|decrypt|query|unlock|open|search|tell|give|return|reply|post|attach|share|forward|email|report|save|write|encode|tar|zip)(?:ing)?\b|\bsecurity\s+(?:find-generic-password|find-internet-password|dump-keychain|find-certificate|find-key|export|unlock-keychain|list-keychains|delete-\w+)\b|Library/Keychains|\.keychain(?:-db)?\b|\bchainbreaker\b|\bcredential-manager\b|\bsecret-tool\b|osascript[^\n]{0,80}keychain|\bcmdkey\s+/list|\bvaultcmd\b
+        (?i)\b(?:print|show|list|display|dump|output|send|upload|paste|reveal|expose|include|export|exfiltrate|leak|cat|read|get|fetch|retrieve|copy|extract|steal|grab|collect|gather|pull|decrypt|query|unlock|open|search|tell|give|return|reply|post|attach|share|forward|email|report|save|write|encode|tar|zip|look|browse|inspect|examine|enumerate|check|walk|iterate|describe)(?:ing)?\b[^\n]{0,80}(?:the\s+|your\s+|all\s+|my\s+|every\s+)?(?:(?:macos|system|login|user|mac)\s+)?keychains?\b|(?:the\s+|your\s+|all\s+|my\s+|every\s+)?(?:(?:macos|system|login|user|mac)\s+)?keychains?\b[^\n]{0,100}\b(?:print|show|list|display|dump|output|send|upload|paste|reveal|expose|include|export|exfiltrate|leak|cat|read|get|fetch|retrieve|copy|extract|steal|grab|collect|gather|pull|decrypt|query|unlock|open|search|tell|give|return|reply|post|attach|share|forward|email|report|save|write|encode|tar|zip|look|browse|inspect|examine|enumerate|check|walk|iterate|describe)(?:ing)?\b|\bsecurity\s+(?:find-generic-password|find-internet-password|dump-keychain|find-certificate|find-key|export|unlock-keychain|list-keychains|delete-\w+)\b|Library/Keychains|\.keychain(?:-db)?\b|\bchainbreaker\b|\bcredential-manager\b|\bsecret-tool\b|osascript[^\n]{0,80}keychain|\bcmdkey\s+/list|\bvaultcmd\b
     - index: 3
       from: |-
         (?i)/etc/(?:shadow|passwd|security/)|/var/lib/(?:jenkins|docker)/.*(?:secret|token|credential)
       local: |-
         (?i)/etc/(?:shadow|security/)|/var/lib/(?:jenkins|docker)/.*(?:secret|token|credential)
-      web: |-
-        (?im)/etc/(?:shadow|security/)|(?:(?<!^[ \t]*)/etc/passwd|/etc/passwd(?![ \t]*$))|/var/lib/(?:jenkins|docker)/.*(?:secret|token|credential)
 
 ATR-2026-00117:
   reason: >-
@@ -522,15 +523,16 @@ ATR-2026-00060:
     Web content (2026-11-01): the same words are how the READMEs of uv, RxJava, numpy and bravado describe
     themselves ("a drop-in replacement for pip", "a replacement for code generation"). A fetched page reads the
     impersonation itself, not the phrase: "the same as / identical to the official ...", "a replacement for the
-    official ...", "a replacement for" a server, tool, plugin, skill or extension ("a drop-in replacement for
-    github-mcp-server"), and "replaces the official". Every other surface reads what it read before.
+    official ...", "a replacement for" a server, tool, plugin, skill, extension, connector or integration ("a drop-in replacement for
+    github-mcp-server", "a replacement for GitHub's connector"), and "replaces the official". Every other surface
+    reads what it read before.
   conditions:
     - index: 7
       from: |-
         (?i)(?:(?:same|identical|equivalent|compatible)\s+(?:as|to|with)\s+(?:the\s+)?(?:official|original|standard)|(?:drop[-\s]?in\s+)?replacement\s+for)\s+[a-zA-Z_-]+
       local: 'off'
       web: |-
-        (?i)(?:(?:same|identical|equivalent|compatible)\s+(?:as|to|with)\s+(?:the\s+)?(?:official|original|standard)|replacement\s+for\s+the\s+(?:official|original))\s+[a-zA-Z_-]+|(?:drop[-\s]?in\s+)?replacement\s+for\s+(?:the\s+)?(?:\w+\s+)?[\w.-]*(?:mcp|server|tool|plugin|skill|extension)\b|\breplaces\s+the\s+official\b
+        (?i)(?:(?:same|identical|equivalent|compatible)\s+(?:as|to|with)\s+(?:the\s+)?(?:official|original|standard)|replacement\s+for\s+the\s+(?:official|original))\s+[a-zA-Z_-]+|(?:drop[-\s]?in\s+)?replacement\s+for\s+(?:the\s+)?(?:[\w.'\u2019-]+\s+)?[\w.'\u2019-]*(?:mcp|server|tool|plugin|skill|extension|connector|integration|bridge|proxy|gateway|adapter)s?\b|\breplaces\s+the\s+official\b
 
 ATR-2026-00161:
   reason: >-
@@ -541,10 +543,9 @@ ATR-2026-00161:
     files (`id_rsa`, `known_hosts`, `~/.aws/credentials`) are read as before, and so is text
     somebody else wrote. A listing of `~/.ssh` over `ssh` still flags (13 times in 2026-10 replays
     of a developer's sessions); narrowing it there is left for a decision on that surface.
-    Web content (2026-11-01): `/etc/passwd` in a command listing in fd's README flagged it as a tool
-    description would be, and `.env.example` in a README flagged the `.env` alternative. A fetched page reads
-    the vendored pattern except /etc/passwd alone on its own line (a listing) and `.env` followed by
-    `.example`, `.sample`, `.template` or `.dist`; every other surface reads what it read before.
+    Web content (2026-11-01): `.env.example` in a README flagged the `.env` alternative. A fetched page reads
+    the vendored pattern except `.env` followed by `.example`, `.sample`, `.template` or `.dist` (and a
+    public key, `id_rsa.pub`); every other surface reads what it read before.
   conditions:
     - index: 2
       from: |-
@@ -552,7 +553,7 @@ ATR-2026-00161:
       local: |-
         \b(?:id_rsa|id_dsa|id_ed25519|id_ecdsa)\b(?!\.pub)|\b(?:\.aws/credentials|\.kube/config|\.docker/config\.json|\.netrc|known_hosts)\b|/etc/(?:shadow|ssl/private)|/proc/self/environ
       web: |-
-        (?m)\b(?:id_rsa|id_dsa|id_ed25519|id_ecdsa)\b(?!\.pub)|\b(?:\.aws/credentials|\.kube/config|\.docker/config\.json|\.netrc|known_hosts)\b|/etc/(?:shadow|ssl/private)|(?:(?<!^[ \t]*)/etc/passwd|/etc/passwd(?![ \t]*$))|/proc/self/environ|\b\.env(?:\.local|\.production|\.secret)?\b(?![/a-zA-Z])(?!\.(?:example|sample|template|dist)\b)
+        (?m)\b(?:id_rsa|id_dsa|id_ed25519|id_ecdsa)\b(?!\.pub)|\b(?:\.aws/credentials|\.kube/config|\.docker/config\.json|\.netrc|known_hosts)\b|/etc/(?:shadow|ssl/private)|/etc/passwd|/proc/self/environ|\b\.env(?:\.local|\.production|\.secret)?\b(?![/a-zA-Z])(?!\.(?:example|sample|template|dist)\b)
 
 ATR-2026-00440:
   reason: >-
@@ -650,9 +651,9 @@ ATR-2026-00114:
     Web content (2026-11-01): a fetched page documents an API the same way (open-design's README:
     "`POST /api/proxy/.../stream` ... paste `baseUrl` + `apiKey` + `model`"). A fetched page reads the vendored
     pattern with the verb inflected or inside a word ("resend", "sending", "autopost") and an HTTP method that is
-    followed by a path, `localhost` or a flag left out ("POST /api/v1/...", "POST localhost:8000", "POST -H ..."):
-    that describes an API. Nothing else is let through, and there is no address to be found: an unknown phrasing
-    is flagged. Every other surface reads the vendored pattern, anchored at the token and read backwards from it
+    followed by a path, `localhost` or a flag left out ("POST /api/v1/...", "POST localhost:8000", "POST -H ..."), but
+    only when the line holds no host (a URL, user@host, an address, a domain) before or after it: that describes an API.
+    Nothing else is let through, and there is no address to be found: an unknown phrasing is flagged. Every other surface reads the vendored pattern, anchored at the token and read backwards from it
     for the verb, whatever the distance between them (`\s+.*` was quadratic: 1.9 s on 200,000 characters of
     "send the ", and 3.75 s for condition 2 on "log "; the backward read stops at the previous token, which has
     been tried already, so it is linear). Condition 2 is anchored the same way, on every surface.
@@ -665,7 +666,7 @@ ATR-2026-00114:
       to: |-
         (?i)(?=(?:access_token|refresh_token|bearer|api[_\s]?key|auth[_\s]?token))(?<=(?:send|forward|post|transmit|exfil)\s(?:\s*\n)?(?:(?!(?:access_token|refresh_token|bearer|api[_\s]?key|auth[_\s]?token))[^\n])*)(?:access_token|refresh_token|bearer|api[_\s]?key|auth[_\s]?token)
       web: |-
-        (?i)(?=(?:access_token|refresh_token|bearer|api[_\s]?key|auth[_\s]?token))(?<=(?:(?:send|forward|transmit|exfil)\w*|(?!post\s+(?:/|localhost\b|-))post\w*)\s(?:\s*\n)?(?:(?!(?:access_token|refresh_token|bearer|api[_\s]?key|auth[_\s]?token))[^\n])*)(?:access_token|refresh_token|bearer|api[_\s]?key|auth[_\s]?token)
+        (?i)(?=(?:access_token|refresh_token|bearer|api[_\s]?key|auth[_\s]?token))(?<=(?:(?:send|forward|transmit|exfil)\w*|(?!(?<!(?:https?://|\b\d{1,3}(?:\.\d{1,3}){3}\b|\b[\w.-]{1,64}@[\w-]{1,63}\.[a-z]{2,}|\b(?:[\w-]{1,40}\.){1,6}(?:invalid|example|test|local|internal|com|net|org|io|dev|xyz|ru|cn|co|me|info|biz|site|online|top|app|ai|cc|ws|us|uk|de|fr|kz|tk|pw|cloud|link|club|space)\b)[^\n]{0,130})post\s+(?:/|localhost\b|-)(?![^\n]{0,200}(?:https?://|\b\d{1,3}(?:\.\d{1,3}){3}\b|\b[\w.-]{1,64}@[\w-]{1,63}\.[a-z]{2,}|\b(?:[\w-]{1,40}\.){1,6}(?:invalid|example|test|local|internal|com|net|org|io|dev|xyz|ru|cn|co|me|info|biz|site|online|top|app|ai|cc|ws|us|uk|de|fr|kz|tk|pw|cloud|link|club|space)\b)))post\w*)\s(?:\s*\n)?(?:(?!(?:access_token|refresh_token|bearer|api[_\s]?key|auth[_\s]?token))[^\n])*)(?:access_token|refresh_token|bearer|api[_\s]?key|auth[_\s]?token)
     - index: 2
       from: |-
         (?i)(?:extract|capture|intercept|log|dump)\s+.*(?:Authorization|Bearer)\s+(?:header|token)
@@ -682,7 +683,12 @@ ATR-2026-00568:
     `gopher://` and `dict://` are read as before.
     Web content (2026-11-01): `Built example @ file:///home/user/example` is where a build log says what it
     built (uv's README prints one), and `/home` is every user's home. A fetched page reads the vendored
-    pattern except a `file://` that follows `@`, `from` or `at` (a build log, a pip log); every other surface
+    pattern except two lines: `Built`, `Installed`, `Resolved`, `Prepared` or `Building`, a name, an optional
+    `==version`, `@` and a path under /home that names no key, token or configuration directory. A path under
+    /etc, /proc, /root, /var/run or /sys, a credential-named path under /home and every other `file://` after
+    "from", "at" or a verb are read always. A version pin followed by `(from file:///home/...)` (uv's resolution
+    line, `+ example==0.1.0 (from file:///home/user/example)`) is the other shape let through. The shape is not anchored to the start of a line: a fetched page is also scanned
+    as serialised JSON, where a line break is the two characters backslash n. Every other surface
     reads what it read before.
   conditions:
     - index: 0
@@ -691,7 +697,7 @@ ATR-2026-00568:
       local: |-
         (?i)(?:169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200|fd00:ec2::254)(?::\d+)?(?:(?:/|%2f)+(?:\.{1,2}(?:/|%2f)+)*)(?:latest|computeMetadata|metadata|openstack|opc|v1|v2|20\d\d-|%[0-9a-f]{2})|\bfile://(?:/?(?:etc|proc|root|home|var/run|sys)/)|\bgopher://|\bdict://
       web: |-
-        (?i)(?:169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200|fd00:ec2::254)(?:[:/]|\b)|(?<!(?:@|\bfrom|\bat)[ \t]{0,3}\(?)\bfile://(?:/?(?:etc|proc|root|home|var/run|sys)/)|\bgopher://|\bdict://
+        (?i)(?:169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200|fd00:ec2::254)(?:[:/]|\b)|\bfile://(?:/?(?:etc|proc|root|var/run|sys)/)|\bfile:///?home/[^/\s]+/(?:[^/\s]+/)*(?:\.(?:ssh|aws|kube|docker|gnupg|config|env|npmrc|netrc|pgpass|bash_history|git-credentials|password-store)\b|[^/\s]*(?:secret|password|passwd|credential|token|private|id_rsa|id_ed25519|wallet)[^/\s]*|[^/\s]*\.(?:pem|p12|pfx|kdbx|key)\b)|(?<!(?:\b(?:Built|Installed|Resolved|Prepared|Building)\s+[\w.-]{1,80}(?:==\S{1,40})?\s+@\s+|[\w.-]{1,80}==[\w.+-]{1,40}\s+\(from\s+))\bfile:///?home/|\bgopher://|\bdict://
 
 ATR-2026-00571:
   reason: >-
@@ -742,24 +748,26 @@ ATR-2026-00150:
     Condition 0 is a bare `-----BEGIN PRIVATE KEY-----`, "a credential leaked in a tool's response". On a
     fetched page it is a configuration guide (Prometheus's configuration reference shows
     `"privateKey": "-----BEGIN PRIVATE KEY-----xxxx"`). A fetched page reads the header unless a
-    placeholder follows it (`xxxx`, `...`, `***`, `<your key>`, `[...]`, `your_key`, `${KEY}`, `{{ key }}`) or
-    the footer does at once. Every other surface reads the bare header as before.
+    placeholder follows it (`xxxx`, `...`, `***`, `<your key>`, `[...]`, `your_key`, `${KEY}`, `{{ key }}`) that is not
+    itself followed by more key (`xxxxMIIEvQ...` is a key) or the footer does at once. Every other surface reads the bare header as before.
   conditions:
     - index: 0
       from: |-
         (?i)-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----
       web: |-
-        (?i)-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----(?!\s*(?:x{3,}|\.{3}|\*{3}|<|\[|your\b|\$\{|\{\{|-----END))
+        (?i)-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----(?!\s*(?:(?:x{3,}|\.{3}|\*{3})(?![A-Za-z0-9+/=]{4,})|<|\[|your\b|\$\{|\{\{|-----END))
 
 ATR-2026-00163:
   reason: >-
     Condition 2 took "disable all security checks for" anywhere in a sentence for a directive to skip
     them, which is how jadx's README describes an environment variable ("`JADX_DISABLE_XML_SECURITY` - set to
     'true' to disable all security checks for XML files"). A fetched page reads the vendored pattern except
-    where the infinitive is a setting's or a flag's ("set ... to disable", "use this flag to disable",
-    "the option to disable"): a word for a setting or a flag earlier in the same sentence, then "to". Every
-    other "to disable" is a request ("your task is to", "it is best to", "make it a habit to", "in order to",
-    "proceed to") and is flagged. It may follow anything that is not part of a word (or the `\n` of a JSON
+    where the infinitive is a setting's or a flag's: a noun for one (flag, option, setting, variable, env,
+    parameter, toggle, switch, argument) within 40 characters before "to", or the jadx sentence ("set to 'true'
+    to disable"). Every other "to disable" is a request ("use the shell tool to disable", "your task is to", "it is
+    best to", "make it a habit to", "in order to", "proceed to"), and a request phrase ("you need to", "make sure
+    to", "are required to", "instructed to") is one even when a setting's noun is earlier in the sentence. It may
+    follow anything that is not part of a word (or the `\n` of a JSON
     string). Every other surface reads the vendored pattern, as before. The pattern reads a lookbehind at
     each verb and is linear. Condition 4 ("run ... in the background ... without telling the user") took
     51 s on a "run" followed by 40,000 blanks: the blanks the first `\s+` took could be given back one at a
@@ -771,7 +779,7 @@ ATR-2026-00163:
       from: |-
         (?i)(?:you\s+(?:must|should|will|shall)\s+)?(?:skip|bypass|disable|ignore|override)\s+(?:all\s+)?(?:security|safety|permission|access|auth)\s+(?:check|control|warning|prompt|gate|guard|verification|validation)s?\s+(?:for|when|before|during|to\s+(?:allow|enable|proceed|run|execute))
       web: |-
-        (?i)(?:(?<![\w'-])|(?<=\\[nrt]))(?<!\b(?:set|setting|settings|flag|flags|option|options|variable|variables|env|environment|param|parameter|parameters|toggle|configure|enable|enables|use|used|uses|pass|default|argument|switch)\b[^\n.]{0,80}\bto\s+)(?:skip|bypass|disable|ignore|override)\s+(?:all\s+)?(?:security|safety|permission|access|auth)\s+(?:check|control|warning|prompt|gate|guard|verification|validation)s?\s+(?:for|when|before|during|to\s+(?:allow|enable|proceed|run|execute))
+        (?i)(?:(?<![\w'-])|(?<=\\[nrt]))(?:(?<=\b(?:need|needs|needed|have|has|had|sure|required|requires|instructed|told|asked|supposed|expected|ordered|want|wants|wanted|ought|tasked)\s+to\s+)|(?<!\b(?:flags?|options?|settings?|variables?|env|environment|params?|parameters?|toggle|switch|arguments?)\b[^\n.]{0,40}\bto\s+|\bset\s+to\s+\S+\s+to\s+))(?:skip|bypass|disable|ignore|override)\s+(?:all\s+)?(?:security|safety|permission|access|auth)\s+(?:check|control|warning|prompt|gate|guard|verification|validation)s?\s+(?:for|when|before|during|to\s+(?:allow|enable|proceed|run|execute))
     - index: 4
       from: |-
         (?i)(?:execute|run|perform)\s+(?:silently|quietly|without\s+(?:notification|alerting|informing|telling|notifying)|(?:[\w\s-]{0,30}\s+)?in\s+the\s+background\b[\s\S]{0,40}?(?:without\s+(?:notif\w*|alert\w*|inform\w*|telling|notifying|(?:the\s+)?user(?:.?s)?(?:\s+(?:knowledge|awareness|notice|consent|confirmation|approval|permission))?|confirmation|approval|consent|permission|notice)|silently|secretly|covertly|hidden\s+from\s+(?:the\s+)?user|unbeknownst))

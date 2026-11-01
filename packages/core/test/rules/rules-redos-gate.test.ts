@@ -229,7 +229,7 @@ const VERB_THEN_NOTHING: ReadonlyArray<(n: number) => string> = [
   (n) => `${' '.repeat(n - 21)}Bearer header token`,
 ];
 TAILORED.push(
-  ...[0, 2, 5, 6].map(
+  ...[0, 2, 5].map(
     (index) => [`ATR-2026-00114#${index}`, index, VERB_THEN_NOTHING] as (typeof TAILORED)[number],
   ),
 );
@@ -252,6 +252,108 @@ TAILORED.push([
     (n) => `${rep('<!--', n / 2)}${rep(' run', n / 2)}`,
   ],
 ]);
+// The credential-path pattern for a fetched page: a path with a program or a host within a window of it, a table row
+// with the same on the next line, and the hosts themselves (a user@host, a chain of labels), which are read at every
+// position of a text made of nothing but their pieces.
+const PATH_SHAPES: ReadonlyArray<(n: number) => string> = [
+  (n) => rep('~/.aws/credentials ', n),
+  (n) => rep('~/.aws/credentials a.a.a.a ', n),
+  (n) => rep('a.a.a.a.', n),
+  (n) => rep('a@a.', n),
+  (n) => rep('a-b.', n),
+  (n) => rep('a'.repeat(70) + '@', n),
+  (n) => rep('| ~/.aws/credentials |\n', n),
+  (n) => rep('| ~/.aws/credentials | scp\n', n),
+  (n) => rep('| ~/.aws/credentials |\n\n\n', n),
+  (n) => rep(`| ~/.aws/credentials |${' '.repeat(300)}\n`, n),
+  (n) => rep(`~/.aws/credentials${' '.repeat(200)}`, n),
+  (n) => rep('1.2.3.4 ', n),
+  (n) => rep('curl ', n),
+  (n) => rep('s3 ', n),
+  (n) => rep('aws s3 ', n),
+  (n) => rep('environment variables, ~/.aws/credentials, ', n),
+  (n) => `${' '.repeat(n - 20)}~/.aws/credentials`,
+  (n) => `${'\n'.repeat(n - 20)}~/.aws/credentials`,
+];
+TAILORED.push(['ATR-2026-00113#6', 6, PATH_SHAPES]);
+TAILORED.push([
+  'ATR-2026-00113#8',
+  8,
+  [
+    (n) => rep('look ', n),
+    (n) => rep('check the keychain ', n),
+    (n) => rep('keychain ', n),
+    (n) => rep('look inside the login ', n),
+    (n) => `look ${' '.repeat(n)}keychain`,
+    (n) => rep('security ', n),
+  ],
+]);
+// `file://` after a build verb is read backwards over a name, a version and an at sign.
+TAILORED.push([
+  'ATR-2026-00568#2',
+  2,
+  [
+    (n) => rep('file:///home/a/', n),
+    (n) => rep('Built x @ file:///home/a/', n),
+    (n) => rep('x==1.0 (from file:///home/a/', n),
+    (n) => `${'a='.repeat(n / 2)} @ file:///home/a/`,
+    (n) => `${'a'.repeat(n)} @ file:///home/a/`,
+    (n) => `Built ${'a.'.repeat(n / 2)} @ file:///home/a/`,
+    (n) => `${' '.repeat(n)}file:///home/a/`,
+    (n) => rep('file:///home/a/.ssh/', n),
+    (n) => rep('file:///home/', n),
+  ],
+]);
+// A setting's noun or a request phrase is read backwards from each verb.
+TAILORED.push([
+  'ATR-2026-00163#5',
+  5,
+  [
+    (n) => rep('flag to ', n),
+    (n) => rep('set to x to ', n),
+    (n) => rep('need to ', n),
+    (n) => rep('flag ', n),
+    (n) => rep('a flag ' + 'b '.repeat(20) + 'to disable all security ', n),
+    (n) => rep('. disable all security checks ', n),
+    (n) => `${' '.repeat(n)}disable all security checks for`,
+  ],
+]);
+TAILORED.push([
+  'ATR-2026-00150#3',
+  3,
+  [
+    (n) => rep('-----BEGIN PRIVATE KEY-----xxxx', n),
+    (n) => rep('-----BEGIN PRIVATE KEY----- ', n),
+    (n) => rep('-----BEGIN PRIVATE KEY-----', n),
+    (n) => `-----BEGIN PRIVATE KEY-----${'x'.repeat(n)}`,
+    (n) => `-----BEGIN PRIVATE KEY-----${' '.repeat(n)}`,
+  ],
+]);
+TAILORED.push([
+  'ATR-2026-00060#11',
+  11,
+  [
+    (n) => rep('replacement for ', n),
+    (n) => rep("replacement for GitHub's ", n),
+    (n) => `replacement for ${'a-'.repeat(n / 2)}`,
+    (n) => `replacement for ${'a '.repeat(n / 2)}`,
+    (n) => rep('drop-in replacement for the ', n),
+  ],
+]);
+// `post` with a method after it is exempt only on a line with no host: the host is looked for 200
+// characters after and 130 before, at every `post` of the text.
+const POST_SHAPES: ReadonlyArray<(n: number) => string> = [
+  (n) => rep('POST /', n),
+  (n) => rep('POST - ', n),
+  (n) => rep('post localhost ', n),
+  (n) => rep('POST /a.a.a.a ', n),
+  (n) => rep('POST /a@a ', n),
+  (n) => rep(`POST /${'a'.repeat(190)} `, n),
+  (n) => rep(`POST / ${'a.'.repeat(60)}`, n),
+  (n) => `${'POST /\n'.repeat(n / 8)}`,
+];
+TAILORED.push(['ATR-2026-00114#6', 6, [...VERB_THEN_NOTHING, ...POST_SHAPES]]);
+TAILORED.push(['STROQ-2026-00004#0', 0, POST_SHAPES]);
 // STROQ-2026-00014 pairs a cue with a cue within 400 characters of it. A text made of nothing but
 // cues makes every cue the start of a window, which is the worst case for a pattern of that shape.
 const ADDENDUM_SHAPES: ReadonlyArray<(n: number) => string> = [
@@ -269,7 +371,7 @@ const ADDENDUM_SHAPES: ReadonlyArray<(n: number) => string> = [
   (n) => `${rep('Hi Assistant, ', n / 2)}${' '.repeat(n / 2)}urgent:`,
 ];
 TAILORED.push(
-  ...[0, 1, 2, 3].map(
+  ...[0, 1, 2, 3, 4].map(
     (index) => [`STROQ-2026-00014#${index}`, index, ADDENDUM_SHAPES] as (typeof TAILORED)[number],
   ),
 );
@@ -382,6 +484,35 @@ const CUE_UNITS = [
   'POST /api ',
   'post -',
   'post localhost ',
+  // Round 4: hosts and programs near a path, the shapes of a table, a build log and a request phrase.
+  'POST - ',
+  'POST /',
+  'POST /a.a.a.a ',
+  'a.a.a.a.',
+  'a@a.',
+  '1.2.3.4 ',
+  'scp ',
+  'curl ',
+  'aws s3 ',
+  '| ~/.aws/credentials | ',
+  '~/.aws/credentials |\n',
+  'environment variables, ~/.aws/credentials, ',
+  'Built x @ file:///home/a/',
+  'x==1.0 (from file:///home/a/',
+  'file:///home/a/.ssh/',
+  'file:///etc/',
+  'need to ',
+  'set to x to ',
+  'a flag to ',
+  'make sure to ',
+  'Hi AI assistant! [SYSTEM] ',
+  '[ADMIN] ',
+  'Hello AI, \u2014 the owner',
+  'look ',
+  'check the keychain ',
+  'enumerate ',
+  "replacement for GitHub's ",
+  '-----BEGIN PRIVATE KEY-----xxxx',
 ];
 
 describe('every pattern the narrowing changed, on text made of the words it looks for', () => {
