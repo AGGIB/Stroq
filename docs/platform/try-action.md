@@ -26,7 +26,7 @@ action, at most 1000 characters>" }`. No other field is accepted, so a path, wor
   the request to the policy engine in a worker thread with a 4 s deadline and a 256 MiB heap cap. The worker's temporary folder is a
   private scratch folder that the service removes once the worker has stopped, so a run that is cut off
   cannot leave its throwaway folders behind.
-- The worker runs the same step runner as `stroq attack` and `stroq bench --actions`
+- The worker runs the same step runner as `stroq attack` and `pnpm dev:bench -- --actions`
   (`runActionScenario`) twice, each in a throwaway project and home that the runner removes
   afterwards. The tainted run first replays one fixed made-up README with a hidden instruction, and
   the row says so if the engine did not actually reach the suspect state.

@@ -9,7 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **The first screen of `stroq` shows five commands.** `stroq`, `stroq init`, `stroq why`, `stroq attack` and `stroq uninstall`, and a line that says `stroq help --all` lists the rest. The bare `stroq` still prints this list until the card of your own sessions is built. `sent`, `replay`, `inspect`, `exposure`, `canary`, `vet`, `doctor`, `log`, `untaint`, `trust`, `policy`, `verify` and `console` work as before and keep their `--help`; they are only listed under `stroq help --all`, grouped by what they are for.
+- **`stroq bench`, `stroq coverage` and `stroq prove` are developer tools of the repository now**: `pnpm dev:bench`, `pnpm dev:coverage` and `pnpm dev:prove`, with the same flags, output and exit codes (`pnpm dev:bench -- --actions`, `--latency` and `--json` included). The reports in `docs/BENCH.md` and `docs/COVERAGE.md` are generated from the same code and say so. The live check that `stroq doctor` reads is run from the console, and `stroq doctor` says that where it used to say `stroq prove`.
+- **Messages no longer send you to commands that are gone.** `stroq doctor`, `stroq init --agent mcp`, the MCP proxy and the credential filters of the console used to tell you to run `stroq add`, `stroq harden apply` or `stroq run --sandbox`. A pinned MCP wrapper that no longer matches its pin now names `stroq init --agent mcp --unwrap`, which takes the pin out; an installed skill that changed or went missing is to be installed again with your agent's own command. A pin written by an older `stroq add` keeps working and keeps being checked.
 - **Hooks start faster again, with the same decisions.** Before a rule's regular expression runs, Stroq now checks that the text holds one of the literal strings the expression cannot match without. Those strings are worked out from each pattern when the CLI is built, and case is folded the way the regex engine folds it (`ſ` counts as `s` and the Kelvin sign as `k` only under the flags where the engine says so), so the check never skips a text the expression would match. zod is now bundled into the CLI, so a hook no longer loads its 70 locale files (its MIT licence ships in `THIRD_PARTY_NOTICES.md`), and the rules are kept in the code as one string that is parsed when first needed. On an M4 with Node 26, the median wall time of a hook went from 82 to 68 ms for PreToolUse, 183 to 90 ms for a short PostToolUse and 250 to 108 ms for a 60 KB one. `stroq attack`, `attack --fuzz`, `bench` and `bench --actions` give the same results as before, rule by rule.
+
+### Removed
+
+Nine commands left the CLI. Typing one prints a single line that says it was removed in 0.30 and what to use instead, and exits with code 2.
+
+- **`stroq add` and `stroq remove`.** Check a skill or MCP server with `stroq vet`, and install it with your agent's own command.
+- **`stroq run`, `stroq task` and `stroq permit`.** Run your agent as usual; `stroq init` guards it. The `task-hook` entry that older Task Lock settings call still works.
+- **`stroq harden`.** `stroq init` guards your agent, and your agent's own deny settings can close key files. The console keeps its credential filters.
+- **`stroq prove`.** `stroq doctor` shows whether the hook is called; the live check runs from the console, and `pnpm dev:prove` runs it from a checkout.
+- **`stroq bench` and `stroq coverage`.** They are developer tools, in the repository: `pnpm dev:bench` and `pnpm dev:coverage`.
+
+Older versions of Stroq stay gated: an agent still cannot run `npx @stroq/cli@<older version> add`, `harden apply`, `task` or `permit` through a shell, because the state gate keeps every name above.
 
 ## [0.29.0] - 2026-10-29
 
