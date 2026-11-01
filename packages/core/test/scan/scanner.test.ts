@@ -131,6 +131,34 @@ describe('scanContent', () => {
     expect(raw.score).toBe(0.4);
     expect(raw.verdict).toBe('clean');
   });
+  it('does not floor a rule at the encoded score when it also matched the plain text', () => {
+    // A page with two percent-escapes anywhere (a badge URL, a `%20`) is also read with every escape
+    // decoded; a rule that matched the page as written matches the decoded copy too, and that says
+    // nothing was hidden. Measured on the 121 benign documentation files of `stroq bench`: 4 of the
+    // 18 files it flagged were flagged by that alone.
+    const text =
+      'confidential payload marker. See [a](http://x.example/a%20b) and [c](http://x.example/c%20d).';
+    const r = scanContent(compiled, text);
+    expect(r.matches.map((m) => m.variant)).toContain('url');
+    expect(r.score).toBe(0.4);
+    expect(r.verdict).toBe('clean');
+  });
+  it('keeps the floor for a hidden base64 or hex payload, whatever the page says in the open', () => {
+    // The decoded token is not the page: a plain `curl … | sh` elsewhere says nothing about it.
+    const b64 = Buffer.from('confidential payload marker', 'utf8').toString('base64');
+    const hex = Buffer.from('confidential payload marker', 'utf8').toString('hex');
+    for (const hidden of [b64, hex]) {
+      const r = scanContent(compiled, `confidential payload marker. data: ${hidden}`);
+      expect(r.matches.some((m) => m.variant === 'base64' || m.variant === 'hex')).toBe(true);
+      expect(r.score).toBe(0.7);
+      expect(r.verdict).toBe('suspect');
+    }
+  });
+  it('still floors a rule that matched only in the decoded text', () => {
+    const hidden = scanContent(compiled, 'data: %63onfidential payload marker %20 %20');
+    expect(hidden.matches.every((m) => m.variant !== 'raw')).toBe(true);
+    expect(hidden.score).toBe(0.7);
+  });
 });
 
 function busyRegex(ms: number): RegExp {

@@ -92,10 +92,22 @@ export const BUDGET_MATCH: RuleMatch = {
   variant: 'raw',
 };
 
-function weightOf(match: RuleMatch): number {
+/**
+ * A match's weight. A rule that matched only after decoding was hiding its text, and a sub-critical
+ * one is raised to the encoded floor for that. The percent-decoded variant is the whole page with
+ * its escapes read, so a rule that matched the page as written matches that copy as well and the
+ * copy says nothing was hidden: it keeps its own severity. Without this a page with two
+ * percent-escapes in it (a badge URL, a `%20`) was read again with every escape decoded, and a
+ * medium rule that had already matched the plain text, such as `curl … | sh` in an install line,
+ * was raised to suspect by its own decoded copy. A base64 or hex variant is only the decoded
+ * token, never the page, so a match there is the hidden text itself and keeps the floor whatever
+ * the page says in the open.
+ */
+function weightOf(match: RuleMatch, plain: ReadonlySet<string>): number {
   const base = SEVERITY_WEIGHT[match.severity];
   const encoded = match.variant !== 'raw' && match.variant !== 'normalized';
-  return encoded ? Math.max(base, ENCODED_FLOOR) : base;
+  if (!encoded) return base;
+  return match.variant === 'url' && plain.has(match.ruleId) ? base : Math.max(base, ENCODED_FLOOR);
 }
 
 function timedOutResult(matches: readonly RuleMatch[]): ScanResult {
@@ -158,6 +170,9 @@ export function scanContent(
       });
     }
   }
-  const score = matches.reduce((max, m) => Math.max(max, weightOf(m)), 0);
+  const plain = new Set(
+    matches.filter((m) => m.variant === 'raw' || m.variant === 'normalized').map((m) => m.ruleId),
+  );
+  const score = matches.reduce((max, m) => Math.max(max, weightOf(m, plain)), 0);
   return { verdict: score >= threshold ? 'suspect' : 'clean', score, matches };
 }

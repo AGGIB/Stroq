@@ -17,6 +17,7 @@ import { writtenTexts } from './written-text.js';
 import { decodePercentRuns } from '../normalize/percent-runs.js';
 import { normalizePathForMatch } from './normalize-path.js';
 import { INSTRUCTION_FILE, SELF_CONFIG_FILE } from './self-config.js';
+import { changesState } from './mcp-state-verbs.js';
 
 export { normalizePathForMatch } from './normalize-path.js';
 
@@ -596,7 +597,7 @@ function classifyMcp(
 ): ToolClassification {
   const mcp = parseMcpToolName(toolName);
   if (!mcp) return EMPTY;
-  const sideEffect = SIDE_EFFECT_TOOL.test(mcp.tool);
+  const sideEffect = SIDE_EFFECT_TOOL.test(mcp.tool) || changesState(wordsOf(mcp.tool));
   const write = isWriteShaped(mcp.tool);
   // Read for every tool, not only the ones whose name says read or write: a credential
   // path in a path-like argument is a credential read however the tool is named. The

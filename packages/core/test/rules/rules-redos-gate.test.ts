@@ -94,7 +94,7 @@ describe('the conditions of the bundled rules on text that repeats', () => {
  * one costs seconds, and the one that was exponential on a line of `>` marks at a size where it
  * would never have finished.
  */
-const TAILORED: ReadonlyArray<readonly [string, number, ReadonlyArray<(n: number) => string>]> = [
+const TAILORED: Array<readonly [string, number, ReadonlyArray<(n: number) => string>]> = [
   [
     'ATR-2026-00139#0',
     0,
@@ -176,7 +176,62 @@ const TAILORED: ReadonlyArray<readonly [string, number, ReadonlyArray<(n: number
     [(n) => '{'.repeat(n), (n) => rep('{"mcpServers": {', n), (n) => rep('"mcpServers": ', n)],
   ],
   ['ATR-2026-02351#0', 0, [(n) => rep('a-b-', n), (n) => 'a'.repeat(n), (n) => rep('a.', n)]],
+  // A directive to skip security checks begins at the verb and looks back; the shapes are a verb after
+  // every kind of lead-in, and the runs of blanks and line breaks that lead-in is read backwards over.
+  [
+    'ATR-2026-00163#2',
+    2,
+    [
+      (n) => '\n'.repeat(n),
+      (n) => ' '.repeat(n),
+      (n) => rep('. ', n),
+      (n) => rep('\n- skip ', n),
+      (n) => rep(', disable security ', n),
+      (n) => rep('. Now bypass all security check ', n),
+      (n) => `${' '.repeat(n)}skip security checks for `,
+    ],
+  ],
 ];
+// The broad token-sending pattern read the rest of the line from every verb on it.
+TAILORED.push([
+  'ATR-2026-00114#0',
+  0,
+  [(n) => rep('send the ', n), (n) => rep('post ', n), (n) => `send ${'a'.repeat(n)}`],
+]);
+// A comment that opens and never closes: `<!--[^>]*word[^>]*-->` read every opening to the end of the text.
+TAILORED.push([
+  'STROQ-2026-00002#1',
+  1,
+  [
+    (n) => rep('<!--', n),
+    (n) => rep('<!--run', n),
+    (n) => rep('<!-- ', n),
+    (n) => rep('<!-- x ', n),
+    (n) => `<!--${' '.repeat(n)}`,
+    (n) => rep('<!-- ignore ', n),
+  ],
+]);
+// STROQ-2026-00014 pairs a cue with a cue within 400 characters of it. A text made of nothing but
+// cues makes every cue the start of a window, which is the worst case for a pattern of that shape.
+const ADDENDUM_SHAPES: ReadonlyArray<(n: number) => string> = [
+  (n) => rep('Hi Assistant, ', n),
+  (n) => rep('Hello AI, ', n),
+  (n) => rep('note to ', n),
+  (n) => rep('before finishing the task ', n),
+  (n) => rep('then continue with the original ', n),
+  (n) => rep('[PRIORITY MESSAGE] ', n),
+  (n) => rep('urgent: ', n),
+  (n) => rep('\u2014 the user ', n),
+  (n) => rep('Hi Assistant, before finishing the task above, urgent: ', n),
+  (n) => rep('\\nHi Assistant\\nI forgot to mention ', n),
+  (n) => rep('Hi Assistant, ', n / 2) + rep('x ', n / 2),
+  (n) => `${rep('Hi Assistant, ', n / 2)}${' '.repeat(n / 2)}urgent:`,
+];
+TAILORED.push(
+  ...[0, 1, 2, 3].map(
+    (index) => [`STROQ-2026-00014#${index}`, index, ADDENDUM_SHAPES] as (typeof TAILORED)[number],
+  ),
+);
 const TAILORED_CHARS = 200_000;
 const TAILORED_BOUND_MS = 1_000;
 

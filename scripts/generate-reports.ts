@@ -108,8 +108,8 @@ async function deriveBench(): Promise<string> {
       'after — because every rule this corpus convicts reads every surface. What moved ' +
       'the rate afterwards was narrowing six of those rules, described below.',
     '',
-    'None of the rules named above is scoped away from documentation, and that is still a ' +
-      'deliberate choice rather than an oversight: every rule this corpus convicts is a ' +
+    'Until 2026-11-01 none of the rules named above was scoped away from documentation, and ' +
+      'that was a deliberate choice rather than an oversight: every rule this corpus convicted was a ' +
       'loose pattern rather than a rule reading the wrong surface — a pattern that would ' +
       'be just as wrong on a tool description or a command line, so declaring a surface ' +
       'for it would remove it from this measurement while leaving it exactly as wrong ' +
@@ -129,6 +129,35 @@ async function deriveBench(): Promise<string> {
       'quietly widen it back. The four vendored rules are patched through ' +
       '[`rules/atr-overrides.yaml`](../rules/atr-overrides.yaml) rather than by editing ' +
       'rules/atr, which is imported verbatim from upstream.',
+    '',
+    'On 2026-11-01 the rate went from 14.9% (18 of 121) to 3.3% (4 of 121), in two steps. ' +
+      'First, the scanner no longer raises a rule to the encoded-variant score when the ' +
+      'percent-decoded copy of the page matches what the page had already matched as ' +
+      'written (a base64 or hex payload keeps the floor, whatever the page says in the ' +
+      'open): a page with two percent-escapes anywhere is also read with every escape ' +
+      'decoded, and `STROQ-2026-00005` (`curl … | sh`, ' +
+      'medium) was lifted to suspect by the decoded copy of an install line it had ' +
+      'matched as written. That alone cleared four files (ClickHouse, APISIX, Pulumi, ' +
+      'PrivateGPT). Second, a fetched page now reads the narrow form of the patterns whose ' +
+      "broad form is evidence only in a tool's description, a tool's result or an " +
+      'instruction file: a credential path, `/etc/passwd`, the word "Keychain" or a ' +
+      '`file://` path named in a README (`ATR-2026-00113`, `ATR-2026-00161`, ' +
+      '`ATR-2026-00568`), an HTTP method beside an API key (`ATR-2026-00114`), "a drop-in ' +
+      'replacement for" (`ATR-2026-00060`) and a bare private key header (`ATR-2026-00150`). ' +
+      'Two Stroq rules and one vendored pattern were tightened outright: `STROQ-2026-00002` ' +
+      'needs "you must" in the sentence that names the assistant and an instruction ' +
+      'addressed to someone in an HTML comment, `STROQ-2026-00004` leaves `copy .env.example` ' +
+      'alone, and `ATR-2026-00163` needs the verb to start the directive. Ten files cleared. ' +
+      'The narrow forms keep every documented true positive of their rules on every surface ' +
+      '([`surface-recall.test.ts`](../packages/core/test/rules/surface-recall.test.ts)), ' +
+      'and a planted instruction still taints the session when it arrives by a fetched page ' +
+      'and is still noted when it arrives by `Read`, `cat` or `git log` ' +
+      '([`engine-planted-instruction.test.ts`](../packages/core/test/engine-planted-instruction.test.ts)). ' +
+      'The four files still flagged are documentation that is byte-identical to what the ' +
+      'rule is for: a README that tells the user to add a `SessionStart` hook to ' +
+      '`~/.claude/settings.json` (`ATR-2026-00523`), an Ollama chat template that contains ' +
+      '`<|im_start|>system` (four rules), a course README that describes prompt injection ' +
+      '(`ATR-2026-02002`) and a README that names `secret-tool` (`ATR-2026-00113`).',
     '',
     'The corpus grew on 2026-09-25, and the rate rose with it: 16.0% on the first 25 ' +
       'files, 24.0% on the 121 that replaced them (before the change below). The first ' +
@@ -155,8 +184,9 @@ async function deriveBench(): Promise<string> {
       'a bare `-----BEGIN PRIVATE KEY-----` header, and its own documented true ' +
       'positives are bare headers too, with no key body — exactly like the TLS ' +
       'configuration example it flags. The difference between those two is the surface ' +
-      'the text arrived on, which is a scan_target question rather than a regex one, and ' +
-      'it is open.',
+      'the text arrived on, which is a scan_target question rather than a regex one; ' +
+      'since 2026-11-01 a fetched page does not read that condition, and a tool result, ' +
+      "an instruction file, the developer's own files and command output do.",
     '',
     'Production scans under a 4,000 ms wall-clock budget (`DEFAULT_BUDGET_MS`, ' +
       '[`packages/core/src/scan/scanner.ts`](../packages/core/src/scan/scanner.ts)) and ' +
