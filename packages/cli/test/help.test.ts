@@ -117,13 +117,15 @@ describe('stroq <command> --help', () => {
 });
 
 describe('stroq --help and stroq help --all', () => {
-  /** The first screen, in the order it lists them. */
-  const CORE = ['sent', 'inspect', 'vet', 'init', 'doctor', 'why', 'uninstall'];
+  /** The first screen, in the order it lists them, after the bare `stroq`. */
+  const CORE = ['init', 'why', 'attack', 'uninstall'];
   /** What Stroq writes into an agent's config; no person types these. */
   const HIDDEN = ['hook', 'mcp'];
-  /** The commands a screen lists: one per line that starts with `  stroq <name>`. */
+  /** Until the next step takes them out of the table: in the table, listed nowhere. */
+  const GOING = ['add', 'remove', 'run', 'task', 'permit', 'harden', 'prove', 'bench', 'coverage'];
+  /** The commands a screen lists: one per line that starts with `stroq <name>`, indented or not. */
   const listed = (text: string): string[] =>
-    [...text.matchAll(/^ {2}stroq ([a-z][a-z-]*)/gm)].map((match) => match[1] ?? '');
+    [...text.matchAll(/^ {0,2}stroq ([a-z][a-z-]*)/gm)].map((match) => match[1] ?? '');
 
   it('prints the same short screen for stroq, stroq --help, stroq -h and stroq help', () => {
     const screen = run('--help');
@@ -133,9 +135,10 @@ describe('stroq --help and stroq help --all', () => {
       expect(run(...args).stdout, args.join(' ')).toBe(screen.stdout);
   });
 
-  it('lists exactly the core commands on that screen, in under 20 lines', () => {
+  it('lists the bare `stroq` and the four core commands on that screen, in under 20 lines', () => {
     const text = run('--help').stdout;
     expect(listed(text)).toEqual(CORE);
+    expect(text).toMatch(/^stroq {2,}who is really in charge of your agent\?/m);
     expect(text.trimEnd().split('\n').length).toBeLessThan(20);
     expect(text).toContain('stroq help --all');
   });
@@ -147,7 +150,7 @@ describe('stroq --help and stroq help --all', () => {
     expect(new Set(names).size).toBe(names.length);
     expect([...names].sort()).toEqual(
       commandNames()
-        .filter((n) => !HIDDEN.includes(n))
+        .filter((n) => !HIDDEN.includes(n) && !GOING.includes(n))
         .sort(),
     );
     expect(run('--help', '--all').stdout).toBe(all.stdout);
