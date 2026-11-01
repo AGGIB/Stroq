@@ -18,6 +18,9 @@
  * condition's `description`); the build's own gates read the whole file.
  */
 
+import { prefilterTable } from './prefilter/embed.js';
+import { readPrefilterTable } from './prefilter/table-check.js';
+
 type Json = Readonly<Record<string, unknown>>;
 
 const isObject = (value: unknown): value is Json =>
@@ -52,8 +55,17 @@ export function runtimeRule(rule: unknown): unknown {
   return kept;
 }
 
-/** The bundle with each rule projected; its other keys (`version`, `disabled`, …) as they are. */
+/**
+ * The bundle with each rule projected; its other keys (`version`, `disabled`, …) as they are, and
+ * `prefilters`: the literals each rule's patterns require (`prefilterTable`), worked out here, from
+ * the patterns being kept, unless the bundle already carries them. That is what makes this
+ * idempotent, and what lets the CLI's build do the reading once for every hook call after it.
+ */
 export function runtimeBundle(bundle: unknown): unknown {
   if (!isObject(bundle) || !Array.isArray(bundle['rules'])) return bundle;
-  return { ...bundle, rules: bundle['rules'].map(runtimeRule) };
+  const rules = bundle['rules'].map(runtimeRule);
+  if (readPrefilterTable(bundle['prefilters']) !== null) return { ...bundle, rules };
+  const disabled = Array.isArray(bundle['disabled']) ? bundle['disabled'] : [];
+  const skip = new Set(disabled.filter((id): id is string => typeof id === 'string'));
+  return { ...bundle, rules, prefilters: prefilterTable(rules, skip) };
 }

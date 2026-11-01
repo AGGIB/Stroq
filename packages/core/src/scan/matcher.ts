@@ -1,5 +1,7 @@
 import type { ScanTarget } from '../rules/atr-types.js';
 import type { CompiledRule, CompiledTest } from '../rules/compile.js';
+import { mayMatch } from '../rules/prefilter/prefilter.js';
+import { TextIndexes } from '../rules/prefilter/text-index.js';
 
 export interface MatchContext {
   /**
@@ -28,11 +30,24 @@ function fieldValue(test: CompiledTest, text: string, context: MatchContext): st
   return context[test.field] ?? null;
 }
 
-export function evaluateTest(test: CompiledTest, text: string, context: MatchContext): boolean {
+/**
+ * Whether one condition holds. `indexes` is what a scan remembers about the texts it reads, so that
+ * the many conditions that look for the same literal in the same text look once; a caller that
+ * evaluates a single condition can leave it out.
+ */
+export function evaluateTest(
+  test: CompiledTest,
+  text: string,
+  context: MatchContext,
+  indexes: TextIndexes = new TextIndexes(),
+): boolean {
   const value = fieldValue(test, text, context);
   if (value === null) return false;
   switch (test.kind) {
     case 'regex':
+      // The prefilter is false only for a text the regex cannot match, and is asked about exactly
+      // the string the regex would be given.
+      if (test.prefilter !== undefined && !mayMatch(test.prefilter, value, indexes)) return false;
       return test.regex?.test(value) ?? false;
     case 'contains':
       return value.toLowerCase().includes(test.value.toLowerCase());
@@ -52,11 +67,16 @@ function testApplies(test: CompiledTest, target: ScanTarget | undefined): boolea
   return test.surfaces.includes(target);
 }
 
-export function ruleMatches(rule: CompiledRule, text: string, context: MatchContext): boolean {
+export function ruleMatches(
+  rule: CompiledRule,
+  text: string,
+  context: MatchContext,
+  indexes: TextIndexes = new TextIndexes(),
+): boolean {
   if (!appliesTo(rule, context.target)) return false;
   const tests = rule.tests.filter((t) => testApplies(t, context.target));
   if (tests.length === 0) return false;
-  const results = tests.map((t) => evaluateTest(t, text, context));
+  const results = tests.map((t) => evaluateTest(t, text, context, indexes));
   return rule.condition === 'all' ? results.every(Boolean) : results.some(Boolean);
 }
 
@@ -65,5 +85,6 @@ export function matchRules(
   text: string,
   context: MatchContext = {},
 ): CompiledRule[] {
-  return rules.filter((rule) => ruleMatches(rule, text, context));
+  const indexes = new TextIndexes();
+  return rules.filter((rule) => ruleMatches(rule, text, context, indexes));
 }

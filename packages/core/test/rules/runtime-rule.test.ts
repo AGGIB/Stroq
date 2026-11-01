@@ -41,7 +41,8 @@ describe('the rules as the engine reads them', () => {
   it('keep the disabled list and the bundle header as they are', () => {
     const runtime = runtimeBundle(whole) as typeof whole;
     expect(runtime.disabled).toEqual(whole.disabled);
-    expect(Object.keys(runtime)).toEqual(Object.keys(whole));
+    // The one key it adds: the literals the patterns require (see prefilter/embed.ts).
+    expect(Object.keys(runtime)).toEqual([...Object.keys(whole), 'prefilters']);
   });
 
   it('hold nothing the engine does not read', () => {

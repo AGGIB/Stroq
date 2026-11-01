@@ -1,5 +1,6 @@
 import { expandVariants } from '../normalize/normalizer.js';
 import type { CompiledRule } from '../rules/compile.js';
+import { TextIndexes } from '../rules/prefilter/text-index.js';
 import type { RuleMatch, ScanResult, Severity } from '../types.js';
 import { appliesTo, ruleMatches, type MatchContext } from './matcher.js';
 
@@ -141,10 +142,12 @@ export function scanContent(
     // A field that is the scanned text is read in each form the scanner makes of it, as `content`
     // is: a response that hides a payload in base64 is no safer than a file that does.
     const read = mirrored.length === 0 ? context : withText(context, mirrored, variant.text);
+    // What the conditions learn about this variant's text is kept for the rules after them.
+    const indexes = new TextIndexes();
     for (const rule of applicable) {
       if (performance.now() - startedAt > budgetMs) return timedOutResult(matches);
       const key = `${rule.id}@${variant.kind}`;
-      if (seen.has(key) || !ruleMatches(rule, variant.text, read)) continue;
+      if (seen.has(key) || !ruleMatches(rule, variant.text, read, indexes)) continue;
       seen.add(key);
       matches.push({
         ruleId: rule.id,
