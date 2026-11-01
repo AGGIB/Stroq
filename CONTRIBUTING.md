@@ -22,6 +22,7 @@ pnpm typecheck
 pnpm format:check    # prettier --check
 pnpm build:rules     # rebuild packages/core/src/rules.bundle.json from rules/ (run this locally)
 pnpm check:rules     # verify the committed bundle deterministically, the same way CI does
+pnpm build:case-fold # re-derive the rule prefilter's case-folding table (packages/core/src/rules/prefilter) from this Node's regex engine
 ./examples/demo/run-demo.sh
 ```
 
