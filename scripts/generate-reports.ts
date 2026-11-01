@@ -130,7 +130,7 @@ async function deriveBench(): Promise<string> {
       '[`rules/atr-overrides.yaml`](../rules/atr-overrides.yaml) rather than by editing ' +
       'rules/atr, which is imported verbatim from upstream.',
     '',
-    'On 2026-11-01 the rate went from 14.9% (18 of 121) to 4.1% (5 of 121), in two steps. ' +
+    'On 2026-11-01 the rate went from 14.9% (18 of 121) to 5.0% (6 of 121), in two steps. ' +
       'First, the scanner no longer raises a rule to the encoded-variant score when the ' +
       'percent-decoded copy of the page matches what the page had already matched as ' +
       'written (a base64 or hex payload keeps the floor, whatever the page says in the ' +
@@ -152,11 +152,12 @@ async function deriveBench(): Promise<string> {
       'read when it holds a program that moves a file or a host, or, for a table row, when ' +
       "the next line does), \"set X to 'true' to disable\" or a flag's own description, " +
       '`POST /api/...` on a line with no host, `.env.example`, a placeholder after a private ' +
-      'key header, and the two lines of a build log (`Built example @ file:///home/...`, ' +
-      '`example==0.1.0 (from file:///home/...)`). The exemptions that let a theft through ' +
-      'in review (a description of the file, an assignment, a docker volume, `/etc/passwd` ' +
-      'alone on a line, `file://` after "from" or "at") are gone, and fd\'s README, which ' +
-      'lists `/etc/passwd`, is a false flag for it. Two rules keep a positive form because ' +
+      'key header that no key follows. The exemptions that let a theft through in review ' +
+      '(a description of the file, an assignment, a docker volume, `/etc/passwd` alone on a ' +
+      'line, `file://` after "from" or "at", the build-log lines of a package manager) are ' +
+      "gone: the words before such a path are written by whoever wrote the page. fd's " +
+      "README, which lists `/etc/passwd`, and uv's, which prints a build log with a " +
+      '`file://` path, are false flags for it. Two rules keep a positive form because ' +
       'the broad one is every README (the word "keychain", "replacement for"), with the ' +
       'verbs two reviews widened. ' +
       'The page pattern is read on `web_content` and nowhere else: a file ' +
@@ -165,7 +166,7 @@ async function deriveBench(): Promise<string> {
       'exactly what they read at 0.29.0, because a planted instruction arrives by every ' +
       'one of them. Two Stroq rules were tightened outright: `STROQ-2026-00002` needs "you ' +
       'must" or "must now" and an action beside the assistant\'s name, and a comment that ' +
-      'instructs someone; `STROQ-2026-00004` leaves `copy .env.example to .env` alone. Thirteen ' +
+      'instructs someone; `STROQ-2026-00004` leaves `copy .env.example to .env` alone. Twelve ' +
       'files cleared. ' +
       'Each narrow form keeps every documented true positive of its rule on every surface ' +
       '([`surface-recall.test.ts`](../packages/core/test/rules/surface-recall.test.ts)), ' +
@@ -175,18 +176,19 @@ async function deriveBench(): Promise<string> {
       'and a planted instruction still taints the session when it arrives by a fetched page ' +
       'and is still noted when it arrives by `Read`, `cat` or `git log` ' +
       '([`engine-planted-instruction.test.ts`](../packages/core/test/engine-planted-instruction.test.ts)). ' +
-      'The five files still flagged are documentation that is byte-identical to what the ' +
+      'The six files still flagged are documentation that is byte-identical to what the ' +
       'rule is for: a README that tells the user to add a `SessionStart` hook to ' +
       '`~/.claude/settings.json` (`ATR-2026-00523`), an Ollama chat template that contains ' +
       '`<|im_start|>system` (four rules), a course README that describes prompt injection ' +
-      "(`ATR-2026-02002`), a README that names `secret-tool` (`ATR-2026-00113`) and fd's, " +
-      'which lists `/etc/passwd` alone on a line (`ATR-2026-00113`, `ATR-2026-00161`).',
+      "(`ATR-2026-02002`), a README that names `secret-tool` (`ATR-2026-00113`), fd's, " +
+      'which lists `/etc/passwd` alone on a line (`ATR-2026-00113`, `ATR-2026-00161`), and ' +
+      "uv's, which prints `Built example @ file:///home/user/example` (`ATR-2026-00568`).",
     '',
     'The number above is a plain string read through the rules. A real WebFetch result is an ' +
       'object, and the hook also scans its serialised JSON, so the corpus was run a second ' +
       'way as well: each file as a `WebFetch` `PostToolUse` event through the built hook ' +
       '(`stroq hook claude-code`, a fresh HOME per file). 0.29.0 flags 19 of the 121 that ' +
-      'way and this version 5, the same five files. On a second set that none of the rules ' +
+      'way and this version 6, the same six files. On a second set that none of the rules ' +
       'was tuned on, 392 documentation tool results (READMEs, changelogs, docs) of 500 ' +
       'public coding-agent sessions read as a fetched page, 0.29.0 flags 17 and this ' +
       'version 9, none of them new.',
