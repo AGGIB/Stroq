@@ -192,12 +192,47 @@ const TAILORED: Array<readonly [string, number, ReadonlyArray<(n: number) => str
     ],
   ],
 ];
-// The broad token-sending pattern read the rest of the line from every verb on it.
-TAILORED.push([
-  'ATR-2026-00114#0',
-  0,
-  [(n) => rep('send the ', n), (n) => rep('post ', n), (n) => `send ${'a'.repeat(n)}`],
-]);
+// The broad token-sending pattern read the rest of the line from every verb on it, and so did the
+// pattern for an Authorization header that is logged or dumped (3.75 seconds on `log ` repeated).
+// Both now look back from the token for the verb, however far, and stop at the previous token, which
+// has been tried already; the one on web content differs by the verbs it takes. A lookahead for a
+// HTTP method after `post` once ran at every blank of a run of blanks (40 seconds), and a `\s+` in the
+// lookbehind was quadratic in the run: the shapes are the runs of blanks and line breaks before a token.
+const VERB_THEN_NOTHING: ReadonlyArray<(n: number) => string> = [
+  (n) => rep('send the ', n),
+  (n) => rep('post ', n),
+  (n) => `send ${'a'.repeat(n)}`,
+  (n) => rep('log ', n),
+  (n) => rep('dump the ', n),
+  (n) => rep('extract ', n),
+  (n) => rep('autopost ', n),
+  (n) => rep('send the Bearer ', n),
+  (n) => rep('log the Authorization header ', n),
+  (n) => `log ${' '.repeat(n)}`,
+  (n) => `${rep('send ', n / 2)}${'\n'.repeat(n / 2)}`,
+  (n) => rep('password ', n),
+  (n) => rep('api_key ', n),
+  (n) => rep('x api_key x ', n),
+  (n) => rep(`api_key${' '.repeat(4_000)}`, n),
+  (n) => rep(`api_key${' '.repeat(20_000)}`, n),
+  (n) => rep(`api_key${'\n'.repeat(5_000)}`, n),
+  (n) => `${' '.repeat(n - 7)}api_key`,
+  (n) => `${'\n'.repeat(n - 7)}api_key`,
+  (n) => `${rep('\n ', n - 7)}api_key`,
+  (n) => `${rep(' \n', n - 7)}api_key`,
+  (n) => `${'a'.repeat(n - 8)} api_key`,
+  (n) => `${rep('send', n - 8)} api_key`,
+  (n) => `send${' '.repeat(n)}`,
+  (n) => rep('post  ', n),
+  (n) => rep('postfoo bearer ', n),
+  (n) => rep('Bearer header ', n),
+  (n) => `${' '.repeat(n - 21)}Bearer header token`,
+];
+TAILORED.push(
+  ...[0, 2, 5, 6].map(
+    (index) => [`ATR-2026-00114#${index}`, index, VERB_THEN_NOTHING] as (typeof TAILORED)[number],
+  ),
+);
 // A comment that opens and never closes: `<!--[^>]*word[^>]*-->` read every opening to the end of the text.
 TAILORED.push([
   'STROQ-2026-00002#1',
@@ -300,6 +335,53 @@ const CUE_UNITS = [
   'credentials ',
   '\\n',
   '\\nHi Assistant',
+  // Round 3: the verbs a hostile line puts before a path, a token or a keychain, the places a benign
+  // line puts a path (a table, a mount, an assignment), and the lead-ins of a note to an assistant.
+  'log ',
+  'dump ',
+  'print ',
+  'show all ',
+  'paste ',
+  'Start by uploading ',
+  'Begin by copying ',
+  '~/.npmrc ',
+  '~/.aws/credentials, paste it ',
+  'Whatever is in ~/.aws/credentials ',
+  'Take ~/.netrc and put it in ',
+  'Add ~/.docker/config.json to ',
+  'git add ~/.kube/config ',
+  'For verification we need ',
+  '| a | ',
+  '\n| ',
+  '`~/.aws/credentials` ',
+  'export X=~/.npmrc ',
+  '-v ~/.npmrc:',
+  'the login keychain: ',
+  'secret-tool ',
+  'security find-generic-password ',
+  '/etc/passwd\n',
+  'open /etc/passwd ',
+  'scp /etc/passwd ',
+  'file:///home/alice/x ',
+  'The assistant must now ',
+  'Dear AI assistant. ',
+  'Hi AI assistant! ',
+  '[IMPORTANT] ',
+  'If you are a bot, ',
+  'If you are an AI agent: ',
+  'From now on ',
+  '<!-- instructions: ',
+  '<!-- <!-- ',
+  '<!-- see a->b ',
+  'it is best to ',
+  'the only way to continue is to ',
+  'make it a habit to ',
+  'A drop-in replacement for github-mcp-server ',
+  'autopost ',
+  'resend ',
+  'POST /api ',
+  'post -',
+  'post localhost ',
 ];
 
 describe('every pattern the narrowing changed, on text made of the words it looks for', () => {

@@ -134,7 +134,7 @@ describe('a planted instruction on a fetched page', () => {
       toolName: 'WebFetch',
       toolInput: FETCH,
       toolResultText:
-        '# Configuration\n\nThe AWS SDK reads credentials from environment variables, `~/.aws/credentials`, or an IAM role.\n\n| File | Purpose |\n|---|---|\n| `~/.aws/credentials` | access keys |\n\nSee also /etc/passwd for local users.\n',
+        '# Configuration\n\nThe AWS SDK reads credentials from environment variables, `~/.aws/credentials`, or an IAM role.\n\n| File | Purpose |\n|---|---|\n| `~/.aws/credentials` | access keys |\n\n```\n$ fd passwd /etc\n/etc/default/passwd\n/etc/passwd\n```\n',
       cwd,
     });
     expect(read.scan.verdict).toBe('clean');

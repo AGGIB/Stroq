@@ -145,7 +145,15 @@ async function deriveBench(): Promise<string> {
       '(`ATR-2026-00113`, `ATR-2026-00161`, `ATR-2026-00568`), an HTTP method beside an API ' +
       'key (`ATR-2026-00114`), "a drop-in replacement for" (`ATR-2026-00060`), a bare ' +
       'private key header (`ATR-2026-00150`) and "disable all security checks for" ' +
-      '(`ATR-2026-00163`). The page pattern is read on `web_content` and nowhere else: a file ' +
+      '(`ATR-2026-00163`). A page pattern fails closed: it is the vendored pattern with only ' +
+      'the benign shapes the bench shows let through (a credential path in the first cell of ' +
+      'a table row, after "stores" or "is stored in", in a docker volume or an assignment; ' +
+      '`/etc/passwd` alone on its line; "set X to disable"; `POST /api/...`; ' +
+      '`@ file:///home/user/...` in a build log), never a list of the verbs an attack uses, so ' +
+      'a phrasing nobody listed stays flagged. Two keep a positive form because the broad one ' +
+      'is every README (the word "keychain", "replacement for"), with the verbs two reviews ' +
+      'widened. ' +
+      'The page pattern is read on `web_content` and nowhere else: a file ' +
       'Read from a cloned repository, a `cat`, an MCP result and a CLAUDE.md are scanned as ' +
       '`repo_content`, `command_output`, `tool_result` and `instruction_file`, and read ' +
       'exactly what they read at 0.29.0, because a planted instruction arrives by every ' +

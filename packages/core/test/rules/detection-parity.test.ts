@@ -21,7 +21,7 @@ interface Entry {
 }
 const fixture = JSON.parse(
   readFileSync(new URL('./fixtures/review-texts.json', import.meta.url), 'utf8'),
-) as { hostile: Entry[]; benign: Entry[] };
+) as { hostile: Entry[]; benign: Entry[]; extra: Entry[] };
 
 const rules = loadBundledRules();
 const TOOL_OF: Readonly<Partial<Record<ScanTarget, string>>> = {
@@ -41,6 +41,26 @@ describe('texts that 0.29.0 called suspect', () => {
   });
   for (const entry of fixture.hostile) {
     it(`${entry.id} stays suspect on ${entry.surfaces.join(', ')}`, () => {
+      for (const surface of entry.surfaces) {
+        expect(verdict(entry.text, surface), `${surface}: ${entry.text.slice(0, 80)}`).toBe(
+          'suspect',
+        );
+      }
+    });
+  }
+});
+
+/**
+ * A page is read with every pattern broad and only the benign shapes the documentation bench shows let
+ * through, so a phrasing nobody listed stays flagged. These are phrasings of that kind, written
+ * without looking at what 0.29.0 did (it missed several): each is suspect on a fetched page.
+ */
+describe('phrasings of a hostile instruction that no one listed', () => {
+  it('has a fixture to read', () => {
+    expect(fixture.extra.length).toBeGreaterThan(20);
+  });
+  for (const entry of fixture.extra) {
+    it(`${entry.id} is suspect on ${entry.surfaces.join(', ')}`, () => {
       for (const surface of entry.surfaces) {
         expect(verdict(entry.text, surface), `${surface}: ${entry.text.slice(0, 80)}`).toBe(
           'suspect',
