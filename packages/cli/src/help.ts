@@ -205,6 +205,31 @@ export const COMMANDS: readonly CommandHelp[] = [
     ],
   },
   {
+    name: 'card',
+    synopsis: 'card [--days <n>] [--json] [--share]',
+    about: [
+      'what your agents did in the last days, from your own Claude Code and Codex sessions:',
+      'commands run, how many a text they had read told them to run, keys sent to another',
+      'company, and repositories that run code as soon as an agent opens them. Nothing runs',
+      'and nothing is sent; it exits 0 whatever it finds. `stroq show <n>` prints the',
+      'evidence behind one of the moments it lists.',
+    ],
+    flags: [
+      ['--days <n>', 'how many days back (1 to 365; default 30)'],
+      ['--json', 'the same as JSON (schema stroq-card/1): counts, moments, coverage, timing'],
+      ['--share', 'one line of counts only, with no path, name or host, to post'],
+    ],
+  },
+  {
+    name: 'show',
+    synopsis: 'show <n>',
+    about: [
+      'the evidence behind moment <n> of the last `stroq card`: what was read, what the',
+      'agent did next, how the two are linked, the session, and the command to dig deeper.',
+    ],
+    flags: [],
+  },
+  {
     name: 'sent',
     synopsis:
       'sent [<session>] [--here] [--last] [--transcript <path>] [--try] [--json] [--counts] [--card [--html] [--out <file>]] [--fail-if third-party|any]',

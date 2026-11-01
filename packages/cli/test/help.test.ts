@@ -124,8 +124,8 @@ describe('the developer tools that used to be commands', () => {
 describe('stroq --help and stroq help --all', () => {
   /** The first screen, in the order it lists them, after the bare `stroq`. */
   const CORE = ['init', 'why', 'attack', 'uninstall'];
-  /** What Stroq writes into an agent's config; no person types these. */
-  const HIDDEN = ['hook', 'mcp'];
+  /** What Stroq writes into an agent's config (no person types these), and the card, which `stroq` runs. */
+  const HIDDEN = ['hook', 'mcp', 'card', 'show'];
   /** The commands a screen lists: one per line that starts with `stroq <name>`, indented or not. */
   const listed = (text: string): string[] =>
     [...text.matchAll(/^ {0,2}stroq ([a-z][a-z-]*)/gm)].map((match) => match[1] ?? '');

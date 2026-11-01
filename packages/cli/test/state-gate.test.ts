@@ -68,6 +68,8 @@ const READS_ONLY: Readonly<Record<string, string>> = {
   verify: 'checks the hash chain of the audit log',
   why: 'prints why the last action was denied or asked',
   replay: 'rebuilds a recorded session; --out only creates a page where no file exists',
+  card: 'reads recorded sessions and prints counts; it keeps a cache of summaries in its own folder under the home, which no caller names',
+  show: 'prints the saved moments of the last card',
   sent: 'lists by name the credentials a recorded session saw; --out only creates a card where no file exists',
   attack: 'replays recorded attacks against the policy, in memory',
   policy:

@@ -105,10 +105,11 @@ const SECTIONS: readonly Section[] = [
 ];
 
 /**
- * What Stroq writes into an agent's config (`init`) and older copies of it still call. No person
- * types these. `task-hook` is not a command of the table at all: it is answered in index.ts.
+ * What Stroq writes into an agent's config (`init`) and older copies of it still call: no person
+ * types `hook` and `mcp`. `task-hook` is not a command of the table at all: it is answered in
+ * index.ts. And the card and `show`, which the no-argument `stroq` is to run: listed with it, not here.
  */
-const HIDDEN: readonly string[] = ['hook', 'mcp'];
+const HIDDEN: readonly string[] = ['hook', 'mcp', 'card', 'show'];
 
 const TIERS: ReadonlyMap<string, Tier> = new Map([
   ...SECTIONS.flatMap((section) =>

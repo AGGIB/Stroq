@@ -20,8 +20,8 @@ import { SCENARIOS } from '../src/attack/scenarios/index.js';
 
 /** The commands on the first screen, in the order it lists them. The bare `stroq` is above them. */
 const CORE = ['init', 'why', 'attack', 'uninstall'];
-/** What Stroq writes into an agent's config: no person runs these, so no list shows them. */
-const HIDDEN = ['hook', 'mcp'];
+/** What Stroq writes into an agent's config (no person runs these), and the card, which `stroq` runs. */
+const HIDDEN = ['hook', 'mcp', 'card', 'show'];
 
 /** The commands a screen lists: one per line that starts with `stroq <name>`, indented or not. */
 const listed = (text: string): string[] =>

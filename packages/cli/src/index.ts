@@ -37,6 +37,8 @@ const COMMANDS: Readonly<Record<string, () => Promise<Runner>>> = {
   },
   trust: async () => (await import('./commands/trust.js')).runTrust,
   untaint: async () => (await import('./commands/untaint.js')).runUntaint,
+  card: async () => (await import('./commands/card.js')).runCard,
+  show: async () => (await import('./commands/show.js')).runShow,
   replay: async () => (await import('./commands/replay.js')).runReplay,
   why: async () => (await import('./commands/why.js')).runWhy,
   sent: async () => (await import('./commands/sent.js')).runSent,
