@@ -2,14 +2,15 @@
 // `stroq help <command>` and the unknown-option check are all read from `COMMANDS`, so a
 // flag a command parses but this table omits fails `test/help.test.ts` rather than going
 // missing from the help. The short lists, `stroq --help` and `stroq help --all`, and the
-// tier of each command are in help-listing.ts.
+// tier of each command are in help-listing.ts. The commands that were taken out are in
+// removed-commands.ts; the three that became developer tools have their usage in dev-help.ts.
 
 export { tierOf, usage, usageAll, type Tier } from './help-listing.js';
 
 /** One flag: how it is written, and what it does. */
 type Flag = readonly [spelling: string, meaning: string];
 
-interface CommandHelp {
+export interface CommandHelp {
   readonly name: string;
   /** Everything after `stroq `, as the top-level list prints it. */
   readonly synopsis: string;
@@ -33,58 +34,6 @@ export const COMMANDS: readonly CommandHelp[] = [
     flags: [
       ['--workspace <directory>', 'existing project directory (default: current directory)'],
       ['--port <number>', 'loopback port (default: 47815; 0 selects an available port)'],
-    ],
-  },
-  {
-    name: 'add',
-    synopsis:
-      'add <local-source|installed-name> [--user] [--restore] [--rollback] [--kind skill|mcp] [--client <name>|--config <path>] [--entrypoint <file>] [--pass-env <names>] [--name <name>] [--cwd <dir>] [--strict] [--force]',
-    about: [
-      'install a skill from a local folder or tar archive, after a check. Stroq reads',
-      'the files and shows a report with a sha256 fingerprint. To install, you type',
-      'the first 12 characters of its fingerprint. Stroq then installs exactly the',
-      'files it showed you, even if the folder changes while you read.',
-      'Give the name of something you installed to update it from the same place.',
-      'The report says what Stroq saw. It does not prove the files are safe.',
-      'With --kind mcp, it adds a local Node MCP server the same way: Stroq keeps a',
-      "copy, and the client's config starts only that copy. Only Node servers work.",
-      'With --strict, Stroq holds back any message from the server that it could not',
-      'fully read and scan. Changing that later needs the typed fingerprint again;',
-      'an update keeps it.',
-    ],
-    flags: [
-      ['--user', "install into ~/.claude/skills instead of this project's .claude/skills"],
-      ['--restore', 'restore an installed skill or MCP wrapper from confirmed store bytes'],
-      ['--rollback', 'roll back an updated skill or MCP server to its previous stored revision'],
-      ['--kind <kind>', 'skill (default) or mcp'],
-      ['--client <name>', 'with --kind mcp: the client whose config gets the entry'],
-      ['--config <path>', 'with --kind mcp: the client config file to edit'],
-      ['--entrypoint <file>', 'with --kind mcp: the start file, when package.json does not say'],
-      ['--pass-env <names>', 'with --kind mcp: comma-separated variables the server may see'],
-      ['--name <name>', 'with --kind mcp: the server name in the config'],
-      ['--cwd <dir>', 'with --kind mcp: the project directory decisions are made for'],
-      ['--strict', 'with --kind mcp: confirm strict mode in the pinned wrapper'],
-      ['--force', 'with --kind mcp: update an entry changed outside Stroq'],
-    ],
-  },
-  {
-    name: 'remove',
-    synopsis:
-      'remove <name> [--user] [--force] [--kind skill|mcp] [--client <name>|--config <path>]',
-    about: [
-      'remove a confirmed skill after a terminal y/N question, and record a receipt;',
-      'with --kind mcp, delete the config entry or restore the one it replaced',
-      'For a wrapper with no lock record, give --force and --client or --config.',
-    ],
-    flags: [
-      ['--user', "remove from ~/.claude/skills instead of this project's .claude/skills"],
-      [
-        '--force',
-        'also remove a skill or entry changed outside Stroq; still requires a person at a terminal',
-      ],
-      ['--kind <kind>', 'skill (default) or mcp'],
-      ['--client <name>', 'with --kind mcp: the client config containing an orphan wrapper'],
-      ['--config <path>', 'with --kind mcp: the explicit config containing an orphan wrapper'],
     ],
   },
   {
@@ -148,48 +97,6 @@ export const COMMANDS: readonly CommandHelp[] = [
     flags: [],
   },
   {
-    name: 'run',
-    synopsis: 'run [--sandbox] [--agent <id>] -- <agent> …',
-    about: [
-      'start an agent already confined: sets the git settings that stop a repository',
-      'running a command during the startup "git status", refuses to launch into a',
-      'repository that runs something before you could approve it, and checks that',
-      "Stroq's hooks are installed for that agent",
-    ],
-    flags: [
-      ['--agent <id>', 'the agent whose hooks to check, when the command does not say'],
-      ['--sandbox', "require Anthropic's srt; refuse before launch when it is missing"],
-      ['--allow-domain <host>', 'with --sandbox: a host the agent may reach; repeat for more'],
-      ['--no-inspect', 'skip reading what the repository runs'],
-      ['--force', 'override repository/hook preflight refusals; --sandbox still requires srt'],
-      ['--dry-run', 'print what would run and start nothing'],
-    ],
-    passThrough: true,
-  },
-  {
-    name: 'task',
-    synopsis:
-      'task [--profile repo-edit-and-test] [--read <glob>] [--write <glob>] [--ttl 30m] -- "<task>"',
-    about: [
-      'preview and confirm a signed Claude Code task; srt is required by default',
-      'The parent controller judges hooks; --hook-only is advisory without OS isolation.',
-    ],
-    flags: [
-      ['--profile <name>', 'repo-edit-and-test'],
-      ['--read <glob>', 'read allowlist; repeat; default project/**'],
-      ['--write <glob>', 'write allowlist; repeat; default project/**'],
-      ['--ttl <duration>', '1m through 24h, default 30m'],
-      ['--hook-only', 'explicit advisory mode without a sandbox'],
-    ],
-    passThrough: true,
-  },
-  {
-    name: 'permit',
-    synopsis: 'permit list | show <task> | extend <task> <fingerprint> | revoke <task>',
-    about: ['inspect signed tasks, confirm a refused exact operation once, or revoke a task'],
-    flags: [],
-  },
-  {
     name: 'mcp',
     synopsis:
       'mcp --server <name> [--call-control <uuid>] [--pin sha256:<digest>] [--cloak] [--strict [--tool-approval]] -- <command> …',
@@ -236,28 +143,6 @@ export const COMMANDS: readonly CommandHelp[] = [
     flags: [
       ['--all', 'list every agent and scope, installed or not'],
       ['--json', 'machine-readable output (version 1)'],
-    ],
-  },
-  {
-    name: 'prove',
-    synopsis: 'prove [--agent <id>] [--yes] [--dry-run] [--json] [--max-requests <n>]',
-    about: [
-      'check that blocking really works on this machine. Your agent runs 3 harmless',
-      'commands with the hook in place. Stroq checks that the ones your policy blocks did',
-      'not run, and that they do run with the hook out of the way. It checks the files the',
-      "commands leave and its own log, not the agent's reply.",
-      'It makes up to 3 short requests on your own login (your subscription, never an API',
-      'key). It says so and asks first. Exit 0: it works. 1: it failed. 3: anything else.',
-    ],
-    flags: [
-      [
-        '--agent <id>',
-        'claude-code (default, macOS/Linux) or codex (Windows, measured CLI 0.162.1 only)',
-      ],
-      ['--yes', 'make the requests without asking; needed where there is no terminal to ask on'],
-      ['--dry-run', 'say what would be done, make no request and write nothing'],
-      ['--json', 'machine-readable output (version 1)'],
-      ['--max-requests <n>', 'the most requests to make, 1 to 6 (default 3)'],
     ],
   },
   {
@@ -448,73 +333,6 @@ export const COMMANDS: readonly CommandHelp[] = [
     ],
   },
   {
-    name: 'bench',
-    synopsis:
-      'bench [--corpus <dir> | --actions | --latency] [--n <count>] [--warmup <count>] [--json] [--verbose]',
-    about: [
-      'measure how much benign developer text the rule set flags,',
-      '(--actions) how much ordinary agent work your policy interrupts,',
-      'or (--latency) what a hook call costs in processor and wall time (p50/p95/p99)',
-    ],
-    flags: [
-      ['--corpus <dir>', 'measure your own files instead of the shipped corpus'],
-      ['--actions', 'replay 75 scenarios of ordinary agent work against your policy'],
-      ['--latency', 'measure hook invocation processor and wall time on claude-code'],
-      ['--n <count>', 'number of measured runs per event (default 100)'],
-      ['--warmup <count>', 'number of warmup runs per event (default 5)'],
-      ['--json', 'machine-readable output'],
-      ['--verbose', 'list the flagged files'],
-    ],
-  },
-  {
-    name: 'coverage',
-    synopsis: 'coverage [--format table|navigator] [--json]',
-    about: ['the control mapping against MITRE ATLAS and OWASP ASI'],
-    flags: [
-      ['--format <table|navigator>', 'navigator emits an ATT&CK Navigator layer'],
-      ['--json', 'machine-readable output'],
-    ],
-  },
-  {
-    name: 'harden',
-    synopsis:
-      'harden [plan|apply|undo|status] [--agent <id>] [--scope user|project] [--recipe <name>] [--json] [--yes]',
-    about: [
-      "make the host's own protection of credential files stronger, and give it back. plan (the",
-      'default) shows exactly what would change and writes nothing; apply asks you, then changes the',
-      'file and keeps what undo needs; undo takes it back; status says what is in place. Recipes:',
-      "claude-read-deny (read rules in Claude Code's settings) and cursor-ignore (a block in",
-      '.cursorignore). A filter inside the host, a best effort and not a guarantee: a program that',
-      'reads the file itself is not covered, and only an OS sandbox covers that.',
-      'Exit codes: 0 done or nothing to do, 1 refused or failed, 2 wrong command line, 3 a flag is missing',
-    ],
-    flags: [
-      ['--agent <id>', 'claude-code (the default) or cursor'],
-      [
-        '--scope <user|project>',
-        "user: the person's own settings, ~/.claude/settings.json (the default for claude-code); project: this folder, .claude/settings.local.json, or .cursorignore for cursor (the only scope of cursor)",
-      ],
-      ['--recipe <name>', 'claude-read-deny or cursor-ignore; the agent follows from it'],
-      ['--json', 'machine-readable output, with plan, apply and status'],
-      [
-        '--yes',
-        'with apply and undo: answer the question yourself. On a terminal they ask first; anywhere else they do nothing without it',
-      ],
-      [
-        '--acknowledge-link',
-        'the path is a link and the change lands in the file it leads to. A plan hides its diff until it is given',
-      ],
-      [
-        '--acknowledge-credential-loss',
-        'apply may replace a value that looks like a credential; no copy of it is kept, so undo cannot put it back',
-      ],
-      [
-        '--acknowledge-reformat',
-        'apply may lay the whole file out again, not only the lines it adds',
-      ],
-    ],
-  },
-  {
     name: 'vet',
     synopsis:
       'vet --from <dir or .tgz> [--online <source>] [--kind skill|mcp|plugin] [--probe] [--entrypoint <file>] [--json | --card] [--expect <sha256>] [--out <file>]',
@@ -572,13 +390,11 @@ const byName = new Map(COMMANDS.map((c) => [c.name, c]));
 /** The name of every command, hidden ones included. */
 export const commandNames = (): readonly string[] => COMMANDS.map((c) => c.name);
 
-/** `stroq <command> --help`, or null for a name that is not a command. */
-export function commandHelp(name: string): string | null {
-  const c = byName.get(name);
-  if (c === undefined) return null;
+/** The text of `--help` for one command: its synopsis, what it does, and its options. */
+export function renderHelp(c: CommandHelp, program = 'stroq '): string {
   const width = Math.max(0, ...c.flags.map(([spelling]) => spelling.length)) + 4;
   return [
-    `stroq ${c.synopsis}`,
+    `${program}${c.synopsis}`,
     '',
     ...c.about.map((line) => `  ${line}`),
     ...(c.flags.length === 0
@@ -592,32 +408,49 @@ export function commandHelp(name: string): string | null {
   ].join('\n');
 }
 
+/** `stroq <command> --help`, or null for a name that is not a command. */
+export function commandHelp(name: string): string | null {
+  const c = byName.get(name);
+  return c === undefined ? null : renderHelp(c);
+}
+
 /** Arguments before the `--` a pass-through command hands to another program. */
-function ownArgs(name: string, args: readonly string[]): readonly string[] {
-  if (byName.get(name)?.passThrough !== true) return args;
+function ownArgs(c: CommandHelp | undefined, args: readonly string[]): readonly string[] {
+  if (c?.passThrough !== true) return args;
   const end = args.indexOf('--');
   return end === -1 ? args : args.slice(0, end);
 }
 
+const asksForHelp = (args: readonly string[]): boolean =>
+  args.some((arg) => arg === '--help' || arg === '-h');
+
 export function wantsHelp(name: string, args: readonly string[]): boolean {
-  return ownArgs(name, args).some((arg) => arg === '--help' || arg === '-h');
+  return asksForHelp(ownArgs(byName.get(name), args));
 }
 
-/** The first option `name` does not have, or null. Values and positionals are not options. */
-export function unknownOption(name: string, args: readonly string[]): string | null {
-  const c = byName.get(name);
-  if (c === undefined) return null;
+/** `wantsHelp` for a command that is not in `COMMANDS` (see dev-help.ts). */
+export const wantsHelpOf = (c: CommandHelp, args: readonly string[]): boolean =>
+  asksForHelp(ownArgs(c, args));
+
+/** The first option `c` does not have, or null. Values and positionals are not options. */
+export function unknownOptionOf(c: CommandHelp, args: readonly string[]): string | null {
   const known = new Set([
     '--help',
     '-h',
     ...c.flags.map(([spelling]) => spelling.split(/[\s|<]/)[0]),
   ]);
-  for (const arg of ownArgs(name, args)) {
+  for (const arg of ownArgs(c, args)) {
     if (!arg.startsWith('-') || arg === '-' || arg === '--') continue;
     const option = arg.split('=')[0] ?? arg;
     if (!known.has(option)) return option;
   }
   return null;
+}
+
+/** The first option `name` does not have, or null. Values and positionals are not options. */
+export function unknownOption(name: string, args: readonly string[]): string | null {
+  const c = byName.get(name);
+  return c === undefined ? null : unknownOptionOf(c, args);
 }
 
 /** What a usage error prints, from the command and what was wrong with it. */
@@ -645,7 +478,7 @@ export function parseArgsProblem(err: unknown): string | null {
 const HINTS: ReadonlyMap<string, string> = new Map([
   [
     'install',
-    'stroq has no install: `stroq init` guards an agent, `stroq add` adds a local skill after a check.',
+    'stroq has no install: `stroq init` guards an agent, `stroq vet` checks a skill or MCP server before you add it.',
   ],
 ]);
 

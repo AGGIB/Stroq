@@ -22,8 +22,6 @@ import { SCENARIOS } from '../src/attack/scenarios/index.js';
 const CORE = ['init', 'why', 'attack', 'uninstall'];
 /** What Stroq writes into an agent's config: no person runs these, so no list shows them. */
 const HIDDEN = ['hook', 'mcp'];
-/** Until the next step takes them out of the table: in the table, listed nowhere. */
-const GOING = ['add', 'remove', 'run', 'task', 'permit', 'harden', 'prove', 'bench', 'coverage'];
 
 /** The commands a screen lists: one per line that starts with `stroq <name>`, indented or not. */
 const listed = (text: string): string[] =>
@@ -82,7 +80,7 @@ describe('usageAll: stroq help --all', () => {
     expect(new Set(names).size).toBe(names.length);
     expect([...names].sort()).toEqual(
       commandNames()
-        .filter((n) => !HIDDEN.includes(n) && !GOING.includes(n))
+        .filter((n) => !HIDDEN.includes(n))
         .sort(),
     );
     for (const name of HIDDEN) expect(names).not.toContain(name);
@@ -127,7 +125,7 @@ describe('tierOf', () => {
     expect(tier('core')).toEqual(expect.arrayContaining(CORE));
     expect(tier('core')).toHaveLength(CORE.length);
     expect(tier('hidden')).toEqual(expect.arrayContaining(HIDDEN));
-    expect(tier('hidden')).toHaveLength(HIDDEN.length + GOING.length);
+    expect(tier('hidden')).toHaveLength(HIDDEN.length);
     expect(tier('more').sort()).toEqual(
       [
         'sent',
@@ -181,24 +179,8 @@ describe('commandHelp', () => {
     expect(commandHelp('mcp')).toMatch(/^stroq mcp --server <name>/);
   });
 
-  it('says how add is confirmed in plain words: a report, then 12 characters of a fingerprint', () => {
-    const text = commandHelp('add') ?? '';
-    expect(text).not.toMatch(/passport|hex digits/);
-    expect(text).toMatch(/report/);
-    expect(text).toMatch(/first 12 characters of (?:its|that) fingerprint/);
-  });
-
   it('leaves the Windows quoting of init to the guide', () => {
     expect(commandHelp('init')).not.toMatch(/cmd\.exe|quote/);
-  });
-
-  it('says what prove checks, what it costs and that it asks first', () => {
-    const text = commandHelp('prove') ?? '';
-    expect(text).toMatch(/^ {2}check that blocking really works/m);
-    expect(text).toContain('up to 3');
-    expect(text).toContain('asks first');
-    expect(text).toMatch(/Exit 0/);
-    expect(text).not.toContain('evidence the model does not write');
   });
 });
 
@@ -210,9 +192,8 @@ describe('wantsHelp', () => {
   });
 
   it('leaves a --help after `--` to the program run or wrapped', () => {
-    expect(wantsHelp('run', ['--', 'claude', '--help'])).toBe(false);
     expect(wantsHelp('mcp', ['--server', 'x', '--', 'node', 's.js', '-h'])).toBe(false);
-    expect(wantsHelp('run', ['--help', '--', 'claude'])).toBe(true);
+    expect(wantsHelp('mcp', ['--help', '--', 'node', 's.js'])).toBe(true);
   });
 });
 
@@ -227,14 +208,14 @@ describe('unknownOption', () => {
     expect(unknownOption('log', ['--count', '5', '--json'])).toBeNull();
     expect(unknownOption('log', ['--count=5'])).toBeNull();
     expect(unknownOption('trust', ['README.md', '--json'])).toBeNull();
-    expect(unknownOption('coverage', ['--format', 'navigator'])).toBeNull();
+    expect(unknownOption('policy', ['check', '--json'])).toBeNull();
     expect(unknownOption('sent', ['--help'])).toBeNull();
     expect(unknownOption('log', ['-'])).toBeNull();
   });
 
   it('does not read past `--` for a pass-through command', () => {
     expect(
-      unknownOption('run', ['--sandbox', '--', 'claude', '--dangerously-anything']),
+      unknownOption('mcp', ['--server', 'x', '--', 'node', 's.js', '--dangerously-anything']),
     ).toBeNull();
   });
 
@@ -292,7 +273,7 @@ describe('commandHint', () => {
   it('says what to run instead of install, in one line that names both commands', () => {
     const hint = commandHint('install');
     expect(hint).toBe(
-      'stroq has no install: `stroq init` guards an agent, `stroq add` adds a local skill after a check.',
+      'stroq has no install: `stroq init` guards an agent, `stroq vet` checks a skill or MCP server before you add it.',
     );
     expect(hint).not.toContain('\n');
   });

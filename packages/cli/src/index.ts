@@ -1,6 +1,7 @@
 import { neutralizeControls, withSafeOutput } from './terminal-safe.js';
 import { handleStdoutError } from './stdout-errors.js';
 import { stroqVersion } from './version.js';
+import { removedNotice } from './removed-commands.js';
 import {
   commandHelp,
   commandHint,
@@ -28,11 +29,7 @@ const COMMANDS: Readonly<Record<string, () => Promise<Runner>>> = {
   inspect: async () => (await import('./commands/inspect.js')).runInspect,
   init: async () => (await import('./commands/init-agent.js')).runInitCommand,
   uninstall: async () => (await import('./commands/uninstall.js')).runUninstall,
-  run: async () => (await import('./commands/run.js')).runRun,
-  task: async () => (await import('./commands/task.js')).runTask,
-  permit: async () => (await import('./commands/permit.js')).runPermit,
   doctor: async () => (await import('./commands/doctor.js')).runDoctor,
-  prove: async () => (await import('./commands/prove.js')).runProve,
   log: async () => (await import('./commands/log.js')).runLog,
   verify: async () => {
     const { runVerify } = await import('./commands/verify.js');
@@ -47,12 +44,7 @@ const COMMANDS: Readonly<Record<string, () => Promise<Runner>>> = {
   attack: async () => (await import('./commands/attack.js')).runAttackCommand,
   policy: async () => (await import('./commands/policy.js')).runPolicy,
   exposure: async () => (await import('./commands/exposure.js')).runExposure,
-  bench: async () => (await import('./commands/bench.js')).runBenchCommand,
-  coverage: async () => (await import('./commands/coverage.js')).runCoverageCommand,
-  harden: async () => (await import('./commands/harden.js')).runHarden,
   vet: async () => (await import('./commands/vet.js')).runVet,
-  add: async () => (await import('./commands/add.js')).runAdd,
-  remove: async () => (await import('./commands/remove.js')).runRemove,
 };
 
 export async function main(argv: readonly string[]): Promise<number> {
@@ -120,12 +112,17 @@ async function report(command: string | undefined, rest: readonly string[]): Pro
     return 0;
   }
   if (command === 'help') {
+    const gone = rest[0] === undefined ? null : removedNotice(rest[0]);
+    if (gone !== null) return removedCommand(gone);
     const help =
       rest[0] === undefined ? usage() : rest[0] === '--all' ? usageAll() : commandHelp(rest[0]);
     if (help === null) return unknownCommand(rest[0] ?? '');
     process.stdout.write(help);
     return 0;
   }
+  // Before the table and before `--help`: a removed command has no help of its own to print.
+  const gone = removedNotice(command);
+  if (gone !== null) return removedCommand(gone);
   const load = Object.hasOwn(COMMANDS, command) ? COMMANDS[command] : undefined;
   if (load === undefined) return unknownCommand(command);
   // `sent` writes its own, longer help.
@@ -147,6 +144,12 @@ async function report(command: string | undefined, rest: readonly string[]): Pro
     process.stderr.write(usageError(command, problem));
     return 2;
   }
+}
+
+/** A command that was taken out: one line saying where to go, and a usage-error exit code. */
+function removedCommand(notice: string): number {
+  process.stderr.write(`${notice}\n`);
+  return 2;
 }
 
 function unknownCommand(typed: string): number {

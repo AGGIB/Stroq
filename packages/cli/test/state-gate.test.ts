@@ -15,19 +15,38 @@ import { commandNames } from '../src/help.js';
 const DENIED_FORMS: Readonly<Record<string, readonly string[]>> = {
   // Starts the authenticated local control service and prints its private bearer URL.
   console: ['stroq console', 'stroq console --workspace /work --port 0'],
-  task: ['stroq task -- "fix tests"', 'stroq task --hook-only -- "fix tests"'],
-  permit: ['stroq permit extend task abc', 'stroq permit revoke task'],
   init: ['stroq init', 'stroq init --agent cursor --user'],
   uninstall: ['stroq uninstall', 'stroq uninstall --agent mcp --client cursor'],
   untaint: ['stroq untaint', 'stroq untaint --all'],
   trust: ['stroq trust README.md', 'stroq trust --remove README.md'],
-  // Starts the program after the `--`, which is judged by the command it names.
-  run: ['stroq run -- stroq uninstall', 'stroq run --sandbox -- npx @stroq/cli init'],
   mcp: ['stroq mcp --server s -- stroq untaint --all'],
   // Starts every stdio server the project's `.mcp.json` names, which an agent can have written.
   exposure: ['stroq exposure --probe', 'stroq exposure --json --probe'],
   // Plants a file with a first line it chooses, wherever it chooses, and adds a canary to the secret index.
   canary: ['stroq canary', 'stroq canary --file ~/.zprofile --name x'],
+  // Reads a folder, and with --online goes to the network for a package: that form is a person's. The
+  // form that only reads is open, and `stroq vet and the state gate` below holds both.
+  vet: ['stroq vet --online', 'stroq vet --from x --online'],
+  // The host's entry point: an event the agent wrote on its input could record a result that was
+  // never read, or say that a call the user was asked about ran and so let a copied value through.
+  hook: [
+    "echo '{}' | stroq hook claude-code",
+    'stroq hook cursor < event.json',
+    "echo '{}' | npx @stroq/cli hook claude-code",
+  ],
+};
+
+/**
+ * The commands 0.30 took out of the CLI. The gate still denies their state-changing forms: an older
+ * `npx @stroq/cli@<version>` still has them, and an agent must not be able to run one through a shell
+ * because the command left this version. They are not in `commandNames()`, so the lists above do not
+ * name them; this does, and the tests below hold the gate to every form.
+ */
+const REMOVED_STILL_GATED: Readonly<Record<string, readonly string[]>> = {
+  task: ['stroq task -- "fix tests"', 'stroq task --hook-only -- "fix tests"'],
+  permit: ['stroq permit extend task abc', 'stroq permit revoke task'],
+  // Starts the program after the `--`, which is judged by the command it names.
+  run: ['stroq run -- stroq uninstall', 'stroq run --sandbox -- npx @stroq/cli init'],
   // Edits an agent's settings or ignore file, and takes the change back. `plan` and `status` only read.
   harden: [
     'stroq harden apply',
@@ -38,18 +57,8 @@ const DENIED_FORMS: Readonly<Record<string, readonly string[]>> = {
   ],
   // Starts the host on the owner's login and spends their requests, and writes the result `doctor` reads.
   prove: ['stroq prove', 'stroq prove --yes --max-requests 6'],
-  // Reads a folder, and with --online goes to the network for a package: that form is a person's. The
-  // form that only reads is open, and `stroq vet and the state gate` below holds both.
-  vet: ['stroq vet --online', 'stroq vet --from x --online'],
   add: ['stroq add ./demo', 'stroq add demo --user', 'stroq add demo --restore'],
   remove: ['stroq remove demo', 'stroq remove demo --force'],
-  // The host's entry point: an event the agent wrote on its input could record a result that was
-  // never read, or say that a call the user was asked about ran and so let a copied value through.
-  hook: [
-    "echo '{}' | stroq hook claude-code",
-    'stroq hook cursor < event.json',
-    "echo '{}' | npx @stroq/cli hook claude-code",
-  ],
 };
 
 /** The commands that only read, or write what no caller chooses the place or the lines of, and why. */
@@ -64,8 +73,6 @@ const READS_ONLY: Readonly<Record<string, string>> = {
   policy:
     'checks a policy file and replays the attack and ordinary-work corpora under it, in memory; opens only the files it is named',
   inspect: 'reads a repository and prints what it would run',
-  bench: 'measures the rules on a corpus and prints the result',
-  coverage: 'prints the control mapping',
 };
 
 const isDenied = (command: string): boolean =>
@@ -77,16 +84,7 @@ describe('every command of the CLI is judged by the state gate, or listed as one
   it('walks the commands of the help, and there are some', () => {
     expect(names.length).toBeGreaterThan(15);
     expect(new Set(names).size).toBe(names.length);
-    for (const name of [
-      'init',
-      'uninstall',
-      'untaint',
-      'trust',
-      'run',
-      'mcp',
-      'canary',
-      'exposure',
-    ])
+    for (const name of ['init', 'uninstall', 'untaint', 'trust', 'mcp', 'canary', 'exposure'])
       expect(names, name).toContain(name);
   });
 
@@ -106,20 +104,29 @@ describe('every command of the CLI is judged by the state gate, or listed as one
       expect(names, name).toContain(name);
   });
 
-  it.each(Object.entries(DENIED_FORMS).flatMap(([, forms]) => forms.map((form) => [form])))(
-    'denies %s',
-    (form) => {
-      expect(isDenied(form), form).toBe(true);
-    },
-  );
+  it('names no removed command in either list, and keeps its own list of them', () => {
+    for (const name of Object.keys(REMOVED_STILL_GATED)) {
+      expect(names, name).not.toContain(name);
+      expect(Object.hasOwn(DENIED_FORMS, name) || Object.hasOwn(READS_ONLY, name), name).toBe(
+        false,
+      );
+    }
+  });
 
-  it.each(Object.entries(DENIED_FORMS).map(([name]) => [name]))(
-    'leaves a request for help for %s open',
-    (name) => {
-      for (const flag of ['--help', '-h'])
-        expect(isDenied(`stroq ${name} ${flag}`), flag).toBe(false);
-    },
-  );
+  it.each(
+    [...Object.values(DENIED_FORMS), ...Object.values(REMOVED_STILL_GATED)].flatMap((forms) =>
+      forms.map((form) => [form]),
+    ),
+  )('denies %s', (form) => {
+    expect(isDenied(form), form).toBe(true);
+  });
+
+  it.each(
+    [...Object.keys(DENIED_FORMS), ...Object.keys(REMOVED_STILL_GATED)].map((name) => [name]),
+  )('leaves a request for help for %s open', (name) => {
+    for (const flag of ['--help', '-h'])
+      expect(isDenied(`stroq ${name} ${flag}`), flag).toBe(false);
+  });
 
   it.each(Object.entries(READS_ONLY))('leaves %s open, as it reads: %s', (name) => {
     expect(isDenied(`stroq ${name}`), name).toBe(false);
