@@ -94,20 +94,27 @@ export const BUDGET_MATCH: RuleMatch = {
 
 /**
  * A match's weight. A rule that matched only after decoding was hiding its text, and a sub-critical
- * one is raised to the encoded floor for that. The percent-decoded variant is the whole page with
- * its escapes read, so a rule that matched the page as written matches that copy as well and the
- * copy says nothing was hidden: it keeps its own severity. Without this a page with two
- * percent-escapes in it (a badge URL, a `%20`) was read again with every escape decoded, and a
- * medium rule that had already matched the plain text, such as `curl … | sh` in an install line,
- * was raised to suspect by its own decoded copy. A base64 or hex variant is only the decoded
- * token, never the page, so a match there is the hidden text itself and keeps the floor whatever
- * the page says in the open.
+ * one is raised to the encoded floor for that. The percent-decoded variant of the page itself (the
+ * first layer) is the whole page with its escapes read, so a rule that matched the page as written
+ * matches that copy as well and the copy says nothing was hidden: it keeps its own severity.
+ * Without this a page with two percent-escapes in it (a badge URL, a `%20`) was read again with
+ * every escape decoded, and a medium rule that had already matched the plain text, such as
+ * `curl … | sh` in an install line, was raised to suspect by its own decoded copy. A base64 or hex
+ * variant is only the decoded token, never the page, and a percent layer inside one is a second
+ * layer of hiding, so a rule that matched there (`hidden`) keeps the floor whatever the page says
+ * in the open.
  */
-function weightOf(match: RuleMatch, plain: ReadonlySet<string>): number {
+function weightOf(
+  match: RuleMatch,
+  plain: ReadonlySet<string>,
+  hidden: ReadonlySet<string>,
+): number {
   const base = SEVERITY_WEIGHT[match.severity];
   const encoded = match.variant !== 'raw' && match.variant !== 'normalized';
   if (!encoded) return base;
-  return match.variant === 'url' && plain.has(match.ruleId) ? base : Math.max(base, ENCODED_FLOOR);
+  const copyOfThePage =
+    match.variant === 'url' && plain.has(match.ruleId) && !hidden.has(match.ruleId);
+  return copyOfThePage ? base : Math.max(base, ENCODED_FLOOR);
 }
 
 function timedOutResult(matches: readonly RuleMatch[]): ScanResult {
@@ -144,6 +151,7 @@ export function scanContent(
   const startedAt = performance.now();
   const input = text.length > maxChars ? text.slice(0, maxChars) : text;
   const seen = new Set<string>();
+  const hidden = new Set<string>();
   const matches: RuleMatch[] = [];
   // Filtered once, not per variant: a rule that does not read this surface cannot
   // match any encoding of the text either. `ruleMatches` re-checks, so a caller
@@ -159,7 +167,18 @@ export function scanContent(
     for (const rule of applicable) {
       if (performance.now() - startedAt > budgetMs) return timedOutResult(matches);
       const key = `${rule.id}@${variant.kind}`;
-      if (seen.has(key) || !ruleMatches(rule, variant.text, read, indexes)) continue;
+      // A variant that is not the page itself with its escapes read: the text of a token, or the
+      // percent layer of one.
+      const hiding =
+        variant.kind !== 'raw' &&
+        variant.kind !== 'normalized' &&
+        !(variant.kind === 'url' && variant.depth === 1);
+      // A rule read on this kind of variant is not read on it again, unless that would be the first
+      // sign that it also matched hidden text.
+      if (seen.has(key) && !(hiding && !hidden.has(rule.id))) continue;
+      if (!ruleMatches(rule, variant.text, read, indexes)) continue;
+      if (hiding) hidden.add(rule.id);
+      if (seen.has(key)) continue;
       seen.add(key);
       matches.push({
         ruleId: rule.id,
@@ -173,6 +192,6 @@ export function scanContent(
   const plain = new Set(
     matches.filter((m) => m.variant === 'raw' || m.variant === 'normalized').map((m) => m.ruleId),
   );
-  const score = matches.reduce((max, m) => Math.max(max, weightOf(m, plain)), 0);
+  const score = matches.reduce((max, m) => Math.max(max, weightOf(m, plain, hidden)), 0);
   return { verdict: score >= threshold ? 'suspect' : 'clean', score, matches };
 }

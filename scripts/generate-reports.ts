@@ -138,18 +138,26 @@ async function deriveBench(): Promise<string> {
       'decoded, and `STROQ-2026-00005` (`curl … | sh`, ' +
       'medium) was lifted to suspect by the decoded copy of an install line it had ' +
       'matched as written. That alone cleared four files (ClickHouse, APISIX, Pulumi, ' +
-      'PrivateGPT). Second, a fetched page now reads the narrow form of the patterns whose ' +
-      "broad form is evidence only in a tool's description, a tool's result or an " +
-      'instruction file: a credential path, `/etc/passwd`, the word "Keychain" or a ' +
-      '`file://` path named in a README (`ATR-2026-00113`, `ATR-2026-00161`, ' +
-      '`ATR-2026-00568`), an HTTP method beside an API key (`ATR-2026-00114`), "a drop-in ' +
-      'replacement for" (`ATR-2026-00060`) and a bare private key header (`ATR-2026-00150`). ' +
-      'Two Stroq rules and one vendored pattern were tightened outright: `STROQ-2026-00002` ' +
-      'needs "you must" in the sentence that names the assistant and an instruction ' +
-      'addressed to someone in an HTML comment, `STROQ-2026-00004` leaves `copy .env.example` ' +
-      'alone, and `ATR-2026-00163` needs the verb to start the directive. Ten files cleared. ' +
-      'The narrow forms keep every documented true positive of their rules on every surface ' +
+      'PrivateGPT). Second, a fetched page now reads a pattern of its own (`web:` in ' +
+      '[`rules/atr-overrides.yaml`](../rules/atr-overrides.yaml)) in the vendored rules whose ' +
+      'broad form is evidence only in a tool, not in a README: a credential path, ' +
+      '`/etc/passwd`, the word "Keychain" or a `file://` path named in a README ' +
+      '(`ATR-2026-00113`, `ATR-2026-00161`, `ATR-2026-00568`), an HTTP method beside an API ' +
+      'key (`ATR-2026-00114`), "a drop-in replacement for" (`ATR-2026-00060`), a bare ' +
+      'private key header (`ATR-2026-00150`) and "disable all security checks for" ' +
+      '(`ATR-2026-00163`). The page pattern is read on `web_content` and nowhere else: a file ' +
+      'Read from a cloned repository, a `cat`, an MCP result and a CLAUDE.md are scanned as ' +
+      '`repo_content`, `command_output`, `tool_result` and `instruction_file`, and read ' +
+      'exactly what they read at 0.29.0, because a planted instruction arrives by every ' +
+      'one of them. Two Stroq rules were tightened outright: `STROQ-2026-00002` needs "you ' +
+      'must" or "must now" and an action beside the assistant\'s name, and a comment that ' +
+      'instructs someone; `STROQ-2026-00004` leaves `copy .env.example to .env` alone. Ten ' +
+      'files cleared. ' +
+      'Each narrow form keeps every documented true positive of its rule on every surface ' +
       '([`surface-recall.test.ts`](../packages/core/test/rules/surface-recall.test.ts)), ' +
+      'every text two independent reviews found it to lose is pinned as suspect on the ' +
+      'surfaces where 0.29.0 called it suspect ' +
+      '([`detection-parity.test.ts`](../packages/core/test/rules/detection-parity.test.ts)), ' +
       'and a planted instruction still taints the session when it arrives by a fetched page ' +
       'and is still noted when it arrives by `Read`, `cat` or `git log` ' +
       '([`engine-planted-instruction.test.ts`](../packages/core/test/engine-planted-instruction.test.ts)). ' +

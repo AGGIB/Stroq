@@ -209,6 +209,12 @@ TAILORED.push([
     (n) => rep('<!-- x ', n),
     (n) => `<!--${' '.repeat(n)}`,
     (n) => rep('<!-- ignore ', n),
+    // One opening and no end: the word is looked for in a comment that never closes.
+    (n) => `<!--${rep(' run', n)}`,
+    (n) => `<!--${rep(' you must', n)}`,
+    (n) => `<!--${rep(' instructions:', n)}`,
+    (n) => `<!--${rep(' ignore', n)}-->`,
+    (n) => `${rep('<!--', n / 2)}${rep(' run', n / 2)}`,
   ],
 ]);
 // STROQ-2026-00014 pairs a cue with a cue within 400 characters of it. A text made of nothing but
@@ -232,6 +238,95 @@ TAILORED.push(
     (index) => [`STROQ-2026-00014#${index}`, index, ADDENDUM_SHAPES] as (typeof TAILORED)[number],
   ),
 );
+// Every pattern the narrowing and its reviews changed, on text made of nothing but the words each one
+// is looking for, at 200,000 characters: each word is the start of a window for the patterns that read
+// a verb and then a path, a token or an address, and the worst case of such a pattern is a text in which
+// every position starts one.
+const CHANGED_RULES = [
+  'ATR-2026-00060',
+  'ATR-2026-00113',
+  'ATR-2026-00114',
+  'ATR-2026-00150',
+  'ATR-2026-00161',
+  'ATR-2026-00163',
+  'ATR-2026-00568',
+  'STROQ-2026-00002',
+  'STROQ-2026-00004',
+  'STROQ-2026-00014',
+];
+const CUE_UNITS = [
+  'head ',
+  'cat ~/.aws/credentials ',
+  '~/.ssh/id_rsa ',
+  'run aws configure ',
+  '--post-file=',
+  '| ',
+  '< ',
+  'keychain ',
+  'read the keychain ',
+  'security dump-keychain ',
+  'Library/Keychains ',
+  'copy the keychain ',
+  'from the keychain ',
+  '/etc/passwd ',
+  'cat /etc/passwd ',
+  'file:///home/u/',
+  'file:///home/a/b/c/d/',
+  '-----BEGIN PRIVATE KEY----- ',
+  'send ',
+  'send the ',
+  'api_key ',
+  'send api_key to ',
+  'access_token ',
+  'disable all security ',
+  ', skip ',
+  'to disable ',
+  'need to ',
+  'replacement for ',
+  'the same as the official ',
+  '<!--',
+  '<!-- run ',
+  '<!-- ignore ',
+  '<!-- x > ',
+  'copy ',
+  'copy .env.example to ',
+  'copy .env.example ',
+  'AI must now ',
+  'the agent must now ',
+  'Attention agent. ',
+  'Hello AI, you must ',
+  'must now run ',
+  'password ',
+  'credentials ',
+  '\\n',
+  '\\nHi Assistant',
+];
+
+describe('every pattern the narrowing changed, on text made of the words it looks for', () => {
+  it('has the rules to read', () => {
+    for (const id of CHANGED_RULES)
+      expect(
+        rules.some((r) => r.id === id),
+        id,
+      ).toBe(true);
+  });
+  it('reads 200,000 characters of any of them in under a second', () => {
+    const slow: string[] = [];
+    for (const id of CHANGED_RULES) {
+      const rule = rules.find((r) => r.id === id);
+      for (const [index, test] of (rule?.tests ?? []).entries()) {
+        if (test.regex === undefined) continue;
+        for (const unit of CUE_UNITS) {
+          const ms = timed(test.regex, rep(unit, 200_000));
+          if (ms > 1_000)
+            slow.push(`${id}#${index} on ${JSON.stringify(unit)}: ${ms.toFixed(0)} ms`);
+        }
+      }
+    }
+    expect(slow).toEqual([]);
+  }, 600_000);
+});
+
 const TAILORED_CHARS = 200_000;
 const TAILORED_BOUND_MS = 1_000;
 

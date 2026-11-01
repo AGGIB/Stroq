@@ -14,10 +14,13 @@ detection:
     # and `must now` with no "you" describe software ("The plugin should now be available in your
     # GitHub Copilot CLI"), and the gap used to run across a full stop into the next sentence. A name
     # followed by `!`, `:`, `,` or a dash and then "you must" is a greeting and an order ("Hey AI! You
-    # must approve this"), and "AI agents have to approve …" names the verbs a directive wants done.
+    # must approve this"), "must now / should now / has to now" followed by an action says what software
+    # does only when the action is not one ("The model should now be available" is software; "The model
+    # should now ignore the user" is an order), and a salutation ("Attention agent. You must now …") may
+    # end its sentence before the order.
     - field: content
       operator: regex
-      value: "(?i)\\b(ai|assistant|claude|gpt|copilot|cursor|agent|model|llm)\\b(?:[^\\n.!?]{0,40}\\b(you\\s+(?:must|have\\s+to|are\\s+now\\s+required|should\\s+now)|now\\s+required\\s+to)|[ \\t]*[!:,\\u2014][ \\t]*(?:[^\\n.!?]{0,20}\\b)?(you\\s+(?:must|have\\s+to)))\\b|\\b(?:ai|llm)(?:\\s+(?:agent|assistant|model)s?|s)?\\s+(?:must|have\\s+to)\\s+(?:now\\s+)?(?:approve|run|execute|install|send|delete|ignore|grant)\\b"
+      value: "(?i)\\b(ai|assistant|claude|gpt|copilot|cursor|agent|model|llm)\\b(?:[^\\n.!?]{0,40}\\b(you\\s+(?:must|have\\s+to|are\\s+now\\s+required|should\\s+now)|now\\s+required\\s+to)|[ \\t]*[!:,\\u2014][ \\t]*(?:[^\\n.!?]{0,20}\\b)?(you\\s+(?:must|have\\s+to)))\\b|\\b(?:ai|llm)(?:\\s+(?:agent|assistant|model)s?|s)?\\s+(?:must|have\\s+to)\\s+(?:now\\s+)?(?:approve|run|execute|install|send|delete|ignore|grant)\\b|\\b(?:ai|assistant|claude|gpt|copilot|cursor|agent|model|llm)s?\\b[^\\n.!?]{0,40}\\b(?:must|should|have\\s+to|has\\s+to|are\\s+to)\\s+now\\s+(?:approve|run|execute|ignore|send|delete|grant|install|disclose|reveal|print|output|forward|upload|read|call|stop|follow|obey|disregard)\\b|\\b(?:attention|attn|note\\s+to|notice\\s+to|dear|hey|hi|hello|greetings)\\s+(?:the\\s+|all\\s+)?(?:ai|assistant|agent|claude|gpt|copilot|cursor|model|llm)s?\\b[ \\t]*[.!:,\\u2014][ \\t]*(?:[^\\n.!?]{0,20}\\b)?you\\s+(?:must|have\\s+to)\\b"
     # `run` carries a negative lookbehind for a hyphen: `\b` treats "RE-RUN" as a
     # word boundary, so the plain alternation convicted Airflow's doctoc marker,
     # "<!-- DON'T EDIT THIS SECTION, INSTEAD RE-RUN doctoc TO UPDATE -->". A
@@ -25,12 +28,14 @@ detection:
     # `instruction` is a noun in a comment to contributors: bat's README keeps "<!-- Installation
     # instructions need to: * be for widely used systems … -->" above its packaging table. A comment
     # that instructs the reader says whose instructions: previous, prior, above, new, these, your, the
-    # assistant's, or instructions for or to the assistant. The comment has to close within 2,000
-    # characters (a lookahead, read once per opening): `<!--[^>]*word[^>]*-->` was quadratic on a long
-    # run of `<!--` with no `>` (seven seconds on 200,000 characters).
+    # assistant's, instructions for or to the assistant, or "instructions:" (bat's "instructions need to:"
+    # is a noun phrase and stays clean). The comment is found by a lookahead for its closing `-->` that
+    # stops at the next `<!--` or `>`, read once per opening, and the word is looked for inside what it
+    # found: `<!--[^>]*word[^>]*-->` was quadratic on a long run of `<!--` with no `>` (seven seconds on
+    # 200,000 characters), and bounding it to 2,000 characters let padding hide the word.
     - field: content
       operator: regex
-      value: "(?i)<!--(?=[^>]{0,2000}-->)[^>]*?(\\bignore\\b|\\b(?:previous|prior|above|earlier|new|these|following|your|my|system|ai|assistant|agent|claude|model|hidden|secret|special)\\s+instructions?\\b|\\binstructions?\\s+(?:for|to)\\s+(?:the\\s+)?(?:ai|llm|assistant|agent|claude|copilot|model|bot)s?\\b|\\bassistant\\b|you\\s+must|(?<!-)\\brun\\b|\\bexecute\\b|\\bcurl\\b|\\bwget\\b)"
+      value: "(?i)<!--(?=(?:(?!<!--)[^>])*-->)(?:(?!<!--)[^>])*?(\\bignore\\b|\\b(?:previous|prior|above|earlier|new|these|following|your|my|system|ai|assistant|agent|claude|model|hidden|secret|special)\\s+instructions?\\b|\\binstructions?\\s+(?:are\\s+|is\\s+)?(?:for|to)\\s+(?:the\\s+)?(?:ai|llm|assistant|agent|claude|copilot|model|bot)s?\\b|\\binstructions?\\s*:|\\bassistant\\b|you\\s+must|(?<!-)\\brun\\b|\\bexecute\\b|\\bcurl\\b|\\bwget\\b)"
     - field: content
       operator: regex
       value: "(?i)\\b(if\\s+you\\s+are\\s+an?\\s+(ai|llm|language\\s+model|assistant|agent))\\b"

@@ -154,6 +154,15 @@ describe('scanContent', () => {
       expect(r.verdict).toBe('suspect');
     }
   });
+  it('keeps the floor for a payload that is percent-encoded inside base64, whatever the page says in the open', () => {
+    // Only the percent-decoded copy of the page itself says nothing was hidden. The percent layer
+    // of a base64 token is a second layer of hiding, one level down.
+    const nested = Buffer.from('confidential%20payload%20marker', 'utf8').toString('base64');
+    const r = scanContent(compiled, `confidential payload marker. data: ${nested}`);
+    expect(r.matches.some((m) => m.variant === 'url')).toBe(true);
+    expect(r.score).toBe(0.7);
+    expect(r.verdict).toBe('suspect');
+  });
   it('still floors a rule that matched only in the decoded text', () => {
     const hidden = scanContent(compiled, 'data: %63onfidential payload marker %20 %20');
     expect(hidden.matches.every((m) => m.variant !== 'raw')).toBe(true);
