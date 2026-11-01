@@ -288,22 +288,6 @@ TAILORED.push([
     (n) => rep('security ', n),
   ],
 ]);
-// `file://` after a build verb is read backwards over a name, a version and an at sign.
-TAILORED.push([
-  'ATR-2026-00568#2',
-  2,
-  [
-    (n) => rep('file:///home/a/', n),
-    (n) => rep('Built x @ file:///home/a/', n),
-    (n) => rep('x==1.0 (from file:///home/a/', n),
-    (n) => `${'a='.repeat(n / 2)} @ file:///home/a/`,
-    (n) => `${'a'.repeat(n)} @ file:///home/a/`,
-    (n) => `Built ${'a.'.repeat(n / 2)} @ file:///home/a/`,
-    (n) => `${' '.repeat(n)}file:///home/a/`,
-    (n) => rep('file:///home/a/.ssh/', n),
-    (n) => rep('file:///home/', n),
-  ],
-]);
 // A setting's noun or a request phrase is read backwards from each verb.
 TAILORED.push([
   'ATR-2026-00163#5',
@@ -327,6 +311,14 @@ TAILORED.push([
     (n) => rep('-----BEGIN PRIVATE KEY-----', n),
     (n) => `-----BEGIN PRIVATE KEY-----${'x'.repeat(n)}`,
     (n) => `-----BEGIN PRIVATE KEY-----${' '.repeat(n)}`,
+    // The key is looked for in the 300 characters after a placeholder, at every header of the text.
+    (n) => rep('-----BEGIN PRIVATE KEY-----xxxx\n', n),
+    (n) => rep('-----BEGIN PRIVATE KEY-----...\n...\n', n),
+    (n) => rep(`-----BEGIN PRIVATE KEY-----<${'a b '.repeat(40)}`, n),
+    (n) => rep(`-----BEGIN PRIVATE KEY-----xxxx ${'abcdefghijklmno '.repeat(20)}`, n),
+    (n) => rep(`-----BEGIN PRIVATE KEY-----${'x'.repeat(290)} `, n),
+    (n) => `-----BEGIN PRIVATE KEY-----${'*'.repeat(n)}`,
+    (n) => `-----BEGIN PRIVATE KEY-----${'.'.repeat(n)}`,
   ],
 ]);
 TAILORED.push([
@@ -513,6 +505,8 @@ const CUE_UNITS = [
   'enumerate ',
   "replacement for GitHub's ",
   '-----BEGIN PRIVATE KEY-----xxxx',
+  '-----BEGIN PRIVATE KEY-----...\n',
+  '-----BEGIN PRIVATE KEY-----<',
 ];
 
 describe('every pattern the narrowing changed, on text made of the words it looks for', () => {

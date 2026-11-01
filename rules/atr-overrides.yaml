@@ -682,22 +682,16 @@ ATR-2026-00568:
     `//latest`, `/./latest`, `/%6catest`), as its true_positives have. `file://` system paths,
     `gopher://` and `dict://` are read as before.
     Web content (2026-11-01): `Built example @ file:///home/user/example` is where a build log says what it
-    built (uv's README prints one), and `/home` is every user's home. A fetched page reads the vendored
-    pattern except two lines: `Built`, `Installed`, `Resolved`, `Prepared` or `Building`, a name, an optional
-    `==version`, `@` and a path under /home that names no key, token or configuration directory. A path under
-    /etc, /proc, /root, /var/run or /sys, a credential-named path under /home and every other `file://` after
-    "from", "at" or a verb are read always. A version pin followed by `(from file:///home/...)` (uv's resolution
-    line, `+ example==0.1.0 (from file:///home/user/example)`) is the other shape let through. The shape is not anchored to the start of a line: a fetched page is also scanned
-    as serialised JSON, where a line break is the two characters backslash n. Every other surface
-    reads what it read before.
+    built (uv's README prints one), and a fetched page is read as the vendored pattern reads it anyway:
+    the words before a `file://` are written by whoever wrote the page, so no shape of them can be let
+    through (a page can write `Built x @ file:///home/<user>/Documents/...` as easily as uv does), and uv's
+    README is a false flag for it. Every other surface reads what it read before.
   conditions:
     - index: 0
       from: |-
         (?i)(?:169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200|fd00:ec2::254)(?:[:/]|\b)|\bfile://(?:/?(?:etc|proc|root|home|var/run|sys)/)|\bgopher://|\bdict://
       local: |-
         (?i)(?:169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200|fd00:ec2::254)(?::\d+)?(?:(?:/|%2f)+(?:\.{1,2}(?:/|%2f)+)*)(?:latest|computeMetadata|metadata|openstack|opc|v1|v2|20\d\d-|%[0-9a-f]{2})|\bfile://(?:/?(?:etc|proc|root|home|var/run|sys)/)|\bgopher://|\bdict://
-      web: |-
-        (?i)(?:169\.254\.169\.254|metadata\.google\.internal|100\.100\.100\.200|fd00:ec2::254)(?:[:/]|\b)|\bfile://(?:/?(?:etc|proc|root|var/run|sys)/)|\bfile:///?home/[^/\s]+/(?:[^/\s]+/)*(?:\.(?:ssh|aws|kube|docker|gnupg|config|env|npmrc|netrc|pgpass|bash_history|git-credentials|password-store)\b|[^/\s]*(?:secret|password|passwd|credential|token|private|id_rsa|id_ed25519|wallet)[^/\s]*|[^/\s]*\.(?:pem|p12|pfx|kdbx|key)\b)|(?<!(?:\b(?:Built|Installed|Resolved|Prepared|Building)\s+[\w.-]{1,80}(?:==\S{1,40})?\s+@\s+|[\w.-]{1,80}==[\w.+-]{1,40}\s+\(from\s+))\bfile:///?home/|\bgopher://|\bdict://
 
 ATR-2026-00571:
   reason: >-
@@ -748,14 +742,15 @@ ATR-2026-00150:
     Condition 0 is a bare `-----BEGIN PRIVATE KEY-----`, "a credential leaked in a tool's response". On a
     fetched page it is a configuration guide (Prometheus's configuration reference shows
     `"privateKey": "-----BEGIN PRIVATE KEY-----xxxx"`). A fetched page reads the header unless a
-    placeholder follows it (`xxxx`, `...`, `***`, `<your key>`, `[...]`, `your_key`, `${KEY}`, `{{ key }}`) that is not
-    itself followed by more key (`xxxxMIIEvQ...` is a key) or the footer does at once. Every other surface reads the bare header as before.
+    placeholder follows it (`xxxx`, `...`, `***`, `<your key>`, `[...]`, `your key`, `${KEY}`, `{{ key }}`) with no key
+    after it, or the footer does at once: a run of 16 base64 characters within the next 300 characters, line breaks
+    and blanks included, makes it a key again (`xxxx\nMIIEvQ...` is a key). Every other surface reads the bare header as before.
   conditions:
     - index: 0
       from: |-
         (?i)-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----
       web: |-
-        (?i)-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----(?!\s*(?:(?:x{3,}|\.{3}|\*{3})(?![A-Za-z0-9+/=]{4,})|<|\[|your\b|\$\{|\{\{|-----END))
+        (?i)-----BEGIN\s+(RSA\s+)?PRIVATE\s+KEY-----(?!\s*(?:(?:x{3,}(?!x)|\.{3}(?!\.)|\*{3}(?!\*)|<|\[|your\b|\$\{|\{\{)(?![\s\S]{0,300}?[A-Za-z0-9+/=]{16,})|-----END))
 
 ATR-2026-00163:
   reason: >-
