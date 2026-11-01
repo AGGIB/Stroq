@@ -2,8 +2,6 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import * as transaction from '../../src/install/mcp-config-transaction.js';
-import { runRemove } from '../../src/commands/remove.js';
-import * as terminal from '../../src/ui/terminal.js';
 import { addMcp, removeMcp } from '../../src/install/mcp-install.js';
 import { readPassports, withPassports, writePassports } from '../../src/install/lock.js';
 import { storePath } from '../../src/install/store.js';
@@ -318,14 +316,11 @@ describe('MCP recovery keeps confirmation and target identity', () => {
     expect(await readPassports(f.options.stroqHome)).toEqual(lock);
   });
 
-  it('removes a no-record orphan through the CLI with an explicit config', async () => {
+  it('removes a no-record orphan with an explicit config', async () => {
     const f = await fixture();
     await addMcp(f.dir, f.mcpOptions);
     await writePassports(f.options.stroqHome, { v: 1, skills: {}, mcp: {} });
-    vi.stubEnv('STROQ_HOME', f.options.stroqHome);
-    vi.spyOn(terminal, 'currentTerminal').mockReturnValue(f.terminal);
-    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-    expect(await runRemove(['demo', '--kind', 'mcp', '--force', '--config', f.config])).toBe(0);
+    await removeMcp('demo', { ...f.mcpOptions, entryArgv: [], force: true, config: f.config });
     expect((await f.servers())['demo']).toBeUndefined();
     expect((await f.servers())['other']).toEqual({ command: 'keep', args: ['1'] });
   });

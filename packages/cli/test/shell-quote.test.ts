@@ -4,22 +4,37 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { ADD_OPTIONS } from '../src/commands/add.js';
-import { REMOVE_OPTIONS } from '../src/commands/remove.js';
 import { UNTAINT_OPTIONS } from '../src/commands/untaint.js';
 import { VET_OPTIONS } from '../src/commands/vet.js';
 import { unknownOption, wantsHelp } from '../src/help.js';
 import { keptNote } from '../src/commands/init-mcp.js';
 import { openclawInstallCommands } from '../src/commands/openclaw-plugin.js';
-import { parseRunArgv } from '../src/commands/run.js';
 import { renderCard } from '../src/commands/vet-card.js';
 import { CONFIRM_SENSITIVE_MAX, confirmationScreen } from '../src/commands/vet-render.js';
 import { wrongCallLines } from '../src/commands/why.js';
 import { inspectTree } from '../src/install/inspect/index.js';
-import { mcpRemedyCommands, skillRemedyCommands } from '../src/install/remedy.js';
 import { reconfirmCommand } from '../src/mcp/pin-argument.js';
 import { commandLine, quoteWord, tryCommandLine, unprintableSentence } from '../src/shell-quote.js';
 import { treeOf } from './helpers/install-tree.js';
+
+/**
+ * The options of `stroq add`, which 0.30 removed. The lines that confirm a wrapper again still name it, and
+ * are held to the way it read them until the next step changes what they say.
+ */
+const ADD_OPTIONS = {
+  user: { type: 'boolean' },
+  restore: { type: 'boolean' },
+  rollback: { type: 'boolean' },
+  kind: { type: 'string' },
+  client: { type: 'string' },
+  config: { type: 'string' },
+  entrypoint: { type: 'string' },
+  'pass-env': { type: 'string' },
+  name: { type: 'string' },
+  cwd: { type: 'string' },
+  force: { type: 'boolean' },
+  strict: { type: 'boolean' },
+} as const;
 
 /**
  * Every command line that Stroq prints for a person to paste has values in it that somebody else wrote: the name of a
@@ -183,8 +198,6 @@ function parsedBy(argv: readonly string[]): Parsed | null {
   switch (command) {
     case 'add':
       return parseArgs({ args: rest, allowPositionals: true, options: ADD_OPTIONS });
-    case 'remove':
-      return parseArgs({ args: rest, allowPositionals: true, options: REMOVE_OPTIONS });
     case 'untaint':
       return parseArgs({ args: rest, options: UNTAINT_OPTIONS });
     case 'vet':
@@ -208,13 +221,6 @@ interface Printer {
   };
 }
 
-const record = (value: string) => ({
-  source: value,
-  config: value,
-  entrypoint: value,
-  passEnv: ['A', 'B'],
-  cwd: value,
-});
 const emptyPassport = () =>
   inspectTree(treeOf({ 'SKILL.md': '# demo' }), {
     kind: 'skill',
@@ -244,70 +250,6 @@ const printers: readonly Printer[] = [
     print: (value) => ({
       text: keptNote(value, false).split('confirm it again: ')[1]!,
       ...reconfirm,
-    }),
-  },
-  {
-    name: 'the remove line for a damaged server',
-    positional: true,
-    print: (value) => ({
-      text: mcpRemedyCommands(value, record(value))[0]!,
-      argv: (shown) => ['remove', shown, '--kind', 'mcp', '--force'],
-      parsed: (shown) => ({ positionals: [shown], values: { kind: 'mcp', force: true } }),
-    }),
-  },
-  {
-    name: 'the add line for a damaged server',
-    positional: true,
-    print: (value) => ({
-      text: mcpRemedyCommands(value, record(value)).at(-1)!,
-      argv: (shown) => [
-        'add',
-        shown,
-        '--kind',
-        'mcp',
-        `--name=${shown}`,
-        `--config=${shown}`,
-        `--entrypoint=${shown}`,
-        '--pass-env=A,B',
-        `--cwd=${shown}`,
-      ],
-      parsed: (shown) => ({
-        positionals: [shown],
-        values: {
-          kind: 'mcp',
-          name: shown,
-          config: shown,
-          entrypoint: shown,
-          'pass-env': 'A,B',
-          cwd: shown,
-        },
-      }),
-    }),
-  },
-  {
-    name: 'the remove line for a damaged skill',
-    positional: true,
-    print: (value) => ({
-      text: skillRemedyCommands(
-        value,
-        { source: value, root: '/p' },
-        { home: '/h', project: '/p' },
-      )[0]!,
-      argv: (shown) => ['remove', shown, '--force'],
-      parsed: (shown) => ({ positionals: [shown], values: { force: true } }),
-    }),
-  },
-  {
-    name: 'the add line for a damaged skill',
-    positional: true,
-    print: (value) => ({
-      text: skillRemedyCommands(
-        value,
-        { source: value, root: '/h' },
-        { home: '/h', project: '/p' },
-      ).at(-1)!,
-      argv: (shown) => ['add', shown, '--user'],
-      parsed: (shown) => ({ positionals: [shown], values: { user: true } }),
     }),
   },
   {
@@ -354,17 +296,6 @@ const printers: readonly Printer[] = [
       text: openclawInstallCommands(value)[0]!,
       argv: (shown) => ['plugins', 'install', '--link', shown],
     }),
-  },
-  {
-    name: 'the "did you mean" of stroq run',
-    print: (value) => {
-      const parsed = parseRunArgv([`w${value}`]);
-      const message = parsed.ok ? '' : parsed.error;
-      return {
-        text: message.split('did you mean: ')[1]!,
-        argv: (shown) => ['run', '--', `w${shown}`],
-      };
-    },
   },
   {
     name: 'the reproduce line of the card of a GitHub source',
@@ -594,12 +525,6 @@ describe('commandLine', () => {
 
 describe('the parsers of the commands that print lines', () => {
   it.each([
-    ['add', ADD_OPTIONS, '--name'],
-    ['add', ADD_OPTIONS, '--config'],
-    ['add', ADD_OPTIONS, '--entrypoint'],
-    ['add', ADD_OPTIONS, '--cwd'],
-    ['add', ADD_OPTIONS, '--pass-env'],
-    ['add', ADD_OPTIONS, '--client'],
     ['vet', VET_OPTIONS, '--from'],
     ['vet', VET_OPTIONS, '--online'],
     ['vet', VET_OPTIONS, '--expect'],
@@ -621,9 +546,9 @@ describe('the parsers of the commands that print lines', () => {
   });
 
   it('does not take a -- before a positional that begins with a dash as enough: Stroq looks at it first', () => {
-    // `stroq add --kind mcp -- -x` stops at the check for an option `add` does not have; `-h` shows the help.
-    expect(unknownOption('add', ['--kind', 'mcp', '--', '-x'])).toBe('-x');
-    expect(wantsHelp('add', ['--kind', 'mcp', '--', '-h'])).toBe(true);
+    // `stroq vet --from x -- -x` stops at the check for an option `vet` does not have; `-h` shows the help.
+    expect(unknownOption('vet', ['--from', 'x', '--', '-x'])).toBe('-x');
+    expect(wantsHelp('vet', ['--from', 'x', '--', '-h'])).toBe(true);
   });
 
   it('has no response file and no tilde of its own in the arguments it prints', () => {
