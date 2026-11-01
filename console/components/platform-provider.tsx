@@ -8,8 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { AGENTS, KEYS, TODAY, type Agent, type ToolCall, type KeyFinding } from '@/lib/data';
-import { DEMO_CALLS } from '@/lib/platform';
+import { EXAMPLE, NOT_CONNECTED, type Snapshot } from '@/lib/connection';
 import { validateSnapshot } from '@/lib/snapshot';
 import { validateLocalContext, type LocalContext } from '@/lib/local-context';
 import { isLocalOperation } from '@/lib/local-operations';
@@ -35,38 +34,26 @@ import {
 import { CODEX_PATH_GUARD_MESSAGES } from '@/lib/codex-path-guard-client';
 import { MCP_GOVERNANCE_ERROR_MESSAGES } from '@/lib/mcp-governance-client';
 
-interface Snapshot {
-  source: 'demo' | 'local';
-  generatedAt: string;
-  calls: readonly ToolCall[];
-  agents: readonly Agent[];
-  keys: readonly KeyFinding[];
-  limitations: readonly string[];
-}
 interface Platform extends Snapshot {
+  /** False until the browser has looked for a token, so a page never claims "not connected" early. */
+  ready: boolean;
   loading: boolean;
   error: string | null;
   connectLocal: () => Promise<void>;
-  useDemo: () => void;
+  /** Shows the made-up example. Only ever called from an explicit user choice. */
+  showExample: () => void;
+  /** Drops the example and reconnects to the real source when a token is held. */
+  leaveExample: () => void;
   refresh: () => Promise<void>;
   localAccess: boolean;
   localContext: LocalContext | null;
   requestLocal: (path: string, body?: unknown, signal?: AbortSignal) => Promise<unknown>;
 }
-const DEMO: Snapshot = {
-  source: 'demo',
-  generatedAt: `${TODAY}T14:30:00Z`,
-  calls: DEMO_CALLS,
-  agents: AGENTS,
-  keys: KEYS,
-  limitations: [
-    'Example workspace with synthetic events. These are not results from your machine.',
-  ],
-};
 const Context = createContext<Platform | null>(null);
 
 export function PlatformProvider({ children }: { children: ReactNode }) {
-  const [snapshot, setSnapshot] = useState<Snapshot>(DEMO);
+  const [snapshot, setSnapshot] = useState<Snapshot>(NOT_CONNECTED);
+  const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [localAccess, setLocalAccess] = useState(false);
@@ -358,11 +345,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
         throw new Error('The local server returned an unsupported snapshot. No data was loaded.');
       if (active.current !== controller) return;
       setSnapshot(data);
-      try {
-        sessionStorage.setItem('stroq-console-source', 'local');
-      } catch {
-        /* Browsing remains available without storage. */
-      }
     } catch (e) {
       if (active.current === controller)
         setError(
@@ -395,39 +377,44 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const hash = new URLSearchParams(window.location.hash.slice(1));
     const incoming = hash.get('token');
-    let preferredSource: string | null = null;
     try {
       token.current = incoming ?? sessionStorage.getItem('stroq-console-token') ?? '';
-      preferredSource = sessionStorage.getItem('stroq-console-source');
       if (incoming) sessionStorage.setItem('stroq-console-token', incoming);
     } catch {
       token.current = incoming ?? '';
     }
     if (incoming) history.replaceState(null, '', location.pathname + location.search);
     setLocalAccess(Boolean(token.current));
-    if (token.current && (incoming || preferredSource !== 'demo')) void connectLocal();
+    // A token always means the real source. Example data is never chosen on load.
+    if (token.current) void connectLocal();
+    setReady(true);
     return () => active.current?.abort();
   }, [connectLocal]);
-  const useDemo = useCallback(() => {
+  const showExample = useCallback(() => {
     active.current?.abort();
     active.current = null;
-    setSnapshot(DEMO);
-    try {
-      sessionStorage.setItem('stroq-console-source', 'demo');
-    } catch {
-      /* Optional browser preference. */
-    }
+    setSnapshot(EXAMPLE);
     setError(null);
     setLoading(false);
   }, []);
+  const leaveExample = useCallback(() => {
+    active.current?.abort();
+    active.current = null;
+    setSnapshot(NOT_CONNECTED);
+    setError(null);
+    setLoading(false);
+    if (token.current) void connectLocal();
+  }, [connectLocal]);
   return (
     <Context.Provider
       value={{
         ...snapshot,
+        ready,
         loading,
         error,
         connectLocal,
-        useDemo,
+        showExample,
+        leaveExample,
         refresh: connectLocal,
         localAccess,
         localContext,

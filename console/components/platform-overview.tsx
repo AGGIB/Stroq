@@ -20,10 +20,12 @@ import { AgentGlyph, Badge, ExportButton, PageHeading, Panel, EmptyState } from 
 import { DECISIONS, inRange, sessionFor } from '@/lib/platform';
 import type { ToolCall } from '@/lib/data';
 import { activityEventHref } from '@/lib/activity-navigation';
+import { NotConnected } from './not-connected';
 
 export function Overview() {
   const { calls, agents, keys, source, generatedAt } = usePlatform();
   const [days, setDays] = useState(7);
+  if (source === 'none') return <NotConnected title="Security overview" />;
   const scoped = inRange(calls, days, generatedAt),
     denied = scoped.filter((c) => c.decision === 'block'),
     review = scoped.filter((c) => c.decision === 'ask' || c.decision === 'flag'),

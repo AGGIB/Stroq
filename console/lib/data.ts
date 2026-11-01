@@ -1,5 +1,7 @@
-// Made-up data for the mockup; today is Wed 21 Oct 2026. `stroq console` will replace this
-// with what it reads from ~/.stroq, in the same shapes.
+// Example data, shown only when the user picks "Example data" in Settings (see lib/connection.ts),
+// and marked as an example on every page. Nothing here is read from the user's machine and it is
+// never a default; today in the example is Wed 21 Oct 2026. The shapes are the ones the real
+// journal snapshot uses.
 import type { Check, Decision, GuardState, KeyOutcome } from './status';
 
 export type AgentName = 'Claude Code' | 'Cursor' | 'Codex CLI' | 'Unknown host';

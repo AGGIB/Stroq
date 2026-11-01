@@ -6,6 +6,7 @@ import { ArrowRight, Info, Search } from 'lucide-react';
 import { sessionFor } from '@/lib/platform';
 import { usePlatform } from '@/components/platform-provider';
 import { Badge, EmptyState, ExportButton, PageHeading, Panel } from '@/components/platform-ui';
+import { NotConnected } from '@/components/not-connected';
 
 function SearchField({
   value,
@@ -65,6 +66,7 @@ export function SessionsPage() {
     }
     return [...groups.values()].sort((a, b) => b.last.localeCompare(a.last));
   }, [calls]);
+  if (source === 'none') return <NotConnected title="Sessions" />;
   const visible = sessions.filter((session) =>
     `${session.name} ${session.project} ${session.agent} ${session.id}`
       .toLowerCase()

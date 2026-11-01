@@ -140,6 +140,7 @@ function page({
           ExportButton,
         };
       if (name === './platform-overview') return { EventTable: () => null };
+      if (name === './not-connected') return { NotConnected: () => null };
       if (name === '@/lib/platform') return platform;
       if (name === '@/lib/activity-navigation') return navigation;
       throw Error(name);

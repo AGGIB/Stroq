@@ -33,6 +33,7 @@ import { Dialog } from 'radix-ui';
 import { useEffect, useState, type ReactNode } from 'react';
 import { usePlatform } from './platform-provider';
 import { BrandMark } from './brand-mark';
+import { ExampleDataBanner } from './example-data-banner';
 import { PLATFORM_PAGES, PLATFORM_SECTIONS } from '@/lib/platform-map';
 const ICONS: Readonly<Record<string, LucideIcon>> = {
   '/': ShieldCheck,
@@ -150,7 +151,7 @@ export function PlatformShell({ children }: { children: ReactNode }) {
   const [searchOpen, setSearchOpen] = useState(false),
     [mobile, setMobile] = useState(false),
     [query, setQuery] = useState('');
-  const { source, calls } = usePlatform(),
+  const { source, calls, localAccess } = usePlatform(),
     { resolvedTheme, setTheme } = useTheme();
   const path = usePathname();
   const localOperation =
@@ -163,6 +164,14 @@ export function PlatformShell({ children }: { children: ReactNode }) {
     path.startsWith('/try') ||
     path.startsWith('/live') ||
     (path.startsWith('/policies') && !path.includes('/reference'));
+  // What the top bar claims must match what is connected: example data and no connection are
+  // never worded like a live machine.
+  const connection =
+    source === 'demo'
+      ? 'demo'
+      : source === 'local' || (localOperation && localAccess)
+        ? 'local'
+        : 'none';
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -225,17 +234,25 @@ export function PlatformShell({ children }: { children: ReactNode }) {
             </button>
             <Link
               href="/settings/"
-              className={`source-indicator ${source}`}
+              className={`source-indicator ${connection}`}
               aria-label={
-                localOperation
-                  ? 'Local engine · connection settings'
-                  : source === 'demo'
-                    ? 'Demo data · connect your machine'
-                    : 'Local snapshot · connection settings'
+                connection === 'demo'
+                  ? 'Example data, not yours · connection settings'
+                  : connection === 'local'
+                    ? localOperation
+                      ? 'Local engine · connection settings'
+                      : 'Local snapshot · connection settings'
+                    : 'Not connected · connection settings'
               }
             >
               <i />
-              {localOperation ? 'Local engine' : source === 'demo' ? 'Demo' : 'Local'}
+              {connection === 'demo'
+                ? 'Example'
+                : connection === 'local'
+                  ? localOperation
+                    ? 'Local engine'
+                    : 'Local'
+                  : 'Not connected'}
             </Link>
             <span className="topbar-divider" />
             <button
@@ -248,15 +265,18 @@ export function PlatformShell({ children }: { children: ReactNode }) {
             </button>
           </div>
         </header>
+        <ExampleDataBanner />
         <main id="content" tabIndex={-1}>
           {children}
           <footer className="workspace-footer">
             <span>
-              {localOperation
-                ? 'Runs on this machine'
-                : source === 'demo'
-                  ? 'Demo · Oct 15–21, 2026 · UTC'
-                  : 'Local snapshot · UTC'}
+              {connection === 'demo'
+                ? 'Example data · Oct 15–21, 2026 · UTC'
+                : connection === 'none'
+                  ? 'Not connected'
+                  : localOperation
+                    ? 'Runs on this machine'
+                    : 'Local snapshot · UTC'}
             </span>
           </footer>
         </main>
@@ -313,6 +333,7 @@ export function PlatformShell({ children }: { children: ReactNode }) {
                     {c.label}
                     <small>
                       {c.agent} · {c.date}
+                      {source === 'demo' ? ' · example' : ''}
                     </small>
                   </span>
                   <ArrowUpRight size={14} aria-hidden="true" />

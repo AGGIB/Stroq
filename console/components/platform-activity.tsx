@@ -18,6 +18,7 @@ import { useEffect, useState } from 'react';
 import { usePlatform } from './platform-provider';
 import { Badge, Command, EmptyState, ExportButton, PageHeading, Panel } from './platform-ui';
 import { EventTable } from './platform-overview';
+import { NotConnected } from './not-connected';
 import { DECISIONS, inRange, sessionFor } from '@/lib/platform';
 import type { Decision } from '@/lib/status';
 import { activityEventSelection, activityFindingHref } from '@/lib/activity-navigation';
@@ -31,6 +32,7 @@ export function ActivityPage() {
     session = params.get('session'),
     days = Number(params.get('days') ?? 30),
     page = Math.max(1, Number(params.get('page')) || 1);
+  if (source === 'none') return <NotConnected title="Activity" />;
   const scoped = inRange(calls, [1, 7, 30].includes(days) ? days : 30, generatedAt);
   const visible = scoped.filter(
     (c) =>
@@ -203,6 +205,7 @@ export function InvestigationPage() {
       setReviewed(false);
     }
   }, [id, source]);
+  if (source === 'none') return <NotConnected title="Event" />;
   if (!call)
     return (
       <div className="page-stack">

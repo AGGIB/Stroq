@@ -1,3 +1,4 @@
+import type { PlatformSource } from './connection';
 import type { ToolCall } from './data';
 import { incidentHref } from './incident-navigation';
 
@@ -25,7 +26,7 @@ export interface ActivitySelection {
 export function activityEventSelection(
   params: Pick<URLSearchParams, 'get' | 'getAll' | 'has'>,
   calls: readonly ToolCall[],
-  source: 'local' | 'demo',
+  source: PlatformSource,
 ): ActivitySelection {
   const evidence = params.get('evidence');
   if (
@@ -46,7 +47,7 @@ export function activityEventSelection(
 }
 
 /** The destination reselects this exact finding; navigation grants no authority. */
-export function activityFindingHref(call: ToolCall, source: 'local' | 'demo') {
+export function activityFindingHref(call: ToolCall, source: PlatformSource) {
   return source === 'local' && bound(call) && ['block', 'ask', 'flag'].includes(call.decision)
     ? incidentHref(`incident-${call.evidenceSha}`, 'all')
     : null;

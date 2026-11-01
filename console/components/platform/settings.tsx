@@ -6,6 +6,7 @@ import {
   ArrowRight,
   Check,
   ChevronDown,
+  FlaskConical,
   Info,
   Laptop,
   LoaderCircle,
@@ -19,7 +20,7 @@ import { Command, PageHeading, Panel } from '@/components/platform-ui';
 import { ThreatFeedSetting } from './threat-feed-setting';
 
 export function SettingsPage() {
-  const { source, generatedAt, limitations, loading, error, connectLocal, useDemo, refresh } =
+  const { source, generatedAt, limitations, loading, error, connectLocal, showExample, refresh } =
     usePlatform();
   const { theme, setTheme } = useTheme();
   const [mounted, setMounted] = useState(false);
@@ -46,11 +47,11 @@ export function SettingsPage() {
               className={`settings-option ${source === 'demo' ? 'is-selected' : ''}`}
               aria-pressed={source === 'demo'}
               disabled={loading}
-              onClick={useDemo}
+              onClick={showExample}
             >
-              <Monitor aria-hidden="true" size={24} />
-              <strong>Demo workspace</strong>
-              <span>Sample activity</span>
+              <FlaskConical aria-hidden="true" size={24} />
+              <strong>Example data</strong>
+              <span>Made-up events, marked on every page. Not from your machine.</span>
               {source === 'demo' && <Check aria-hidden="true" size={17} />}
             </button>
             <button
