@@ -4,6 +4,8 @@
 // here, in the same shape as `COMMANDS`, so that `test/help.test.ts` still holds each tool's help to the
 // flags its source parses, and the docs that copy a sentence of it are still held to the code.
 
+import { existsSync, realpathSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import {
   parseArgsProblem,
   renderHelp,
@@ -118,4 +120,17 @@ export async function runDevTool(
       return EXIT_USAGE;
     }
   });
+}
+
+/**
+ * The built CLI, `packages/cli/dist/index.js`: the file a hook line starts. The developer tools run from
+ * source (`scripts/dev/*.ts`), so `process.argv[1]` is the tool and not the Stroq that a host is to call;
+ * `dev:bench --latency` and `dev:prove` both need the real one, and say so when it has not been built.
+ */
+export function builtCliEntry(): string {
+  const entry = fileURLToPath(new URL('../dist/index.js', import.meta.url));
+  if (!existsSync(entry)) {
+    throw new Error('CLI bundle not found. Please build the packages with "pnpm build" first.');
+  }
+  return realpathSync(entry);
 }

@@ -1,5 +1,6 @@
 import { parseArgs } from 'node:util';
-import { parseArgsProblem, usageError } from '../help.js';
+import { devUsageError } from '../dev-help.js';
+import { parseArgsProblem } from '../help.js';
 import type { ProveDeps } from './prove-types.js';
 
 export type { ProveDeps } from './prove-types.js';
@@ -89,7 +90,7 @@ export async function runProve(args: readonly string[], deps: ProveDeps = {}): P
   const parsed = parseProveArgs(args);
   if (!parsed.ok) {
     (deps.err ?? ((text: string) => void process.stderr.write(text)))(
-      usageError('prove', parsed.error),
+      devUsageError('prove', parsed.error),
     );
     return EXIT_USAGE;
   }

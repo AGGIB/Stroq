@@ -220,7 +220,10 @@ const endWithStop = (text: string): string => (/[.!?]$/.test(text) ? text : `${t
 
 /** The whole report: the title, the table, the verdict, the caveats the result carries, the advice. */
 export function renderReport(report: ProveReport): string {
-  const lines: string[] = [`stroq prove: ${hostWithVersion(report.agent, report.hostVersion)}`, ''];
+  const lines: string[] = [
+    `pnpm dev:prove: ${hostWithVersion(report.agent, report.hostVersion)}`,
+    '',
+  ];
   const table = tableLines(report.probes);
   if (table.length > 0) lines.push(...table, '');
   lines.push('Verdict', ...verdictLines(report), '');
@@ -251,7 +254,7 @@ export function noticeText(facts: NoticeFacts): string[] {
   const requests = `${facts.maxRequests} short request${facts.maxRequests === 1 ? '' : 's'}`;
   return [
     ...wrapKeeping(
-      `stroq prove sends up to ${requests} to ${host} (model: ${facts.agent === 'codex' ? CODEX_MODEL : MODEL_NAME}), with your own login.`,
+      `pnpm dev:prove sends up to ${requests} to ${host} (model: ${facts.agent === 'codex' ? CODEX_MODEL : MODEL_NAME}), with your own login.`,
       WIDTH,
     ),
     ...bullet(

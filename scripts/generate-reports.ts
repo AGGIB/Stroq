@@ -41,7 +41,7 @@ function banner(command: string): string {
 function deriveCoverage(): string {
   const report = buildCoverage();
   return [
-    banner('stroq coverage'),
+    banner('pnpm dev:coverage'),
     '# Stroq coverage',
     '',
     `Stroq's control mapping against MITRE ATLAS ${report.atlasRelease} and OWASP ASI ` +
@@ -62,8 +62,8 @@ function deriveCoverage(): string {
       'with its method documented in ' +
       '[`packages/cli/src/coverage/SCOPE.md`](../packages/cli/src/coverage/SCOPE.md).',
     '',
-    'Reproduce this table with `stroq coverage`, or load the same mapping into MITRE ' +
-      'ATT&CK Navigator with `stroq coverage --format=navigator`.',
+    'Reproduce this table with `pnpm dev:coverage`, or load the same mapping into MITRE ' +
+      'ATT&CK Navigator with `pnpm dev:coverage -- --format=navigator`.',
     '',
     '```text',
     formatCoverage(report).trimEnd(),
@@ -76,7 +76,7 @@ async function deriveBench(): Promise<string> {
   const report = runBench(BENCH_CORPUS);
   const actions = await runDefaultActionsBench();
   return [
-    banner(`stroq bench --corpus ${BENCH_CORPUS}\` and \`stroq bench --actions`),
+    banner(`pnpm dev:bench -- --corpus ${BENCH_CORPUS}\` and \`pnpm dev:bench -- --actions`),
     '# Stroq bench',
     '',
     "Stroq's false-positive rate against real, benign developer documentation. This " +
@@ -183,7 +183,7 @@ async function deriveBench(): Promise<string> {
       'each source was chosen.',
     '',
     'This corpus is deliberately disjoint from `rules/fixtures/benign`, a separate, ' +
-      'much smaller corpus that `stroq bench` never reads: `scripts/build-rules.ts` runs ' +
+      'much smaller corpus that `pnpm dev:bench` never reads: `scripts/build-rules.ts` runs ' +
       'every ATR rule against those fixtures at build time and disables any rule that ' +
       'fires on one, which is where the disabled rules in the shipped bundle come from. ' +
       'Measuring the false-positive rate against that same corpus would report a number ' +
@@ -193,11 +193,11 @@ async function deriveBench(): Promise<string> {
       'corpus.test.ts` enforces the two corpora share no file by hashing both ' +
       'directories, rather than relying on nobody copying a file across.',
     '',
-    '`stroq bench --corpus <dir>` reproduces this measurement on your own files. The ' +
+    '`pnpm dev:bench -- --corpus <dir>` reproduces this measurement on your own files. The ' +
       'vendored corpus this document measures ships with the repository, not with the ' +
-      'published npm package — `stroq bench` with no `--corpus` looks for it next to the ' +
-      'installed CLI and, not finding it there, tells you to pass `--corpus` yourself, ' +
-      'which is always the case for an installed CLI.',
+      'published npm package — `pnpm dev:bench` with no `--corpus` looks for it in the ' +
+      'repository and, not finding it there, tells you to fetch it (`pnpm fetch:bench-corpus`) ' +
+      'or to pass `--corpus` yourself.',
     '',
     '## Ordinary agent work, held out',
     '',
@@ -222,7 +222,7 @@ async function deriveBench(): Promise<string> {
       'a denial caused by an earlier timed-out scan. The total still includes every scenario; ' +
       '`judged` counts only conclusive scenarios, and the rate is `interrupted / judged`. ' +
       'With no judged scenarios the JSON rate is `null` and the text says "rate unavailable". ' +
-      'Any inconclusive scenario makes `stroq bench --actions` exit 1: a rate for the judged ' +
+      'Any inconclusive scenario makes `pnpm dev:bench -- --actions` exit 1: a rate for the judged ' +
       'subset does not stand for the full corpus. A command too large to read is asked about, which ' +
       'is a result the same on every machine; it is counted as asked and as interrupted, and the ' +
       '`asked` line says how many were asked at a limit rather than by a rule. The set holds ' +
@@ -248,7 +248,7 @@ async function deriveBench(): Promise<string> {
       'work does. A scenario that is interrupted stays in the set: removing it would be ' +
       'fitting the set to the rules.',
     '',
-    '`stroq bench --actions` reproduces this on any machine, with the policy that machine ' +
+    '`pnpm dev:bench -- --actions` reproduces this on any machine, with the policy that machine ' +
       'runs, so it also says how often yours interrupts them. The scenarios are in ' +
       '[`packages/cli/src/bench/actions-corpus.ts`](../packages/cli/src/bench/actions-corpus.ts).',
     '',

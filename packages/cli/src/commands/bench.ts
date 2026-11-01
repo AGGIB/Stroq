@@ -4,7 +4,8 @@ import { ACTION_SCENARIOS } from '../bench/actions-corpus.js';
 import { formatLatencyBench, runLatencyBench } from '../bench/latency.js';
 import { defaultCorpusDir, formatBench, runBench } from '../bench/run.js';
 import { loadPolicy, policySource } from '../engine-factory.js';
-import { parseArgsProblem, usageError } from '../help.js';
+import { devUsageError } from '../dev-help.js';
+import { parseArgsProblem } from '../help.js';
 import { displayPath } from './attack.js';
 
 const EXIT_USAGE = 2;
@@ -47,25 +48,25 @@ export async function runBenchCommand(args: readonly string[]): Promise<number> 
   } catch (err) {
     const problem = parseArgsProblem(err);
     if (problem === null) throw err;
-    process.stderr.write(usageError('bench', problem));
+    process.stderr.write(devUsageError('bench', problem));
     return EXIT_USAGE;
   }
 
   if (values.latency) {
     if (values.actions || values.corpus !== undefined) {
       process.stderr.write(
-        usageError('bench', '--latency cannot be combined with --actions or --corpus'),
+        devUsageError('bench', '--latency cannot be combined with --actions or --corpus'),
       );
       return EXIT_USAGE;
     }
     const parsedN = parseBoundInteger(values.n, '--n', 1, 1000, 100);
     if (!parsedN.ok) {
-      process.stderr.write(usageError('bench', parsedN.error));
+      process.stderr.write(devUsageError('bench', parsedN.error));
       return EXIT_USAGE;
     }
     const parsedWarmup = parseBoundInteger(values.warmup, '--warmup', 0, 100, 5);
     if (!parsedWarmup.ok) {
-      process.stderr.write(usageError('bench', parsedWarmup.error));
+      process.stderr.write(devUsageError('bench', parsedWarmup.error));
       return EXIT_USAGE;
     }
     try {
@@ -76,19 +77,19 @@ export async function runBenchCommand(args: readonly string[]): Promise<number> 
       return 0;
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
-      process.stderr.write(`stroq bench: ${msg}\n`);
+      process.stderr.write(`pnpm dev:bench: ${msg}\n`);
       return 1;
     }
   }
 
   if (values.n !== undefined || values.warmup !== undefined) {
-    process.stderr.write(usageError('bench', '--n and --warmup are only valid with --latency'));
+    process.stderr.write(devUsageError('bench', '--n and --warmup are only valid with --latency'));
     return EXIT_USAGE;
   }
 
   if (values.actions) {
     if (values.corpus !== undefined) {
-      process.stderr.write(usageError('bench', '--actions cannot be combined with --corpus'));
+      process.stderr.write(devUsageError('bench', '--actions cannot be combined with --corpus'));
       return EXIT_USAGE;
     }
     // The other side of `stroq attack`: ordinary work, and how often it is interrupted.
@@ -107,9 +108,10 @@ export async function runBenchCommand(args: readonly string[]): Promise<number> 
   const dir = values.corpus ?? defaultCorpusDir();
   if (dir === null) {
     process.stderr.write(
-      'stroq bench: no corpus. The vendored corpus ships with the repository, not with the\n' +
-        'npm package. Point the command at your own documentation instead:\n' +
-        '  stroq bench --corpus <dir>\n',
+      'pnpm dev:bench: no corpus. The vendored corpus is fetched into the repository\n' +
+        '(pnpm fetch:bench-corpus), not shipped in the npm package. Point the tool at\n' +
+        'your own documentation instead:\n' +
+        '  pnpm dev:bench -- --corpus <dir>\n',
     );
     return 1;
   }

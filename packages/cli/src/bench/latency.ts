@@ -3,6 +3,7 @@ import { existsSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
+import { builtCliEntry } from '../dev-help.js';
 import { childEnv } from '../mcp/child-env.js';
 import { stroqVersion } from '../version.js';
 import { summarizeMetric, type MetricSummary } from './latency-math.js';
@@ -122,7 +123,7 @@ export interface LatencyBenchOptions {
   readonly runner?: ChildRunFn;
 }
 
-/** Resolves the built CLI entry point file (`dist/index.js`). */
+/** Resolves the built CLI entry point file (`dist/index.js`), or the one the caller names. */
 export function resolveCliEntry(custom?: string): string {
   if (custom) {
     if (!existsSync(custom)) {
@@ -131,17 +132,7 @@ export function resolveCliEntry(custom?: string): string {
     return realpathSync(resolve(custom));
   }
 
-  const launched = resolve(process.argv[1] ?? '');
-  let candidate = launched;
-  try {
-    candidate = realpathSync(launched);
-  } catch {}
-
-  if (candidate && existsSync(candidate)) {
-    return candidate;
-  }
-
-  throw new Error('CLI bundle not found. Please build the packages with "pnpm build" first.');
+  return builtCliEntry();
 }
 
 const RECORDER_SCRIPT_SOURCE = `

@@ -25,7 +25,7 @@ describe('a command line it cannot use', () => {
       const ran = await prove(['--max-requests', value], HONEST_LIVE);
       expect(ran.code).toBe(2);
       expect(ran.err).toContain('--max-requests');
-      expect(ran.err).toContain('stroq prove --help');
+      expect(ran.err).toContain('pnpm dev:prove -- --help');
       expect(ran.driver?.calls).toEqual([]);
     },
   );
@@ -39,7 +39,7 @@ describe('a command line it cannot use', () => {
   it('refuses a word that is not an option', async () => {
     const ran = await prove(['claude-code'], HONEST_LIVE);
     expect(ran.code).toBe(2);
-    expect(ran.err).toContain('stroq prove');
+    expect(ran.err).toContain('pnpm dev:prove');
     expect(ran.err).not.toMatch(/TypeError|ERR_PARSE_ARGS/);
   });
 

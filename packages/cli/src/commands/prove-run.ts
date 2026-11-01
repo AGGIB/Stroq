@@ -7,9 +7,8 @@
 // so what has to be undone is registered with `onInterrupt`, and a handler runs it before the signal is
 // raised again for what it was going to do. The host is started in a process group of its own and does not
 // see Ctrl-C, so the same handler ends it.
-import { realpathSync } from 'node:fs';
-import { resolve } from 'node:path';
 import type { Policy } from '@stroq/core';
+import { builtCliEntry } from '../dev-help.js';
 import { hookCommand, windowsHookCommands } from './hook-command.js';
 import { definedEnv } from '../live/drivers/host-process.js';
 import { LiveCheckError } from '../live/errors.js';
@@ -27,15 +26,9 @@ import type { SignalSource } from './prove-types.js';
 /** How long one request may take: a host that has not answered by then is stopped. */
 export const REQUEST_DEADLINE_MS = 90_000;
 
-/** The line `stroq init` writes for `agent`, for the Stroq that is running (not the npx cache's copy of it). */
+/** The line `stroq init` writes for `agent`, for the Stroq built in this repository (not the npx cache's copy of it). */
 export function defaultHookLine(agent: string): string {
-  const launched = resolve(process.argv[1] ?? '');
-  let entry = launched;
-  try {
-    entry = realpathSync(launched);
-  } catch {
-    // Not a file we can resolve: the line is built from the path as it was given.
-  }
+  const entry = builtCliEntry();
   return process.platform === 'win32' && agent === 'codex'
     ? windowsHookCommands(process.execPath, entry, agent)[0]!
     : hookCommand(process.execPath, entry, agent);
@@ -136,7 +129,7 @@ export async function runCheck(input: CheckInput): Promise<HostResult> {
       removeThrowawayRoot(made.root);
     } catch (err) {
       input.warn(
-        `stroq prove: could not remove ${made.root}: ${err instanceof Error ? err.message : String(err)}\n`,
+        `pnpm dev:prove: could not remove ${made.root}: ${err instanceof Error ? err.message : String(err)}\n`,
       );
     }
   }
