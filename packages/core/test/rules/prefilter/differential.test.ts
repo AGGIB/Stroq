@@ -1,3 +1,5 @@
+import { dirname, join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { expandVariants } from '../../../src/normalize/normalizer.js';
 import { loadBundledRules } from '../../../src/rules/bundle.js';
@@ -29,7 +31,8 @@ interface Mutation {
 
 /** The attack fuzzer's own mutations, loaded from the CLI sources by path (core does not depend on the CLI). */
 async function fuzzerMutations(): Promise<readonly Mutation[]> {
-  const path = ATTACK_CORPUS.replace('scenarios/corpus.json', 'mutate.ts');
+  // A file URL, joined from parts: a Windows path has backslashes and a drive letter.
+  const path = pathToFileURL(join(dirname(ATTACK_CORPUS), '..', 'mutate.ts')).href;
   const loaded = (await import(/* @vite-ignore */ path)) as { MUTATIONS: readonly Mutation[] };
   return loaded.MUTATIONS;
 }

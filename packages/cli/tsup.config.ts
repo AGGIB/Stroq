@@ -3,6 +3,7 @@ import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { defineConfig, type Options } from 'tsup';
+import { withPrefilterTable } from '../core/src/rules/prefilter/embed.js';
 import { runtimeBundle } from '../core/src/rules/runtime-rule.js';
 
 type Plugin = NonNullable<Options['esbuildPlugins']>[number];
@@ -12,7 +13,7 @@ type Plugin = NonNullable<Options['esbuildPlugins']>[number];
  * file the corpus is vendored in.
  */
 const runtimeRules = (path: string): string =>
-  JSON.stringify(runtimeBundle(JSON.parse(readFileSync(path, 'utf8'))));
+  JSON.stringify(withPrefilterTable(runtimeBundle(JSON.parse(readFileSync(path, 'utf8')))));
 
 /**
  * The rules go into the code as text, parsed when they are first asked for. As an object in the

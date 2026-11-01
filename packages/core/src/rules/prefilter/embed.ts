@@ -1,6 +1,7 @@
 import { compileRegex } from '../compile.js';
 import type { PrefilterTable, RuleLiterals } from './prefilter.js';
 import { requiredLiterals } from './requirements.js';
+import { readPrefilterTable } from './table-check.js';
 
 /**
  * The literals a condition's pattern requires, as `compileRule` finds them when it is given none.
@@ -53,4 +54,20 @@ export function prefilterTable(
     entries.set(id, conditionsOf(rule as RuleLike).map(literalsOfCondition));
   }
   return Object.fromEntries([...entries].filter(([id]) => !repeated.has(id)));
+}
+
+const isObject = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * `bundle` (as `runtimeBundle` cuts it) with `prefilters`, the table of `prefilterTable` for its
+ * enabled rules, unless it already carries one that reads as a table. The CLI's build calls it once,
+ * so a hook call reads the table instead of 2,600 patterns; from source it runs when the rules load.
+ */
+export function withPrefilterTable(bundle: unknown): unknown {
+  if (!isObject(bundle) || !Array.isArray(bundle['rules'])) return bundle;
+  if (readPrefilterTable(bundle['prefilters']) !== null) return bundle;
+  const disabled = Array.isArray(bundle['disabled']) ? bundle['disabled'] : [];
+  const skip = new Set(disabled.filter((id): id is string => typeof id === 'string'));
+  return { ...bundle, prefilters: prefilterTable(bundle['rules'], skip) };
 }

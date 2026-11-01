@@ -10,7 +10,7 @@ import {
   withoutPrefilters,
   type CompiledRule,
 } from '../../../src/rules/compile.js';
-import { prefilterTable } from '../../../src/rules/prefilter/embed.js';
+import { prefilterTable, withPrefilterTable } from '../../../src/rules/prefilter/embed.js';
 import { runtimeBundle } from '../../../src/rules/runtime-rule.js';
 import { evaluateTest, ruleMatches } from '../../../src/scan/matcher.js';
 import { scanContent } from '../../../src/scan/scanner.js';
@@ -88,7 +88,8 @@ describe('the table the bundle carries', () => {
     rules: unknown[];
     disabled: string[];
   };
-  const shipped = JSON.parse(JSON.stringify(runtimeBundle(whole)));
+  const cut = (bundle: unknown): unknown => withPrefilterTable(runtimeBundle(bundle));
+  const shipped = JSON.parse(JSON.stringify(cut(whole)));
   const compile = (withTable: boolean): CompiledRule[] => {
     const parsed = parseBundle(shipped);
     const disabled = new Set(parsed.disabled);
@@ -111,7 +112,16 @@ describe('the table the bundle carries', () => {
   });
 
   it('is left as it is when the bundle is cut again', () => {
-    expect(runtimeBundle(shipped)).toEqual(shipped);
+    expect(cut(shipped)).toEqual(shipped);
+  });
+
+  it('is added beside the projection, which imports nothing (the console builds it alone)', () => {
+    const source = readFileSync(
+      join(import.meta.dirname, '../../../src/rules/runtime-rule.ts'),
+      'utf8',
+    );
+    expect(source).not.toMatch(/^\s*import\s/m);
+    expect(Object.keys(runtimeBundle(whole) as object)).not.toContain('prefilters');
   });
 
   it('is not trusted when it does not read as a table', () => {
@@ -123,8 +133,8 @@ describe('the table the bundle carries', () => {
 
   it('is made again by the cut when the bundle has none, or a bad one', () => {
     const { prefilters: _dropped, ...bare } = shipped;
-    expect(runtimeBundle(bare)).toEqual(shipped);
-    expect(runtimeBundle({ ...shipped, prefilters: 'bad' })).toEqual(shipped);
+    expect(cut(bare)).toEqual(shipped);
+    expect(cut({ ...shipped, prefilters: 'bad' })).toEqual(shipped);
   });
 });
 

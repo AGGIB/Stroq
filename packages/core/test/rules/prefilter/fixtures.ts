@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { loadBundledRules } from '../../../src/rules/bundle.js';
 import type { CompiledTest } from '../../../src/rules/compile.js';
@@ -55,9 +55,9 @@ export function rejectedButMatched(
 export function filesUnder(dir: string): { readonly name: string; readonly text: string }[] {
   const found: { name: string; text: string }[] = [];
   const walk = (path: string): void => {
-    for (const entry of readdirSync(path)) {
-      const full = join(path, entry);
-      if (statSync(full).isDirectory()) walk(full);
+    for (const entry of readdirSync(path, { withFileTypes: true })) {
+      const full = join(path, entry.name);
+      if (entry.isDirectory()) walk(full);
       else found.push({ name: full, text: readFileSync(full, 'utf8').slice(0, DEFAULT_MAX_CHARS) });
     }
   };
