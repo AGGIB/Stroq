@@ -1,4 +1,6 @@
 import { copyFileSync, readFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
+import { dirname, join } from 'node:path';
 import { defineConfig, type Options } from 'tsup';
 import { runtimeBundle } from '../core/src/rules/runtime-rule.js';
 
@@ -18,6 +20,15 @@ const runtimeRules: Plugin = {
   },
 };
 
+/**
+ * zod's licence file. zod is part of `dist` (see `noExternal`), and its licence asks that the notice
+ * travel with copies of the code.
+ */
+const zodLicense = join(
+  dirname(createRequire(import.meta.url).resolve('zod/package.json')),
+  'LICENSE',
+);
+
 export default defineConfig({
   // `dist/index.js` is what every hook line, the plugin wrapper and `bin` start. It is built from
   // `bin.ts`, which turns on the compile cache and then loads `index.ts` (see `bin.ts` for why).
@@ -30,7 +41,10 @@ export default defineConfig({
   // library other bundlers resolve stack traces through), and it roughly doubled the
   // unpacked package size for no benefit.
   sourcemap: false,
-  noExternal: ['@stroq/core'],
+  // zod is bundled too. Its package entry loads one module for each of its 70 locales and the hook
+  // uses one, so a PreToolUse read about a hundred files of zod before it began; bundled, the
+  // locales that are not used are dropped. `yaml` is not on the hook's path and stays a dependency.
+  noExternal: ['@stroq/core', 'zod'],
   esbuildPlugins: [runtimeRules],
   // tsup strips `node:` from builtin imports by default. `fs` still resolves without
   // it; `sqlite` does not exist at all, so the Cursor reader loaded nothing in the
@@ -53,5 +67,7 @@ export default defineConfig({
     // reason: OWASP publishes no machine-readable release, so this is a
     // hand-transcribed, version-pinned file a reader should be able to diff directly.
     copyFileSync('src/coverage/asi.json', 'dist/asi.json');
+    // The notice zod's licence asks to accompany the code that is now in dist/ (see `zodLicense`).
+    copyFileSync(zodLicense, 'dist/LICENSE.zod');
   },
 });
