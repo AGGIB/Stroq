@@ -115,3 +115,12 @@ export const cloakDir = (): string => cloakDirIn(stroqHome());
 export const lastHookDir = (): string => lastHookDirIn(stroqHome());
 export const liveDir = (): string => liveDirIn(stroqHome());
 export const liveResultFile = (agent: string): string => liveResultFileIn(stroqHome(), agent);
+
+/**
+ * What `stroq` (the card) keeps between runs, so that the next one reads only what changed: a summary
+ * per transcript, and the moments of the last card for `stroq show`. Counts, commands the audit already
+ * redacted and names; never a key's value.
+ */
+export const cardDirIn = (home: string): string => join(home, 'card');
+export const cardSessionsFileIn = (home: string): string => join(cardDirIn(home), 'sessions.json');
+export const cardLastFileIn = (home: string): string => join(cardDirIn(home), 'last.json');
