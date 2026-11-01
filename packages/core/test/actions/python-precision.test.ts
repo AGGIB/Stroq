@@ -472,6 +472,139 @@ describe('a command line bound to a name, and an environment with one more varia
   });
 });
 
+describe('a name that something other than a process start may change', () => {
+  // The marker in a value is inert: the program is only classified, and no process is started.
+  const MUTATE = "'/tmp/inert-marker.so'";
+  const env = "import subprocess, os\nenv = os.environ.copy()\nenv['A'] = '1'\n";
+  const run = "subprocess.run(['git', 'status'], env=env)";
+  const cmd = "import subprocess\ncmd = ['git', 'status']\n";
+
+  it.each([
+    [
+      'a function that receives it as a keyword and mutates it by another name',
+      `${env}def f(**kw):\n    kw['env']['LD_PRELOAD'] = ${MUTATE}\nf(env=env)\n${run}`,
+    ],
+    [
+      'a function that receives it as a keyword and forwards it',
+      `${env}def f(**kw):\n    g(**kw)\nf(env=env)\n${run}`,
+    ],
+    [
+      'a lambda that receives it as a keyword',
+      `${env}g = lambda **k: k['env'].update(LD_PRELOAD=${MUTATE})\ng(env=env)\n${run}`,
+    ],
+    ['a call to a name the program does not define', `${env}unknown(env=env)\n${run}`],
+    ['a call that receives it by position', `${env}f(env)\n${run}`],
+    ['a call that receives it under another keyword', `${env}f(environment=env)\n${run}`],
+    ['a method that receives it', `${env}obj.configure(env=env)\n${run}`],
+    ['a dict that holds it', `${env}d = {'env': env}\n${run}`],
+    ['a dict update that holds it', `${env}d = {}\nd.update(env=env)\n${run}`],
+    ['a list that holds it', `${env}l = [env]\n${run}`],
+    ['an alias', `${env}e = env\ne['LD_PRELOAD'] = ${MUTATE}\n${run}`],
+    ['an alias used to update', `${env}e = env\ne.update(LD_PRELOAD=${MUTATE})\n${run}`],
+    ['an alias made by a tuple', `${env}e, x = env, 1\ne['LD_PRELOAD'] = ${MUTATE}\n${run}`],
+    ['an attribute set to it', `${env}setattr(obj, 'e', env)\n${run}`],
+    ['an attribute assigned it', `${env}obj.e = env\nobj.e['LD_PRELOAD'] = ${MUTATE}\n${run}`],
+    ['globals', `${env}globals()['env']['LD_PRELOAD'] = ${MUTATE}\n${run}`],
+    ['locals', `${env}locals()['env']['LD_PRELOAD'] = ${MUTATE}\n${run}`],
+    ['vars', `${env}vars()['env']['LD_PRELOAD'] = ${MUTATE}\n${run}`],
+    [
+      'a comprehension that mutates it',
+      `${env}[env.update(LD_PRELOAD=${MUTATE}) for _ in [0]]\n${run}`,
+    ],
+    [
+      'a function named for a process start that mutates it',
+      `${env}def check_output(*a, **kw):\n    kw['env']['LD_PRELOAD'] = ${MUTATE}\ncheck_output(['true'], env=env)\n${run}`,
+    ],
+    [
+      'a function named Popen that mutates it',
+      `${env}def Popen(*a, **kw):\n    kw['env']['LD_PRELOAD'] = ${MUTATE}\nPopen(['true'], env=env)\n${run}`,
+    ],
+    [
+      'a method named for a process start on an object that is not the module',
+      `${env}obj.Popen(['true'], env=env)\n${run}`,
+    ],
+    [
+      'a process function the program replaced',
+      `${env}def f(*a, **kw):\n    kw['env']['LD_PRELOAD'] = ${MUTATE}\nsubprocess.call = f\nsubprocess.call(['true'], env=env)\n${run}`,
+    ],
+    ['a with block that holds it', `${env}with ctx(env) as c:\n    pass\n${run}`],
+    ['a return value', `${env}def f():\n    return env\nf()['LD_PRELOAD'] = ${MUTATE}\n${run}`],
+    ['a global statement', `${env}def f():\n    global env\n    env = other\nf()\n${run}`],
+    ['a second process call that is unread', `${env}${run}\nsubprocess.run(cmd, env=env)`],
+  ])('an environment given to %s is not read', (_name, program) => {
+    const reading = readPythonProcesses(program);
+    expect(reading?.unread || reading?.opaque, program).toBe(true);
+    expect(denied(py(program)), program).toBe(true);
+  });
+
+  it.each([
+    [
+      'a function that receives it and appends',
+      `${cmd}def f(*a, **k):\n    k['c'].append('--exec-path=/tmp/inert-marker')\nf(c=cmd)\nsubprocess.run(cmd)`,
+    ],
+    ['a call that receives it as a keyword', `${cmd}f(cmd=cmd)\nsubprocess.run(cmd)`],
+    [
+      'a function named for a process start',
+      `${cmd}def check_output(c):\n    c.append('x')\ncheck_output(cmd)\nsubprocess.run(cmd)`,
+    ],
+    ['a method named for a process start', `${cmd}obj.Popen(cmd)\nsubprocess.run(cmd)`],
+    ['a call that receives it by position', `${cmd}f(cmd)\nsubprocess.run(cmd)`],
+    [
+      'an alias that is appended to',
+      `${cmd}c2 = cmd\nc2.append('--exec-path=/tmp/inert-marker')\nsubprocess.run(cmd)`,
+    ],
+    ['an alias that is changed by position', `${cmd}c2 = cmd\nc2[0] = 'rm'\nsubprocess.run(cmd)`],
+    ['an alias made by a tuple', `${cmd}c2, x = cmd, 1\nc2.append(x)\nsubprocess.run(cmd)`],
+    [
+      'a lambda that appends to it',
+      `${cmd}g = lambda c: c.append('x')\ng(cmd)\nsubprocess.run(cmd)`,
+    ],
+    ['a dict that holds it', `${cmd}d = {'c': cmd}\nsubprocess.run(cmd)`],
+    ['a list that holds it', `${cmd}l = [cmd]\nsubprocess.run(cmd)`],
+    ['an attribute set to it', `${cmd}setattr(obj, 'c', cmd)\nsubprocess.run(cmd)`],
+    ['globals', `${cmd}globals()['cmd'].append('x')\nsubprocess.run(cmd)`],
+    ['a return value', `${cmd}def f():\n    return cmd\nf().append('x')\nsubprocess.run(cmd)`],
+    ['a second process call that is unread', `${cmd}subprocess.run(cmd)\nsubprocess.run(x)`],
+  ])('a command line given to %s is not read', (_name, program) => {
+    const reading = readPythonProcesses(program);
+    expect(reading?.unread || reading?.opaque, program).toBe(true);
+    expect(denied(py(program)), program).toBe(true);
+  });
+
+  it('reads a name that only process starts take, as many times as they take it', () => {
+    const twice = readPythonProcesses(
+      "import subprocess, os\nenv = os.environ.copy()\nenv['A'] = '1'\nsubprocess.run(['ls'], env=env)\nsubprocess.Popen(['pwd'], env=env)",
+    );
+    expect(twice?.processes.map((p) => p.command)).toEqual(['A=1 ls', 'A=1 pwd']);
+    expect(twice?.unread).toBe(false);
+    expect(twice?.opaque).toBe(false);
+    const lists = readPythonProcesses(
+      "import subprocess\ncmd = ['git', 'status']\nsubprocess.run(cmd)\nsubprocess.check_output(cmd, text=True)\nsubprocess.call(cmd)",
+    );
+    expect(lists?.processes.map((p) => p.command)).toEqual([
+      'git status',
+      'git status',
+      'git status',
+    ]);
+    expect(lists?.unread).toBe(false);
+  });
+
+  it('is what it was for a copy of the environment that no process takes', () => {
+    for (const program of [
+      "import subprocess, os\nenv = os.environ.copy()\nenv['A'] = '1'\nsubprocess.run(['ls'])",
+      "import subprocess, os\nenv = os.environ.copy()\nf(env=env)\nsubprocess.run(['ls'])",
+      'import os\nenv = os.environ.copy()\nprint(env)',
+    ])
+      expect(readPythonProcesses(program)?.opaque, program).toBe(true);
+  });
+
+  it('is what it was for a list that no process takes', () => {
+    const reading = readPythonProcesses("cmd = ['git', 'status']\nprint(cmd)\ncmd.append('x')");
+    expect(reading?.unread).toBe(false);
+    expect(reading?.opaque).toBe(false);
+  });
+});
+
 describe('what stays a question', () => {
   it.each([
     ['import pty', "import pty; print('pty available')"],

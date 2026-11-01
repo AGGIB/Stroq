@@ -11,19 +11,30 @@ import { isName, isOp } from './python-vocabulary.js';
  * Neither is a value the reader may take for what it looks like unless nothing else touches the name.
  * A string is the same wherever it is read; a list is changed by `cmd.append(x)`, `cmd[0] = x` and
  * `cmd += y`, none of which binds the name again, and an environment by `env.update(x)`, `env.pop(k)`
- * and `f(env)`. So a name qualifies only where every place the program writes it is accounted for: a
- * list is written twice (where it is bound, and where it is used), and an environment where it is bound,
- * where a variable is set in it with two strings written out, and where it is given to a process as `env=`.
- * A name used in any other way is left to the caller, as unread.
+ * and `f(env)`. A callee that is not a process start can be handed the name under another (`f(env=env)`
+ * with `def f(**kw): kw['env']['LD_PRELOAD'] = x`), and so can an alias (`e = env`).
+ *
+ * So this reads only what the name is bound to, and what is written into it by statements with strings
+ * written out. Where the name is used is the reader's to say: each place a process start takes it is
+ * told back (`accountedFor`), and the name is trusted only if every place the program writes it is the
+ * binding, such a statement, or a place a process start took it. Any other place (an alias, a call that
+ * is not a process start, a `**kw` forwarded, a dict that holds it) leaves what the processes took unread.
  */
+
+export interface EnvironmentCopy {
+  /** The variables set in it with two strings written out, in order. */
+  readonly variables: readonly (readonly [string, string])[];
+  /** The `environ` token of `os.environ.copy()`, which reads the environment and does not change it. */
+  readonly environ: number;
+}
 
 export interface NamedValues {
   /** A name bound once to a list or tuple written out, by the token range of the literal. */
   readonly lists: ReadonlyMap<string, readonly [number, number]>;
-  /** A name bound once to `os.environ.copy()` and set only to strings written out, by its variables in order. */
-  readonly environments: ReadonlyMap<string, readonly (readonly [string, string])[]>;
-  /** The `environ` tokens of those copies, which read the environment and do not change it. */
-  readonly copies: ReadonlySet<number>;
+  /** A name bound once to `os.environ.copy()` and set only by strings written out. */
+  readonly environments: ReadonlyMap<string, EnvironmentCopy>;
+  /** Whether every place the program writes `name` is accounted for, given the places a process start took it. */
+  readonly accountedFor: (name: string, taken: ReadonlySet<number>) => boolean;
 }
 
 /** A name written more often than this in one program is not followed: the cost of reading it is bounded. */
@@ -45,7 +56,11 @@ export function isPlainVariable(key: string): boolean {
   );
 }
 
-const noValues: NamedValues = { lists: new Map(), environments: new Map(), copies: new Set() };
+const noValues: NamedValues = {
+  lists: new Map(),
+  environments: new Map(),
+  accountedFor: () => false,
+};
 
 export function readNamedValues(
   tokens: readonly PythonToken[],
@@ -69,8 +84,9 @@ export function readNamedValues(
     return tok === undefined || tok.kind === 'nl' || isOp(tok, ';');
   };
   const lists = new Map<string, readonly [number, number]>();
-  const environments = new Map<string, readonly (readonly [string, string])[]>();
-  const copies = new Set<number>();
+  const environments = new Map<string, EnvironmentCopy>();
+  /** The places of a name that need no process start to account for them: its binding and its statements. */
+  const written = new Map<string, ReadonlySet<number>>();
   const seen = new Set<string>();
   for (let i = 1; i < tokens.length; i += 1) {
     const target = tokens[i - 1] as PythonToken;
@@ -82,19 +98,27 @@ export function readNamedValues(
     const open = tokens[i + 1];
     if (open !== undefined && (isOp(open, '[') || isOp(open, '('))) {
       const close = match.get(i + 1);
-      // Written twice: where it is bound, and where it is used as the command line.
-      if (close !== undefined && endsStatement(close + 1) && where.length === 2)
+      if (close !== undefined && endsStatement(close + 1)) {
         lists.set(name, [i + 1, close + 1]);
+        written.set(name, new Set([i - 1]));
+      }
       continue;
     }
     const environ = copiedEnvironment(tokens, names, i + 1, endsStatement);
     if (environ === null) continue;
-    const variables = environmentVariables(tokens, where, i - 1, startsStatement, endsStatement);
-    if (variables === null) continue;
-    environments.set(name, variables);
-    copies.add(environ);
+    const set = environmentVariables(tokens, where, i - 1, startsStatement, endsStatement);
+    if (set === null) continue;
+    environments.set(name, { variables: set.variables, environ });
+    written.set(name, new Set([i - 1, ...set.places]));
   }
-  return lists.size === 0 && environments.size === 0 ? noValues : { lists, environments, copies };
+  if (lists.size === 0 && environments.size === 0) return noValues;
+  const accountedFor = (name: string, taken: ReadonlySet<number>): boolean => {
+    const own = written.get(name);
+    return (
+      own !== undefined && (occurrences.get(name) ?? []).every((at) => own.has(at) || taken.has(at))
+    );
+  };
+  return { lists, environments, accountedFor };
 }
 
 /** The index of `environ` in `os.environ.copy()` at `at`, or null when the tokens there are anything else. */
@@ -120,10 +144,9 @@ function copiedEnvironment(
 }
 
 /**
- * The variables set in a copy of the environment, in order, or null when the name is written
- * anywhere the reader does not account for: each of its places is the binding (`bound`), a
- * statement `env['KEY'] = 'value'` with both strings written out, or the value of `env=` in a call
- * (and, when the name is `env` itself, the keyword before it, which reads nothing).
+ * The variables set in a copy of the environment by statements `env['KEY'] = 'value'` with both strings
+ * written out, in order, and where those statements are; or null when one sets a variable that is not
+ * plain (`isPlainVariable`) or a variable twice.
  */
 function environmentVariables(
   tokens: readonly PythonToken[],
@@ -131,11 +154,15 @@ function environmentVariables(
   bound: number,
   startsStatement: (at: number) => boolean,
   endsStatement: (at: number) => boolean,
-): readonly (readonly [string, string])[] | null {
+): {
+  readonly variables: readonly (readonly [string, string])[];
+  readonly places: number[];
+} | null {
   const variables: Array<readonly [string, string]> = [];
+  const places: number[] = [];
   const keys = new Set<string>();
-  const accounted = new Set<number>([bound]);
   for (const at of where) {
+    if (at === bound) continue;
     const key = tokens[at + 2];
     const value = tokens[at + 5];
     const sets =
@@ -146,20 +173,12 @@ function environmentVariables(
       isOp(tokens[at + 4], '=') &&
       value?.value !== undefined &&
       endsStatement(at + 6);
-    if (sets) {
-      if (!isPlainVariable(key.value as string) || keys.has(key.value as string)) return null;
-      keys.add(key.value as string);
-      variables.push([key.value as string, value.value as string]);
-      accounted.add(at);
-    } else if (
-      isOp(tokens[at - 1], '=') &&
-      isName(tokens[at - 2], 'env') &&
-      (isOp(tokens[at - 3], '(') || isOp(tokens[at - 3], ',')) &&
-      (isOp(tokens[at + 1], ',') || isOp(tokens[at + 1], ')'))
-    ) {
-      accounted.add(at);
-      accounted.add(at - 2);
-    }
+    if (!sets) continue;
+    const name = key.value as string;
+    if (!isPlainVariable(name) || keys.has(name)) return null;
+    keys.add(name);
+    variables.push([name, value.value as string]);
+    places.push(at);
   }
-  return where.every((at) => accounted.has(at)) ? variables : null;
+  return { variables, places };
 }
