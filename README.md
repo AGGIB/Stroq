@@ -5,7 +5,7 @@
   <img src="docs/assets/logo.svg" alt="Stroq" width="340">
 </picture>
 
-### AI agent security platform
+### Who is really in charge of your agent?
 
 [![CI](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml/badge.svg)](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml)
 [![stroq attack: 0 of 36 passed through](https://img.shields.io/badge/stroq%20attack-0%20of%2036%20passed%20through-1f9d55)](docs/GUIDE.md#replay-thirty-six-attacks-from-public-reports-and-synthetic-cells)
@@ -15,6 +15,33 @@
 
 </div>
 
+Stroq reads your own Claude Code and Codex sessions and shows how many commands came from text your agent read, and which keys left your machine.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/card-dark.png">
+  <img src="docs/assets/readme/card.png" alt="The Stroq card in a terminal, on an example machine: Hoo, an orange pixel owl, beside the counts for 30 days of agent sessions (105 commands your agent ran, 1 that came from text it read, 1 key that left the machine, 1 repo that runs code as soon as an agent opens it) and three moments worth a look, each with a stroq show line" width="800">
+</picture>
+
+<sub>An example: a made-up machine with made-up sessions, keys and hosts. Hoo is Stroq's owl. Your card shows your own sessions.</sub>
+
+```bash
+npx @stroq/cli
+```
+
+It reads your last 30 days of sessions, your key files and the folders your agent worked in; prints key names, never values; writes nothing but a small cache under `~/.stroq`; and sends nothing. No account, no telemetry.
+
+```text
+npx @stroq/cli            a card of your own sessions, like the one above
+npx @stroq/cli init       stop it next time: guard your agent
+npx @stroq/cli why        why an action was stopped
+npx @stroq/cli attack     watch Stroq stop 36 known attacks, in a sandbox
+npx @stroq/cli uninstall  remove Stroq
+```
+
+Every moment on the card has a `stroq show` line that prints the evidence behind it (`npx @stroq/cli show 1`). `stroq help --all` lists the other commands. Needs Node.js 22 or newer. Apache-2.0.
+
+## Beyond the card
+
 Stroq is a local security platform for AI coding agents: Claude Code, Cursor, Codex CLI and others. Its hooks judge every tool call before it runs. They deny `curl | sh` and outbound calls that carry a known secret from your machine, and they ask you first when a command repeats text the agent read, naming that text. The console shows which agents actually ask Stroq, and every decision with its reason. Sessions you already had can be checked too, without installing anything.
 
 ```bash
@@ -23,8 +50,6 @@ npx @stroq/cli replay --all   # your Claude Code sessions of the last 30 days ag
 npx @stroq/cli sent           # did your agent pass your keys on? key names, never values
 npx @stroq/cli init           # hook into your agent and guard the next session
 ```
-
-Needs Node.js 22 or newer. Runs on your machine: no account, no telemetry, Apache-2.0.
 
 <img src="docs/assets/readme/console-live.png" alt="Stroq console, Live page: the last 17 recorded actions, 11 allowed, 2 asked you, 3 denied, 1 flagged, and the feed with each action's decision and rule, such as a command denied by deny-encoded-exec and one asked about by ask-origin-untrusted" width="900">
 
