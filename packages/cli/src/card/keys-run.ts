@@ -17,6 +17,7 @@ import type { CardJob } from './jobs.js';
 import type { KeyAnswer } from './key-job.js';
 import { indexDigest, newSalt, prepareIndex, type PreparedIndex } from './key-index.js';
 import { registerKeyIndex } from './key-registry.js';
+import { namesGuard } from './ordinary-value.js';
 import { fitsKept, findingsOf, sanitizeKeys, summaryOf } from './key-result.js';
 import type { KeyCacheEntry, SessionKeys } from './key-schema.js';
 import { entriesUnder, keptKeys, keyCacheKey, readKeyCache, writeKeyCache } from './key-store.js';
@@ -76,7 +77,7 @@ export function startKeys(env: KeysEnv, sessions: readonly WindowSession[]): Key
     env.stroqHome,
     notes.memoryFor,
   );
-  const finder = keyFinder(loaded.keys);
+  const finder = keyFinder(loaded.keys, namesGuard);
   const scrub = scrubber(finder);
   const checkable = sessions.map((s) => !isTooLarge(s));
   if (loaded.keys.length === 0) return nothingToLookFor(scrub, checkable);

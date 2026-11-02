@@ -139,8 +139,9 @@ export const isToolName = (tool: string): boolean => TOOL_NAME.test(tool);
 export function scrubPlace(place: Place, finder: KeyFinder): Place {
   const clean = (text: string | undefined, shaped: (t: string) => boolean): string | undefined => {
     if (text === undefined) return undefined;
-    if (finder.hasPiece(text)) return HIDDEN;
-    return shaped(text) ? text : NAME_NOT_SHOWN;
+    const shown = finder.shown(text);
+    if (shown === null) return HIDDEN;
+    return shaped(shown) ? shown : NAME_NOT_SHOWN;
   };
   const host = clean(place.host, isHostShape);
   const detail = clean(place.detail, isPathDetail(place) ? () => true : isProgramName);

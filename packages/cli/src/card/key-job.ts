@@ -15,6 +15,7 @@ import { scanMatcher, scanSessions } from '../sent/scan-sessions.js';
 import type { SessionRef } from '../sent/sessions.js';
 import { budgetSpent, commandsCut, startReadBudget } from '../sent/shell-read.js';
 import { prepareIndex } from './key-index.js';
+import { namesGuard } from './ordinary-value.js';
 import { registeredKeyIndex } from './key-registry.js';
 import { hitsOf } from './key-result.js';
 import type { SessionKeys } from './key-schema.js';
@@ -45,7 +46,7 @@ function preparedFor(digest: string): Prepared | null {
   const index = registeredKeyIndex();
   if (index === null || index.digest !== digest) return null;
   if (prepared?.digest === digest) return prepared;
-  const finder = keyFinder(index.data.keys);
+  const finder = keyFinder(index.data.keys, namesGuard);
   prepared = {
     digest,
     finder,

@@ -17,7 +17,7 @@ import { buildMoments, type ToldInput } from './moments.js';
 import { runPool, type Channel } from './pool.js';
 import type { AutorunResult } from './autorun.js';
 import { startKeys, type KeyOutcome } from './keys-run.js';
-import { scrubSummary } from './scrub.js';
+import { scrubSummary, type Scrub } from './scrub.js';
 import type { CacheEntry, SessionSummary } from './schema.js';
 import { cacheKey, cachedSummary, readSessionCache, writeSessionCache } from './store.js';
 import { isTooLarge, listWindow, type WindowSession } from './window.js';
@@ -109,14 +109,6 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
   const cache = readSessionCache(run.stroqHome);
   const keyOf = (s: WindowSession): string =>
     cacheKey({ bytes: s.bytes, mtimeMs: s.mtimeMs, version: run.version, policy });
-
-  const summaries: (SessionSummary | undefined)[] = sessions.map(
-    (s) => cachedSummary(cache, s.path, keyOf(s)) ?? undefined,
-  );
-  const fromCache = summaries.filter((s) => s !== undefined).length;
-  const tooLarge = sessions.filter((s, i) => summaries[i] === undefined && isTooLarge(s)).length;
-
-  const { dirs, total: folderTotal } = sessionFolders(sessions, run.home);
   // The keys this machine holds, in this thread and the workers only: the check looks for them, and
   // anything the card keeps is cleaned of them.
   const keys = startKeys(
@@ -124,6 +116,16 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
     sessions,
   );
   const keysReadyAt = Date.now();
+  // A transcript is named in the cache by its path with any key taken out, as the key results are.
+  const pathKey = (s: WindowSession): string => keys.scrub(s.path);
+
+  const summaries: (SessionSummary | undefined)[] = sessions.map(
+    (s) => cachedSummary(cache, pathKey(s), keyOf(s)) ?? undefined,
+  );
+  const fromCache = summaries.filter((s) => s !== undefined).length;
+  const tooLarge = sessions.filter((s, i) => summaries[i] === undefined && isTooLarge(s)).length;
+
+  const { dirs, total: folderTotal } = sessionFolders(sessions, run.home);
   const jobs: CardJob[] = [];
   const kinds: ('repos' | { session: number } | { keys: number })[] = [];
   if (dirs.length > 0) {
@@ -196,7 +198,9 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
   const keysMs =
     (lastKeyAt === 0 ? keysReadyAt : lastKeyAt) - started + (Date.now() - mergeStarted);
   for (const at of keyOutcome.unreadable) unreadable.add(at);
-  const cacheSaved = saveCache(run.stroqHome, cache, sessions, keyOf, fresh) && keyOutcome.saved;
+  const cacheSaved =
+    saveCache(run.stroqHome, cache, sessions, keyOf, pathKey, keys.scrub, fresh) &&
+    keyOutcome.saved;
   return assemble(
     days,
     run,
@@ -218,6 +222,7 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
       workers,
       keysMs,
       replayMs: lastReplayAt === 0 ? 0 : lastReplayAt - started,
+      scrub: keys.scrub,
     },
   );
 }
@@ -228,13 +233,16 @@ function saveCache(
   old: ReadonlyMap<string, CacheEntry>,
   sessions: readonly WindowSession[],
   keyOf: (s: WindowSession) => string,
+  pathKey: (s: WindowSession) => string,
+  scrub: Scrub,
   fresh: ReadonlyMap<number, SessionSummary>,
 ): boolean {
   if (fresh.size === 0) return true;
-  const next = new Map(old);
+  // What was kept is cleaned again of the keys of today: a key added since may be in a path.
+  const next = new Map([...old].map(([path, entry]) => [scrub(path), entry] as const));
   for (const [index, summary] of fresh) {
     const session = sessions[index] as WindowSession;
-    next.set(session.path, { key: keyOf(session), mtimeMs: session.mtimeMs, summary });
+    next.set(pathKey(session), { key: keyOf(session), mtimeMs: session.mtimeMs, summary });
   }
   try {
     writeSessionCache(stroqHome, next);
@@ -252,6 +260,8 @@ interface Context {
   readonly workers: number;
   readonly keysMs: number;
   readonly replayMs: number;
+  /** Takes any key out of a text that is about to be shown. */
+  readonly scrub: Scrub;
 }
 
 function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): CardData {
@@ -264,11 +274,12 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
     for (const moment of summary.moments)
       told.push({
         moment,
+        // A folder or a file named with a key would print it: the same cut as for the text itself.
         session: {
           agent: session.agent,
-          id: summary.sessionId,
-          path: session.path,
-          cwd: session.cwd,
+          id: ctx.scrub(summary.sessionId),
+          path: ctx.scrub(session.path),
+          cwd: session.cwd === null ? null : ctx.scrub(session.cwd),
         },
       });
   });

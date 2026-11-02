@@ -63,7 +63,7 @@ export function prepareIndex(data: KeyIndexData): PreparedIndex {
     idOf,
     indexOf: order,
     lines: [
-      JSON.stringify({ v: 1, home: data.home, mcp }),
+      JSON.stringify({ v: 2, home: data.home, mcp }),
       ...order.map((i) => lines[i] as string),
     ],
   };

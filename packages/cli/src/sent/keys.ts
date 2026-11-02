@@ -352,26 +352,66 @@ export interface KeyFinder {
    * for a host, a path or a program name about to be printed (`pieces.ts`).
    */
   hasPiece(text: string): boolean;
+  /**
+   * A name as it may be printed: null when it holds six characters of a key that guards names (the
+   * whole name is then hidden); otherwise the name with the value of every key that does not guard
+   * names (see `keyFinder`) cut out of it, in any case. The pieces are looked for in the name as it
+   * came, before any cut: a cut could split a piece and let it through.
+   */
+  shown(text: string): string | null;
   /** How many texts the search for keys was cut short in (`needles.ts`). */
   cuts(): number;
 }
 
-export function keyFinder(keys: readonly Key[]): KeyFinder {
+/** What a masked value is written as. */
+const MASKED = '[key]';
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The finder for `keys`. Every key is looked for in a text. `guardsNames` says which of them hide a
+ * whole name that holds a piece of them (`hasPiece`): all of them unless a caller names fewer. The
+ * others (the card names the keys whose value is an ordinary word, `card/ordinary-value.ts`) are
+ * cut out of a name instead (`shown`), so no value is printed either way.
+ */
+export function keyFinder(
+  keys: readonly Key[],
+  guardsNames: (key: Key) => boolean = () => true,
+): KeyFinder {
   const matcher = textMatcher(keys.map((k) => k.value));
   let lower: ReturnType<typeof textMatcher> | null = null;
+  const plain = keys.filter((k) => !guardsNames(k));
+  let plainLower: ReturnType<typeof textMatcher> | null = null;
   // A canary's prefix is the same for every one, and documented: only the letters drawn after it
   // are its secret.
   const pieces = pieceTable(
-    keys.map((k) =>
-      k.canary === true && k.value.startsWith(CANARY_PREFIX)
-        ? k.value.slice(CANARY_PREFIX.length)
-        : k.value,
-    ),
+    keys
+      .filter(guardsNames)
+      .map((k) =>
+        k.canary === true && k.value.startsWith(CANARY_PREFIX)
+          ? k.value.slice(CANARY_PREFIX.length)
+          : k.value,
+      ),
   );
+  /** `text` with the value of every key that does not guard names cut out of it, in any case. */
+  const mask = (text: string): string => {
+    if (plain.length === 0 || text.length === 0) return text;
+    plainLower ??= textMatcher(plain.map((k) => k.value.toLowerCase()));
+    const found = [...plainLower.find(text.toLowerCase())]
+      .map((i) => (plain[i] as Key).value)
+      .sort((a, b) => b.length - a.length);
+    let out = text;
+    for (const value of found)
+      for (const form of keyForms(value))
+        out = out.replace(new RegExp(escapeRegExp(form), 'gi'), MASKED);
+    return out;
+  };
   return {
     keys,
     hasPiece: (text) => pieces.has(text),
-    cuts: () => matcher.cuts() + (lower?.cuts() ?? 0),
+    // The pieces are looked for in the name as it came: a cut made first could split one.
+    shown: (text) => (pieces.has(text) ? null : mask(text)),
+    cuts: () => matcher.cuts() + (lower?.cuts() ?? 0) + (plainLower?.cuts() ?? 0),
     holds(text: string): boolean {
       if (text.length === 0) return false;
       lower ??= textMatcher(keys.map((k) => k.value.toLowerCase()));

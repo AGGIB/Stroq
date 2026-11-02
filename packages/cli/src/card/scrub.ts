@@ -29,13 +29,22 @@ const TOKEN_SHAPES: readonly RegExp[] = [
   /-----BEGIN [A-Z ]{0,30}PRIVATE KEY-----/g,
 ];
 
-/** A function that takes out of a text the keys `finder` holds and the shapes of tokens. */
+/**
+ * A function that takes out of a text every key `finder` holds, in every spelling it has there, and
+ * the shapes of tokens. Every key: a value that is an ordinary word is taken out too, wherever it
+ * stands (`ordinary-value.ts` only changes how a whole name that holds a piece of a key is hidden).
+ */
 export function scrubber(finder: KeyFinder): Scrub {
   return (text) => {
     let out = text;
-    if (finder.keys.length > 0)
-      for (const found of finder.find(out))
-        for (const form of found.forms) out = out.split(form).join(MARK);
+    if (finder.keys.length > 0) {
+      // The longest spelling first: a value that begins another (`admin`, `administrator`) must not
+      // be cut out of it and leave the rest.
+      const forms = [...new Set(finder.find(out).flatMap((found) => found.forms))].sort(
+        (a, b) => b.length - a.length,
+      );
+      for (const form of forms) out = out.split(form).join(MARK);
+    }
     for (const shape of TOKEN_SHAPES) out = out.replace(shape, MARK);
     return out;
   };
@@ -54,7 +63,12 @@ function scrubMoment(moment: ToldMoment, scrub: Scrub): ToldMoment {
   };
 }
 
-/** A summary with every string that came from a transcript scrubbed. */
+/** A summary with every string that came from a transcript scrubbed: its ids and folder too. */
 export function scrubSummary(summary: SessionSummary, scrub: Scrub): SessionSummary {
-  return { ...summary, moments: summary.moments.map((m) => scrubMoment(m, scrub)) };
+  return {
+    ...summary,
+    sessionId: scrub(summary.sessionId),
+    cwd: summary.cwd === null ? null : scrub(summary.cwd),
+    moments: summary.moments.map((m) => scrubMoment(m, scrub)),
+  };
 }
