@@ -124,3 +124,5 @@ export const liveResultFile = (agent: string): string => liveResultFileIn(stroqH
 export const cardDirIn = (home: string): string => join(home, 'card');
 export const cardSessionsFileIn = (home: string): string => join(cardDirIn(home), 'sessions.json');
 export const cardLastFileIn = (home: string): string => join(cardDirIn(home), 'last.json');
+/** What the key check found per transcript, under a digest of the keys it looked for. Names and counts, no values. */
+export const cardKeysFileIn = (home: string): string => join(cardDirIn(home), 'keys.json');

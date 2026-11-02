@@ -38,7 +38,7 @@ export function cacheKey(parts: {
 }
 
 /** Makes the folder, or checks the one that is there is a real folder only this user can use. */
-function ensureCardDir(home: string): void {
+export function ensureCardDir(home: string): void {
   const dir = cardDirIn(home);
   let info;
   try {
