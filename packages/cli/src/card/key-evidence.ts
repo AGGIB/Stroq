@@ -7,6 +7,7 @@
 // `clean`, and the text was already taken apart by `sent/evidence.ts`, which keeps no value.
 import type { Finding } from '../sent/findings.js';
 import { markerName } from '../sent/evidence.js';
+import { isEverywhere } from '../sent/file-paths.js';
 import type { Evidence, Matched } from '../sent/place.js';
 import type { Moment } from './schema.js';
 import { clean, shortPath } from './text.js';
@@ -47,6 +48,12 @@ function ruleWords(f: Finding, evidence: Evidence, home: string): { by: string; 
         plain: `The command names the file the key is kept in, ${kept}${word === '' ? '' : ` (the word ${word})`}.`,
       };
     case 'folder':
+      // The root and the home folder have every key file under them: they are named as a whole.
+      if (word !== '' && isEverywhere(word))
+        return {
+          by: `the word ${word}, a folder the key's file is under, ${kept}`,
+          plain: `The command names ${word}, a folder the key's file is under, ${kept}.`,
+        };
       return {
         by: `the word ${word === '' ? 'it names' : word}, the name of the folder the key is kept in, ${folder}`,
         plain: `The command names the folder the key is kept in, ${folder}${word === '' ? '' : ` (the word ${word})`}.`,
