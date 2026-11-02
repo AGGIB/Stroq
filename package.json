@@ -27,6 +27,7 @@
     "generate:reports": "tsx scripts/generate-reports.ts",
     "check:reports": "tsx scripts/generate-reports.ts --check",
     "demo:svg": "tsx scripts/render-demo-svg.ts",
+    "owl:svg": "tsx scripts/render-owl-svg.ts",
     "demo:gif": "bash scripts/render-demo-gif.sh",
     "dev:bench": "tsx scripts/dev/bench.ts",
     "dev:coverage": "tsx scripts/dev/coverage.ts",
