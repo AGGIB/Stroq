@@ -11,6 +11,7 @@ import { neutralizeControls } from '@stroq/core';
 import type { FoundKey, KeyFinder } from './keys.js';
 import { shellJoined } from './needles.js';
 import type { Evidence, Matched } from './place.js';
+import { CLOSE, OPEN, redactCredentials } from './redact-credentials.js';
 import { redactTokens } from './token-shapes.js';
 
 /** The most characters of a call's text read for its evidence; past it the text is not kept. */
@@ -18,10 +19,9 @@ const MAX_READ = 200_000;
 /** The characters kept around the first replacement, and how many of them come before it. */
 export const WINDOW = 600;
 const BEFORE = 200;
-
-/** Marks a replacement while the text is worked on; no character of a call is left as one. */
-const OPEN = '\u0001';
-const CLOSE = '\u0002';
+/** The stretch of a text worked on around what is shown; it holds the window with room to spare. */
+const SLICE_BEFORE = 900;
+const SLICE_AFTER = 1_200;
 
 /** A key's name as a marker prints it: the shape of a name, else a fixed word. */
 const NAME = /^[\w.@:/+-]{1,60}$/;
@@ -68,7 +68,13 @@ export function maskedText(text: string, finder: KeyFinder, word = ''): string |
     .sort((a, b) => b[0].length - a[0].length);
   let out = work;
   for (const [form, name] of forms) out = out.split(form).join(`${OPEN}${name}${CLOSE}`);
-  out = redactTokens(out, `${OPEN}secret${CLOSE}`).replace(/\s+/g, ' ').trim();
+  out = redactTokens(out, `${OPEN}secret${CLOSE}`);
+  // Only the stretch around what is shown is worked on from here: the rest is never kept, and the credential
+  // shapes are read in a text of a bounded length.
+  const anchor = Math.max(0, word === '' ? out.indexOf(OPEN) : out.indexOf(word));
+  out = redactCredentials(out.slice(Math.max(0, anchor - SLICE_BEFORE), anchor + SLICE_AFTER))
+    .replace(/\s+/g, ' ')
+    .trim();
   const marker = new RegExp(`${OPEN}([^${CLOSE}]*)${CLOSE}`, 'g');
   const first = new RegExp(marker.source).exec(out)?.[1];
   const shown = neutralizeControls(out.replace(marker, '[$1]'));
