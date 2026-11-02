@@ -165,6 +165,18 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
   ],
   ['python decoder, sourced text before it', (r) => `${r('. ./x; ')}python3 -c 'import base64'`],
   [
+    'python decoder, wrappers of a builtin before it',
+    (r) => `${r('builtin command noglob ')}eval x; python3 -c 'import base64'`,
+  ],
+  [
+    'python decoder, wrappers of a filter after it',
+    (r) => `python3 -c 'import base64' | ${r('command ')}head`,
+  ],
+  [
+    'python decoder, exec with redirects before it',
+    (r) => `${r('exec 3>&1; ')}python3 -c 'import base64'`,
+  ],
+  [
     'python decoder, closers with redirects',
     (r) => `python3 -c 'import base64'; ${r('done > /dev/null; ')}`,
   ],

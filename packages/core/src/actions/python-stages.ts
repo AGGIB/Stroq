@@ -2,6 +2,7 @@ import { inlinePython, type PipeConsumer } from './pipe-consumer.js';
 import { quote, readPythonProcesses, type PythonProcess } from './python-processes.js';
 import type { Lexed, Stage } from './shell-lex.js';
 import { argv } from './shell-word-reader.js';
+import { resolve } from './shell-words.js';
 
 /**
  * The stages of a command that give Python a program with `-c`, each read for the processes it
@@ -158,29 +159,41 @@ const FILTERS: ReadonlySet<string> = new Set([
   'column',
   'jq',
 ]);
-const ASSIGNMENT_WORD = /^[A-Za-z_]\w*=/;
 /** `-o`, `-ro`, `--output=f`, and any prefix of the long option getopt reads as it (`--o`, `--outp f`). */
 const SORT_OUTPUT = /^-[A-Za-z]*o|^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(?:=|$)/;
 
-/** The program of a stage: its first word that is not an assignment, or undefined. */
-function programOf(text: string): string | undefined {
-  return argv(text).find((word) => !word.redirect && !ASSIGNMENT_WORD.test(word.value))?.value;
-}
+/**
+ * Builtins that run text of their own in the shell of the line (`source <(…)`, `trap '…' EXIT`, `eval "$x"`),
+ * where an `exec >f` may be. How a stage reaches one through `builtin`, `command`, `noglob`, `time`, `env` and
+ * the like is read by `resolve`, the one reading of wrappers that the classifier has.
+ */
+const RUNS_TEXT: ReadonlySet<string> = new Set(['.', 'source', 'eval', 'trap', 'fc', 'emulate']);
 
-/** Builtins that run text the reader may not see (`source <(…)`, `eval "$x"`): an `exec >f` may be in it. */
-const RUNS_TEXT: ReadonlySet<string> = new Set(['.', 'source', 'eval']);
-
-/** The stage redirects its output, or runs text that may (`source`, `.`, `eval`). */
+/**
+ * The stage redirects its output, or may run text that does: a builtin that runs text, a command word that is
+ * an expansion, wrappers nested deeper than they are read, or an `exec` given a redirect (it changes the
+ * descriptors of the shell for the rest of the line, whatever it is copied from).
+ */
 function mayRedirectOutput(text: string): boolean {
-  const program = programOf(text);
-  return redirectsOutput(text) || (program !== undefined && RUNS_TEXT.has(program));
+  if (redirectsOutput(text)) return true;
+  const found = resolve(text);
+  if (found === null) return false;
+  if (found.deep || found.evalProgram !== null || found.name.startsWith('$')) return true;
+  if (found.wrappers.includes('eval') || RUNS_TEXT.has(found.name)) return true;
+  const execs = found.name === 'exec' || found.wrappers.includes('exec');
+  return execs && argv(text).some((word) => word.redirect);
 }
 
-/** The stage is one of `FILTERS`, by that name and with no option that names a file to write (`sort -o`). */
+/**
+ * The stage is one of `FILTERS`, by that name as it stands (not through a wrapper, a path or a variable set
+ * for it) and with no option that names a file to write (`sort -o`).
+ */
 function onlyFilters(text: string): boolean {
-  const first = programOf(text);
-  if (first === undefined || !FILTERS.has(first)) return false;
-  return !(first === 'sort' && argv(text).some((word) => SORT_OUTPUT.test(word.value)));
+  const found = resolve(text);
+  if (found === null || found.deep || found.assigned === true || found.wrappers.length > 0)
+    return false;
+  if (found.word !== found.name || !FILTERS.has(found.name)) return false;
+  return !(found.name === 'sort' && argv(text).some((word) => SORT_OUTPUT.test(word.value)));
 }
 
 /** Whether a stage is given input: a pipe into it, a here-document, or an input redirect. */
