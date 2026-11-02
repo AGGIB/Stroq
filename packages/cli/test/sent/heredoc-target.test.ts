@@ -163,6 +163,10 @@ describe('a heredoc given to a program that can run its input is code', () => {
     [`gawk '{ print | "sh" }' <<'EOF'\n${POST}\nEOF`],
     [`awk '{ "sh -c \\"" $0 "\\"" | getline x }' <<'EOF'\n${POST}\nEOF`],
     [`dd of=out.sh <<'EOF'\n${POST}\nEOF`],
+    // These can start a program of their own, so their heredoc is code.
+    [`sort --compress-program=sh <<'EOF'\n${POST}\nEOF`],
+    [`rg --pre sh . <<'EOF'\n${POST}\nEOF`],
+    [`ag --pager sh x <<'EOF'\n${POST}\nEOF`],
   ])('%s: sent', (command) => {
     expect(placesIn('/Users/me/dev/app', [command]).get('STRIPE_KEY')).toMatchObject({
       tier: 'third_party',
@@ -170,15 +174,7 @@ describe('a heredoc given to a program that can run its input is code', () => {
   });
 
   it('while a program that only reads text still writes it', () => {
-    for (const program of [
-      'cat > f',
-      'tee f',
-      'head -n 5',
-      'grep curl',
-      'cut -c1-20',
-      'sort',
-      'jq -R .',
-    ])
+    for (const program of ['cat > f', 'tee f', 'head -n 5', 'grep curl', 'cut -c1-20', 'jq -R .'])
       expect(
         placesIn('/Users/me/dev/app', [`${program} <<'EOF'\n${POST}\nEOF`]).get('STRIPE_KEY'),
         program,

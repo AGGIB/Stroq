@@ -10,6 +10,8 @@
  * `e` runs a line), `awk` and `gawk` (`system()`, `print | cmd`, `| getline`), `dd`, `patch`, nor a pager: a heredoc
  * given to one of those is code unless proven otherwise.
  */
+// Not here: `sort` (`--compress-program` starts a helper), `rg` (`--pre`, `--search-zip`) and `ag` (`--pager`) can
+// run a program of their own, so a heredoc given to them is judged as code.
 export const DATA_PROGRAMS: ReadonlySet<string> = new Set([
   'cat',
   'tee',
@@ -18,7 +20,6 @@ export const DATA_PROGRAMS: ReadonlySet<string> = new Set([
   'tac',
   'rev',
   'tr',
-  'sort',
   'uniq',
   'wc',
   'cut',
@@ -30,8 +31,6 @@ export const DATA_PROGRAMS: ReadonlySet<string> = new Set([
   'grep',
   'egrep',
   'fgrep',
-  'rg',
-  'ag',
   'jq',
   'base64',
   'xxd',
