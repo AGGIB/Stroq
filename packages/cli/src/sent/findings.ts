@@ -77,6 +77,47 @@ function earlier(a: string, b: string): boolean {
   return !Number.isNaN(x) && x < y;
 }
 
+/** What one session says of one key, reduced so that sessions can be merged without their sightings. */
+export interface KeyInSession {
+  /** The key's farthest place in this session, and of those the earliest. */
+  readonly sighting: Sighting;
+  /** Sightings in that place's rank. */
+  readonly times: number;
+  /** Sightings in any place. */
+  readonly seen: number;
+  /** The most later calls that could have sent the key, after any of its sightings here. */
+  readonly later: number;
+}
+
+/** One session's keys, each reduced; what `collectFromSummaries` merges. */
+export interface SessionKeySummary {
+  readonly session: SessionInfo;
+  readonly keys: ReadonlyMap<number, KeyInSession>;
+}
+
+/** The reduction of a key's sightings in one session, after one more. */
+function reduceOne(current: KeyInSession | undefined, sighting: Sighting): KeyInSession {
+  const later = sighting.laterNetwork ?? 0;
+  if (current === undefined) return { sighting, times: 1, seen: 1, later };
+  const seen = current.seen + 1;
+  const most = Math.max(current.later, later);
+  const rank = placeRank(sighting.place) - placeRank(current.sighting.place);
+  if (rank < 0) return { sighting, times: 1, seen, later: most };
+  if (rank > 0) return { ...current, seen, later: most };
+  const times = current.times + 1;
+  return earlier(sighting.at, current.sighting.at)
+    ? { sighting, times, seen, later: most }
+    : { ...current, times, seen, later: most };
+}
+
+/** One session's sightings, reduced to one entry per key, in the order the keys were first seen. */
+export function summarizeSightings(sightings: readonly Sighting[]): Map<number, KeyInSession> {
+  const out = new Map<number, KeyInSession>();
+  for (const sighting of sightings)
+    out.set(sighting.key, reduceOne(out.get(sighting.key), sighting));
+  return out;
+}
+
 interface Best {
   readonly sighting: Sighting;
   readonly session: SessionInfo;
@@ -87,39 +128,38 @@ interface Best {
   readonly later: ReadonlyMap<string, number>;
 }
 
-/** The later calls of a session, with one more sighting's. */
+/** The later calls of a session, with one more session's most. */
 function withLater(
   later: ReadonlyMap<string, number>,
-  sighting: Sighting,
+  n: number,
   path: string,
 ): ReadonlyMap<string, number> {
-  const n = sighting.laterNetwork ?? 0;
   if (n <= (later.get(path) ?? 0)) return later;
   return new Map([...later, [path, n]]);
 }
 
-/** The best so far for a key, after one more sighting of it. */
-function next(current: Best | undefined, sighting: Sighting, session: SessionInfo): Best {
+/** The best so far for a key, after one more session's reduction of it. */
+function next(current: Best | undefined, one: KeyInSession, session: SessionInfo): Best {
   if (current === undefined)
     return {
-      sighting,
+      sighting: one.sighting,
       session,
-      times: 1,
-      seen: 1,
+      times: one.times,
+      seen: one.seen,
       sessions: new Set([session.path]),
-      later: withLater(new Map(), sighting, session.path),
+      later: withLater(new Map(), one.later, session.path),
     };
   const sessions = current.sessions.has(session.path)
     ? current.sessions
     : new Set([...current.sessions, session.path]);
-  const seen = current.seen + 1;
-  const later = withLater(current.later, sighting, session.path);
-  const rank = placeRank(sighting.place) - placeRank(current.sighting.place);
-  if (rank < 0) return { sighting, session, times: 1, seen, sessions, later };
+  const seen = current.seen + one.seen;
+  const later = withLater(current.later, one.later, session.path);
+  const rank = placeRank(one.sighting.place) - placeRank(current.sighting.place);
+  if (rank < 0) return { sighting: one.sighting, session, times: one.times, seen, sessions, later };
   if (rank > 0) return { ...current, seen, sessions, later };
-  const times = current.times + 1;
-  return earlier(sighting.at, current.sighting.at)
-    ? { sighting, session, times, seen, sessions, later }
+  const times = current.times + one.times;
+  return earlier(one.sighting.at, current.sighting.at)
+    ? { sighting: one.sighting, session, times, seen, sessions, later }
     : { ...current, times, seen, sessions, later };
 }
 
@@ -134,11 +174,18 @@ function laterOf(b: Best): Pick<Finding, 'laterNetworkCommands' | 'laterNetworkS
   };
 }
 
-export function collectFindings(keys: readonly Key[], all: readonly SessionSightings[]): Finding[] {
+/**
+ * One finding per key, from sessions already reduced (`summarizeSightings`). The sessions are merged
+ * in the order given, so the same sessions in the same order give the same findings, whether each was
+ * read now or kept from an earlier run.
+ */
+export function collectFromSummaries(
+  keys: readonly Key[],
+  all: readonly SessionKeySummary[],
+): Finding[] {
   const best = new Map<number, Best>();
-  for (const { session, sightings } of all)
-    for (const sighting of sightings)
-      best.set(sighting.key, next(best.get(sighting.key), sighting, session));
+  for (const { session, keys: seen } of all)
+    for (const [index, one] of seen) best.set(index, next(best.get(index), one, session));
   const findings = [...best.entries()].map(([index, b]): Finding => {
     const key = keys[index] as Key;
     const service = providerOf(key);
@@ -166,5 +213,12 @@ export function collectFindings(keys: readonly Key[], all: readonly SessionSight
       tierRank(a.tier) - tierRank(b.tier) ||
       decoyFirst(a) - decoyFirst(b) ||
       (earlier(a.at ?? '', b.at ?? '') ? -1 : earlier(b.at ?? '', a.at ?? '') ? 1 : 0),
+  );
+}
+
+export function collectFindings(keys: readonly Key[], all: readonly SessionSightings[]): Finding[] {
+  return collectFromSummaries(
+    keys,
+    all.map(({ session, sightings }) => ({ session, keys: summarizeSightings(sightings) })),
   );
 }
