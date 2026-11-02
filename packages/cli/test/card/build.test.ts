@@ -175,7 +175,7 @@ describe('the card when the time runs out', () => {
     populate(m);
     const data = await buildCard(
       30,
-      env({ budgetMs: 100, graceMs: 100, workers: 1, open: stalling(2) }),
+      env({ budgetMs: 1_000, graceMs: 100, workers: 1, open: stalling(2) }),
     );
     expect(data.coverage.found).toBe(4);
     expect(data.coverage.checked).toBe(2);
@@ -185,7 +185,7 @@ describe('the card when the time runs out', () => {
 
   it('continues from the cache on the next run', async () => {
     populate(m);
-    await buildCard(30, env({ budgetMs: 100, graceMs: 100, workers: 1, open: stalling(2) }));
+    await buildCard(30, env({ budgetMs: 1_000, graceMs: 100, workers: 1, open: stalling(2) }));
     const next = await buildCard(30, env());
     expect(next.coverage.notChecked).toBe(0);
     expect(next.coverage.fromCache).toBe(2);

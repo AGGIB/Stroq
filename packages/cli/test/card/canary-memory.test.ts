@@ -1,7 +1,10 @@
 import {
   appendFileSync,
+  chmodSync,
   mkdirSync,
   mkdtempSync,
+  renameSync,
+  statSync,
   symlinkSync,
   utimesSync,
   writeFileSync,
@@ -50,6 +53,35 @@ describe('what the card remembers of looking for canaries', () => {
     again.memoryFor(SIG).look(b).learn();
     utimesSync(b, new Date(1_000), new Date(1_000));
     expect(canaryNotes(again.result()).memoryFor(SIG).look(b).clean).toBe(false);
+  });
+
+  it('reads a file again once it was replaced by one of the same size and date', () => {
+    const dir = folder();
+    const when = new Date(1_700_000_000_000);
+    const a = file(dir, 'a.jsonl', 'same size\n');
+    utimesSync(a, when, when);
+    const notes = canaryNotes(null);
+    notes.memoryFor(SIG).look(a).learn();
+    const kept = notes.result();
+    const other = file(dir, 'other.jsonl', 'diff size\n');
+    utimesSync(other, when, when);
+    renameSync(other, a);
+    expect(statSync(a).size).toBe(10);
+    expect(statSync(a).mtimeMs).toBe(when.getTime());
+    expect(canaryNotes(kept).memoryFor(SIG).look(a).clean).toBe(false);
+  });
+
+  it('reads a file again once its permissions changed', () => {
+    const dir = folder();
+    const a = file(dir, 'a.jsonl');
+    const notes = canaryNotes(null);
+    notes.memoryFor(SIG).look(a).learn();
+    const kept = notes.result();
+    // Same bytes, same date; only the status change time moves.
+    const when = statSync(a).mtime;
+    chmodSync(a, 0o640);
+    utimesSync(a, when, when);
+    expect(canaryNotes(kept).memoryFor(SIG).look(a).clean).toBe(false);
   });
 
   it('remembers the file as it was when it was looked at, not as it was after the read', () => {

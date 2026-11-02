@@ -228,6 +228,61 @@ describe('withSessionCanaries with a memory of clean files', () => {
     expect(mem.learned).toEqual([]);
   });
 
+  /** A memory that holds the names it learned and trusts them as they are. */
+  function remembering(): {
+    readonly files: Set<string>;
+    readonly for: (signature: string) => CanaryMemory;
+  } {
+    const files = new Set<string>();
+    return {
+      files,
+      for: () => ({
+        look: (file) => ({ clean: files.has(file), learn: () => void files.add(file) }),
+      }),
+    };
+  }
+  const TWO = (): string =>
+    stroqHome([
+      { value: CANARY, name: 'decoy_token' },
+      { value: 'stroq_canary_FAKEneverSeen0123456789abcdefABC', name: 'STROQ_CANARY_KEY' },
+    ]);
+
+  it('does not learn a file that could not be read, so a file that is readable later is read', () => {
+    const home = TWO();
+    const gone = join(mkdtempSync(join(tmpdir(), 'stroq-sent-session-canaries-g-')), 'later.jsonl');
+    const refs: SessionRef[] = [
+      { agent: 'claude-code', path: gone, files: [gone], cwd: null, first: null, mtimeMs: 0 },
+    ];
+    const mem = remembering();
+    expect(withSessionCanaries(EMPTY, refs, home, mem.for).keys).toEqual([]);
+    expect(mem.files.size).toBe(0);
+    writeFileSync(gone, `saw ${CANARY}\n`);
+    expect(withSessionCanaries(EMPTY, refs, home, mem.for).keys.map((k) => k.value)).toEqual([
+      CANARY,
+    ]);
+  });
+
+  it('does not learn a file that holds a missing canary another file already showed', () => {
+    const home = TWO();
+    const first = sessionFile(`saw ${CANARY}\n`);
+    const second = sessionFile(`also ${CANARY}\n`);
+    const mem = remembering();
+    const both = withSessionCanaries(EMPTY, [first, second], home, mem.for);
+    expect(both.keys.map((k) => k.value)).toEqual([CANARY]);
+    expect(mem.files.size).toBe(0);
+    // The first session is gone from the window: the second still shows it.
+    const alone = withSessionCanaries(EMPTY, [second], home, mem.for);
+    expect(alone.keys.map((k) => k.value)).toEqual([CANARY]);
+  });
+
+  it('learns a file that holds only values that are no planted canary', () => {
+    const home = TWO();
+    const other = sessionFile(`saw ${OTHER}\n`);
+    const mem = remembering();
+    withSessionCanaries(EMPTY, [other], home, mem.for);
+    expect([...mem.files]).toEqual([other.path]);
+  });
+
   it('asks for no memory when no canary is missing, and finds the same with or without one', () => {
     const home = stroqHome([{ value: CANARY, name: 'decoy_token' }]);
     const known: KeySet = {

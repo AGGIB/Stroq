@@ -4,7 +4,7 @@
 // session file for values of a canary's shape and hashes each against the planted ones
 // (`session-canaries.ts`). That is a read of all the sessions, and while a planted canary stays missing
 // it would be made again on every run. So a file read through to its end with no match is remembered,
-// by path, with the size and date it had when it was looked at, for as long as the same canaries are
+// by path, with the stamp it had when it was looked at (disk place, size, date, status change), for as long as the same canaries are
 // missing; a file that grew or changed is read again, and so is every file once another canary is
 // missing or found. Paths and numbers are kept; a value never is.
 import { lstatSync } from 'node:fs';
@@ -13,11 +13,17 @@ import type { CanaryMemory } from '../sent/session-canaries.js';
 import { MAX_CACHED } from './store.js';
 import type { CanaryMemoryFile } from './key-schema.js';
 
-/** A file as it is now, in a word: its size and date; null for anything but a regular file. */
+/**
+ * A file as it is now, in a word: where it is on its disk, its size, its date and when its status last
+ * changed, so that a file replaced by another of the same size and date, or whose permissions were
+ * changed, is another; null for anything but a regular file.
+ */
 function stampOf(file: string): string | null {
   try {
     const info = lstatSync(file);
-    return info.isFile() ? `${info.size}:${info.mtimeMs}` : null;
+    return info.isFile()
+      ? `${info.dev}:${info.ino}:${info.size}:${info.mtimeMs}:${info.ctimeMs}`
+      : null;
   } catch {
     return null;
   }

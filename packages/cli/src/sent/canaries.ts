@@ -136,18 +136,27 @@ function shapesIn(
   return true;
 }
 
+/** How reading a file for canary-shaped values ended. */
+export type ReadEnd =
+  /** The file was opened and read to its end with no error. */
+  | 'done'
+  /** `found` said to stop. */
+  | 'stopped'
+  /** The file could not be opened as a regular file, or a read failed: what it holds is not known. */
+  | 'failed';
+
 /**
  * Hands `found` each value of a canary's shape in a file, read a piece at a time, until `found`
- * says to stop. False when it stopped early. A file that cannot be read gives nothing.
+ * says to stop, and says how the read ended.
  */
-export function canaryValuesInFile(
+export function readCanaryValues(
   path: string,
   found: (value: string) => boolean,
   chunk: number = READ_CHUNK,
-): boolean {
+): ReadEnd {
   // A FIFO or a device is refused, never waited on.
   const fd = openRegularFile(path);
-  if (fd === null) return true;
+  if (fd === null) return 'failed';
   // A value that starts in the last bytes of a read may end in the next one: they are kept.
   const keep = VALUE_BYTES - 1;
   const buf = Buffer.allocUnsafe(Math.max(1, chunk) + keep);
@@ -156,19 +165,29 @@ export function canaryValuesInFile(
     for (;;) {
       const n = readSync(fd, buf, filled, buf.length - filled, null);
       filled += n;
-      if (n === 0) return shapesIn(buf, filled, filled, found);
+      if (n === 0) return shapesIn(buf, filled, filled, found) ? 'done' : 'stopped';
       if (filled < buf.length) continue;
       const limit = filled - keep;
-      if (!shapesIn(buf, filled, limit, found)) return false;
+      if (!shapesIn(buf, filled, limit, found)) return 'stopped';
       buf.copyWithin(0, limit, filled);
       filled = keep;
     }
   } catch {
-    return true;
+    return 'failed';
   } finally {
     closeSync(fd);
   }
 }
+
+/**
+ * `readCanaryValues` for a caller that does not need to know how the read ended: false when it
+ * stopped early. A file that cannot be read gives nothing.
+ */
+export const canaryValuesInFile = (
+  path: string,
+  found: (value: string) => boolean,
+  chunk: number = READ_CHUNK,
+): boolean => readCanaryValues(path, found, chunk) !== 'stopped';
 
 /** `canaryValuesInFile` for a text already read, such as a Cursor row. */
 export function canaryValuesInText(text: string, found: (value: string) => boolean): boolean {

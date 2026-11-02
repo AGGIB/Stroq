@@ -12,7 +12,7 @@
 // cut short by its budget is counted and reported, since it may be tampering. Nothing is written.
 import { createHash } from 'node:crypto';
 import { hashSecret } from '@stroq/core';
-import { canaryValuesInFile, canaryValuesInText, plantedCanaries } from './canaries.js';
+import { canaryValuesInText, plantedCanaries, readCanaryValues, type ReadEnd } from './canaries.js';
 import type { Key, KeySet } from './keys.js';
 import { keyName } from './names.js';
 import type { SessionRef } from './sessions.js';
@@ -59,6 +59,10 @@ export function missingSignature(salt: string, hashes: Iterable<string>): string
 interface FileCheck {
   readonly done: boolean;
   readonly cut: boolean;
+  /** The file was read through to its end with no error. */
+  readonly read: boolean;
+  /** A value in it hashed to a canary that was missing, whether or not an earlier file showed it too. */
+  readonly sawMissing: boolean;
 }
 
 /**
@@ -84,10 +88,11 @@ export function withSessionCanaries(
   const memory = memoryFor?.(missingSignature(planted.salt, missing.keys()));
   const found = new Map<string, string>();
   /** Hands each value of one file to the check, to its budget; what that did. */
-  const checkFile = (read: (each: (value: string) => boolean) => boolean): FileCheck => {
+  const checkFile = (read: (each: (value: string) => boolean) => ReadEnd): FileCheck => {
     const checked = new Set<string>();
     let cut = false;
-    read((value) => {
+    let sawMissing = false;
+    const end = read((value) => {
       if (checked.has(value)) return true;
       if (checked.size >= MAX_CHECKS_PER_FILE) {
         cut = true;
@@ -95,40 +100,45 @@ export function withSessionCanaries(
       }
       checked.add(value);
       const hash = hashSecret(planted.salt, value);
-      if (missing.has(hash)) found.set(hash, value);
+      if (missing.has(hash)) {
+        found.set(hash, value);
+        sawMissing = true;
+      }
       return found.size < missing.size;
     });
-    return { done: found.size >= missing.size, cut };
+    return { done: found.size >= missing.size, cut, read: end === 'done', sawMissing };
   };
 
   let cutFiles = 0;
   interface Source {
     /** The file it reads, for the memory; none for a Cursor session's rows. */
     readonly file?: string;
-    readonly read: (each: (value: string) => boolean) => boolean;
+    readonly read: (each: (value: string) => boolean) => ReadEnd;
   }
   const sources: Source[] = refs.flatMap((ref) => [
     ...(ref.cursor === undefined
       ? []
       : [
           {
-            read: (each: (value: string) => boolean) =>
-              ref.cursor?.rows.every((row) => canaryValuesInText(row, each)) ?? true,
+            read: (each: (value: string) => boolean): ReadEnd =>
+              ref.cursor?.rows.every((row) => canaryValuesInText(row, each)) === false
+                ? 'stopped'
+                : 'done',
           },
         ]),
     ...ref.files.map((file) => ({
       file,
-      read: (each: (value: string) => boolean) => canaryValuesInFile(file, each),
+      read: (each: (value: string) => boolean): ReadEnd => readCanaryValues(file, each),
     })),
   ]);
   for (const source of sources) {
     const looked = source.file === undefined ? undefined : memory?.look(source.file);
     if (looked?.clean === true) continue;
-    const before = found.size;
     const check = checkFile(source.read);
     if (check.cut) cutFiles += 1;
     if (check.done) break;
-    if (!check.cut && found.size === before) looked?.learn();
+    // Only a file opened and read to its end, with no value of a missing canary in it and no cut.
+    if (check.read && !check.cut && !check.sawMissing) looked?.learn();
   }
 
   const added: Key[] = [...found].map(([hash, value]) => ({
