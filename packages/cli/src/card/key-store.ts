@@ -11,6 +11,7 @@ import { cardKeysFileIn } from '../paths.js';
 import {
   KEY_CACHE_SCHEMA,
   keyCacheSchema,
+  type CanaryMemoryFile,
   type KeyCacheEntry,
   type KeyCacheFile,
   type SessionKeys,
@@ -25,9 +26,16 @@ export interface KeyCache {
   readonly salt: string | null;
   readonly digest: string | null;
   readonly entries: ReadonlyMap<string, KeyCacheEntry>;
+  /** The session files found to hold no missing canary, or null. */
+  readonly canaries: CanaryMemoryFile | null;
 }
 
-export const NO_KEY_CACHE: KeyCache = { salt: null, digest: null, entries: new Map() };
+export const NO_KEY_CACHE: KeyCache = {
+  salt: null,
+  digest: null,
+  entries: new Map(),
+  canaries: null,
+};
 
 /** Everything a result depends on in the transcript and the program; the digest covers the keys. */
 export function keyCacheKey(parts: {
@@ -52,8 +60,8 @@ export function readKeyCache(home: string): KeyCache {
   if (read.kind !== 'text') return NO_KEY_CACHE;
   const parsed = keyCacheSchema.safeParse(parse(read.text));
   if (!parsed.success) return NO_KEY_CACHE;
-  const { salt, digest, entries } = parsed.data;
-  return { salt, digest, entries: new Map(Object.entries(entries)) };
+  const { salt, digest, entries, canaries } = parsed.data;
+  return { salt, digest, entries: new Map(Object.entries(entries)), canaries: canaries ?? null };
 }
 
 /** The entries that were made under `digest`; none when the cache was made under another. */
@@ -78,6 +86,7 @@ export function writeKeyCache(
     readonly salt: string;
     readonly digest: string;
     readonly entries: ReadonlyMap<string, KeyCacheEntry>;
+    readonly canaries?: CanaryMemoryFile | null;
   },
 ): void {
   ensureCardDir(home);
@@ -89,6 +98,7 @@ export function writeKeyCache(
     salt: file.salt,
     digest: file.digest,
     entries: Object.fromEntries(newest),
+    ...(file.canaries === undefined || file.canaries === null ? {} : { canaries: file.canaries }),
   };
   // Through the schema that reads it, so that what is written is what will be accepted.
   const checked = keyCacheSchema.parse(JSON.parse(JSON.stringify(body)));

@@ -109,6 +109,19 @@ const entrySchema = z
   .strict();
 export type KeyCacheEntry = z.infer<typeof entrySchema>;
 
+/**
+ * The session files read for a canary `stroq canary` planted whose decoy is gone, and found to hold
+ * none of the canaries then missing: by path, with the size and date they had. True while the same
+ * canaries are missing (`signature`). Paths and numbers only.
+ */
+const canaryMemorySchema = z
+  .object({
+    signature: z.string().regex(/^[0-9a-f]{64}$/),
+    files: z.record(z.string().max(4_096), text),
+  })
+  .strict();
+export type CanaryMemoryFile = z.infer<typeof canaryMemorySchema>;
+
 export const KEY_CACHE_SCHEMA = 'stroq-card-keys/1';
 export const keyCacheSchema = z
   .object({
@@ -118,6 +131,7 @@ export const keyCacheSchema = z
     /** The digest of the key index the entries were made under (`key-index.ts`). */
     digest: z.string().regex(/^[0-9a-f]{64}$/),
     entries: z.record(z.string().max(4_096), entrySchema),
+    canaries: canaryMemorySchema.optional(),
   })
   .strict();
 export type KeyCacheFile = z.infer<typeof keyCacheSchema>;

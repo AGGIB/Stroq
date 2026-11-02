@@ -11,6 +11,8 @@ import type { Finding, SessionKeySummary } from '../sent/findings.js';
 import { keyFinder, loadKeys, type KeyFinder } from '../sent/keys.js';
 import { loadMcpServers } from '../sent/mcp-config.js';
 import { projectDirs } from '../sent/run.js';
+import { withSessionCanaries } from '../sent/session-canaries.js';
+import { canaryNotes, type CanaryNotes } from './canary-memory.js';
 import type { CardJob } from './jobs.js';
 import type { KeyAnswer } from './key-job.js';
 import { indexDigest, newSalt, prepareIndex, type PreparedIndex } from './key-index.js';
@@ -64,12 +66,16 @@ export function startKeys(env: KeysEnv, sessions: readonly WindowSession[]): Key
     env.cwd,
     sessions.map((s) => s.ref),
   );
-  const loaded = loadKeys({
-    home: env.home,
-    env: env.env,
-    projectDirs: dirs,
-    stroqHome: env.stroqHome,
-  });
+  // The set `stroq sent` looks for (`checkSessions`): the key files, the environment, the decoys, and
+  // the canaries `stroq canary` planted whose decoy is gone and that the sessions themselves show.
+  const cache = readKeyCache(env.stroqHome);
+  const notes = canaryNotes(cache.canaries);
+  const loaded = withSessionCanaries(
+    loadKeys({ home: env.home, env: env.env, projectDirs: dirs, stroqHome: env.stroqHome }),
+    sessions.map((s) => s.ref),
+    env.stroqHome,
+    notes.memoryFor,
+  );
   const finder = keyFinder(loaded.keys);
   const scrub = scrubber(finder);
   const checkable = sessions.map((s) => !isTooLarge(s));
@@ -77,12 +83,11 @@ export function startKeys(env: KeysEnv, sessions: readonly WindowSession[]): Key
 
   const mcp = loadMcpServers({ home: env.home, projectDirs: dirs });
   const index = prepareIndex({ home: env.home, keys: loaded.keys, mcp: [...mcp.known] });
-  const cache = readKeyCache(env.stroqHome);
   const salt = cache.salt ?? newSalt();
   const digest = indexDigest(index, salt);
   const kept = entriesUnder(cache, digest);
   registerKeyIndex({ digest, data: index.data });
-  return new Run({ env, sessions, finder, scrub, index, salt, digest, kept, checkable });
+  return new Run({ env, sessions, finder, scrub, index, salt, digest, kept, checkable, notes });
 }
 
 /** A machine that holds no key to look for: every session that can be checked is, at once. */
@@ -115,6 +120,7 @@ interface RunParts {
   readonly digest: string;
   readonly kept: ReadonlyMap<string, KeyCacheEntry>;
   readonly checkable: readonly boolean[];
+  readonly notes: CanaryNotes;
 }
 
 class Run implements KeysRun {
@@ -192,7 +198,7 @@ class Run implements KeysRun {
 
   /** Keeps what was kept and what was just made complete; false when it could not be written. */
   private save(): boolean {
-    if (this.fresh.size === 0) return true;
+    if (this.fresh.size === 0 && !this.p.notes.changed()) return true;
     const entries = new Map(this.p.kept);
     for (const [i, result] of this.fresh) {
       const s = this.p.sessions[i] as WindowSession;
@@ -203,6 +209,7 @@ class Run implements KeysRun {
         salt: this.p.salt,
         digest: this.p.digest,
         entries,
+        canaries: this.p.notes.result(),
       });
       return true;
     } catch {
