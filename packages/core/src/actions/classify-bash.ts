@@ -305,6 +305,9 @@ export const GH_REPO_CREATE_PUSH = followedBy(/\bgh\s+repo\s+create\b/, /--push\
 // without importing this one; `dangerous-target.ts` explains why it moved.
 export { isDangerousRmTarget } from './dangerous-target.js';
 
+/** A target that is a credential file or a folder of them (`/tmp/.ssh`, `/tmp/server.pem`) is never routine. */
+const namesASecret = (target: string): boolean => SECRET_PATTERNS.some((re) => re.test(target));
+
 /** `--no-preserve-root`, or any spelling of it that `rm` would read as that option. */
 const NO_PRESERVE_ROOT = /^--no/;
 
@@ -324,7 +327,11 @@ function rmIsDangerous(segment: string, cwd: string, line: LineFacts): boolean {
     !args.some((a) => NO_PRESERVE_ROOT.test(a.replace(/["']/g, ''))) && !cutsAWordApart(segment);
   return args
     .filter((a) => !a.startsWith('-'))
-    .some((a) => isDangerousRmTarget(a, cwd) && !(scratch && isNamedTempTarget(a, line, cwd)));
+    .some(
+      (a) =>
+        isDangerousRmTarget(a, cwd) &&
+        !(scratch && !namesASecret(a) && isNamedTempTarget(a, line, cwd)),
+    );
 }
 
 /** What `find` tests that limits what it removes: a name, a time, a size, an owner. `-type` does not. */

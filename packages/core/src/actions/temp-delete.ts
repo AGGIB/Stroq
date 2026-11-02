@@ -20,6 +20,9 @@ import { resolveThroughLinks } from './symlink.js';
  * yet, so such a path is judged only when every other command of the line is one that makes no
  * link (`inert`): `ln -s ~ /tmp/a && rm -rf /tmp/a/Documents` is a delete of the home.
  *
+ * None of this holds where the directory the hook gives is itself in scratch space (`cwdInScope`): the
+ * delete of a name under it can be the project, a folder above it or the one beside it.
+ *
  * `$TMPDIR/name` is the same path when the hook's own `TMPDIR` is a temp directory and the line
  * neither sets that variable nor does anything that could (`setsTempDir`, and `inert`). The hook
  * and the agent's shell share their environment; a line that changes it is not trusted.
@@ -115,6 +118,31 @@ function realRoots(scope: TempScope): readonly string[] {
   return found;
 }
 
+const inScopeCache = new WeakMap<TempScope, Map<string, boolean>>();
+
+/**
+ * Whether the directory the hook gives is itself in scratch space (CI, a `mktemp` sandbox, `/private/tmp`):
+ * then `rm -rf /tmp/work/proj` can be the project, `/tmp/work` the folder above it and `/tmp/work/other`
+ * the one beside it, and no name under a temp root is routine. A directory that is not an absolute path
+ * is not known to be elsewhere. Looked up once for a scope.
+ */
+function cwdInScope(cwd: string, scope: TempScope): boolean {
+  const known = inScopeCache.get(scope)?.get(cwd);
+  if (known !== undefined) return known;
+  let found = !cwd.startsWith('/');
+  if (!found) {
+    const real = resolveThroughLinks(cwd, '/');
+    const roots = realRoots(scope);
+    const within = (path: string): boolean =>
+      roots.some((root) => path === root || path.startsWith(`${root}/`));
+    found = within(withoutTrailingSlashes(cwd)) || (real !== null && within(real));
+  }
+  const cache = inScopeCache.get(scope) ?? new Map<string, boolean>();
+  cache.set(cwd, found);
+  inScopeCache.set(scope, cache);
+  return found;
+}
+
 /** The path stays inside scratch space after every link on disk is followed. */
 function staysInside(path: string, cwd: string, scope: TempScope): boolean {
   const real = resolveThroughLinks(path, cwd);
@@ -144,6 +172,7 @@ export function isNamedTempTarget(
   scope: TempScope = line.scope(),
 ): boolean {
   if (target.length > MAX_TARGET_CHARS) return false;
+  if (cwdInScope(cwd, scope)) return false;
   const word = target.replace(/["']/g, '');
   const place = placeOf(word, scope);
   if (place === null) return false;

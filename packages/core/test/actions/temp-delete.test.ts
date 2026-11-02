@@ -172,6 +172,123 @@ describe('what stays a question', () => {
   });
 });
 
+/**
+ * A project that is itself under a temp directory (CI, a `mktemp` sandbox, `/private/tmp`): the delete of a
+ * name under it can be the project, a folder above it, or the folder beside it. The exemption is off
+ * wherever the directory the hook gives is inside scratch space.
+ */
+describe('a project under the temp directory', () => {
+  const asksIn = (command: string, cwd: string): boolean =>
+    classifyCommand(command, cwd).classes.includes('shell.destructive');
+
+  it.each([
+    ['/tmp/work/proj', 'rm -rf /tmp/work/proj'],
+    ['/tmp/work/proj', 'rm -rf /tmp/work'],
+    ['/tmp/work/proj', 'rm -rf /tmp/work/other'],
+    ['/tmp/work/proj', 'rm -rf /tmp/work/*'],
+    ['/tmp/work/proj', 'rm -rf /tmp/test_output'],
+    ['/tmp/work/proj', 'rm -rf /var/tmp/test_output'],
+    ['/tmp/work', 'rm -rf /tmp/work'],
+    ['/var/tmp/work/proj', 'rm -rf /var/tmp/work/proj'],
+    ['/var/tmp/work/proj', 'rm -rf /var/tmp/work'],
+    ['/private/tmp/work/proj', 'rm -rf /private/tmp/work/proj'],
+    ['/private/tmp/work/proj', 'rm -rf /tmp/work/proj'],
+    ['/private/tmp/work/proj', 'rm -rf /private/tmp/work'],
+    ['/private/var/tmp/work/proj', 'rm -rf /private/var/tmp/work/proj'],
+    ['/tmp/work/proj', 'rm -rf "/tmp/work/proj"'],
+    ['/tmp/work/proj', 'cd /tmp && rm -rf /tmp/work'],
+  ])('keeps the question: in %s, %s', (cwd, command) => {
+    expect(asksIn(command, cwd), `${cwd}: ${command}`).toBe(true);
+  });
+
+  it.each([
+    ['/workspace/project', 'rm -rf /tmp/work/proj'],
+    ['/home/dev/project', 'rm -rf /tmp/work'],
+    ['/tmpx/work', 'rm -rf /tmp/work'],
+    ['/var/tmpx/work', 'rm -rf /tmp/x'],
+    ['/home/dev/tmp/work', 'rm -rf /tmp/x'],
+  ])('is routine where the project is elsewhere: in %s, %s', (cwd, command) => {
+    expect(asksIn(command, cwd), `${cwd}: ${command}`).toBe(false);
+  });
+
+  it('is off for a project under $TMPDIR, and under what $TMPDIR is on this machine', () => {
+    const home = mkdtempSync(join(tmpdir(), 'stroq-temp-project-'));
+    try {
+      vi.stubEnv('TMPDIR', home);
+      mkdirSync(join(home, 'proj'), { recursive: true });
+      const cwd = join(home, 'proj');
+      for (const command of [
+        'rm -rf $TMPDIR/proj',
+        `rm -rf ${cwd}`,
+        `rm -rf ${home}`,
+        `rm -rf ${home}/other`,
+        `rm -rf ${home}/*`,
+        'rm -rf $TMPDIR/other',
+      ])
+        expect(asksIn(command, cwd), command).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+
+  it('is off for a project reached through a link into the temp directory', () => {
+    const home = mkdtempSync(join(tmpdir(), 'stroq-temp-project-'));
+    const outside = mkdtempSync(join(dirname(fileURLToPath(import.meta.url)), 'stroq-link-'));
+    try {
+      vi.stubEnv('TMPDIR', home);
+      mkdirSync(join(home, 'proj'), { recursive: true });
+      symlinkSync(join(home, 'proj'), join(outside, 'here'));
+      expect(asksIn('rm -rf $TMPDIR/proj', join(outside, 'here'))).toBe(true);
+      expect(asksIn(`rm -rf ${join(home, 'proj')}`, join(outside, 'here'))).toBe(true);
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+      rmSync(outside, { recursive: true, force: true });
+    }
+  });
+
+  it('is told by the judgement itself', () => {
+    const system: TempScope = {
+      roots: ['/tmp', '/var/tmp', '/private/tmp', '/private/var/tmp'],
+      tmpdir: null,
+    };
+    const named = (target: string, cwd: string): boolean =>
+      isNamedTempTarget(target, facts(true), cwd, system);
+    expect(named('/tmp/x', '/workspace/project')).toBe(true);
+    expect(named('/tmp/x', '/tmp/work/proj')).toBe(false);
+    expect(named('/tmp/work', '/tmp/work/proj')).toBe(false);
+    expect(named('/tmp/work/proj', '/tmp/work/proj')).toBe(false);
+    expect(named('/tmp/work/other', '/tmp/work/proj')).toBe(false);
+    expect(named('/var/tmp/x', '/tmp/work/proj')).toBe(false);
+  });
+});
+
+/** A target that names a secret keeps the question, wherever it is. */
+describe('a secret under the temp directory', () => {
+  it.each([
+    'rm -rf /tmp/.ssh',
+    'rm -rf /tmp/.ssh/keys',
+    'rm -rf /tmp/id_rsa',
+    'rm -rf /tmp/id_ed25519',
+    'rm -rf /tmp/.env',
+    'rm -rf /tmp/.env.local',
+    'rm -rf /tmp/server.pem',
+    'rm -rf /tmp/server.key',
+    'rm -rf /tmp/.aws',
+    'rm -rf /tmp/a/.aws/credentials',
+    'rm -rf /tmp/.gnupg',
+    'rm -rf /tmp/credentials.json',
+    'rm -rf /tmp/service-account-prod.json',
+    'rm -rf /tmp/terraform.tfstate',
+    'rm -rf /tmp/.npmrc',
+    'rm -rf /tmp/.netrc',
+    'rm -rf /tmp/.git-credentials',
+    'rm -rf /var/tmp/.ssh',
+    'rm -rf "/tmp/.ssh"',
+  ])('keeps the question: %s', (command) => {
+    expect(asks(command), command).toBe(true);
+  });
+});
+
 describe('$TMPDIR', () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'stroq-temp-delete-'));
   afterAll(() => rmSync(tempDir, { recursive: true, force: true }));
