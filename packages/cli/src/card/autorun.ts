@@ -8,7 +8,7 @@
 // findings" and a count of them would be a count of every repository there is.
 import { isFailing, tagChanges } from '../exposure/agent-change.js';
 import { agentSurface } from '../exposure/agent-tree.js';
-import { folderSurface, repoSurface } from '../exposure/repo-surface.js';
+import { folderSurface, repoSurface, type RepoExecHit } from '../exposure/repo-surface.js';
 
 /** One thing in a folder that runs by itself. */
 export interface AutorunItem {
@@ -26,6 +26,38 @@ export interface AutorunRepo {
 
 const MAX_ITEMS = 5;
 
+/**
+ * Hooks git runs only when someone commits, pushes, rebases or applies a patch. `inspect` still
+ * reports them (in a downloaded archive they run on the next such command), but the card's line is
+ * "runs code as soon as an agent opens it", which they do not.
+ */
+const LATER_HOOKS: ReadonlySet<string> = new Set([
+  'applypatch-msg',
+  'pre-applypatch',
+  'post-applypatch',
+  'pre-commit',
+  'pre-merge-commit',
+  'prepare-commit-msg',
+  'commit-msg',
+  'post-commit',
+  'pre-rebase',
+  'post-rewrite',
+  'pre-push',
+  'push-to-checkout',
+  'pre-auto-gc',
+  'sendemail-validate',
+]);
+
+/** Whether a finding runs when an agent opens the folder, rather than when it later commits or pushes. */
+export function runsOnOpen(hit: Pick<RepoExecHit, 'kind' | 'what'>): boolean {
+  if (hit.kind === 'git-hook-routine') {
+    const name = hit.what.split(',')[0]?.trim() ?? '';
+    return !LATER_HOOKS.has(name);
+  }
+  // The key only says where hooks are; the hooks it leads to are judged one by one.
+  return !(hit.kind === 'git-config-exec' && hit.what.toLowerCase() === 'core.hookspath');
+}
+
 /** What the folder runs by itself, or null when it runs nothing. Reads only; runs nothing. */
 export function autorunOf(dir: string): AutorunRepo | null {
   const inRepo = repoSurface(dir);
@@ -39,7 +71,8 @@ export function autorunOf(dir: string): AutorunRepo | null {
     seen.add(key);
     items.push(item);
   };
-  for (const hit of surface.preTrust) add({ kind: hit.kind, file: hit.file, name: hit.what });
+  for (const hit of surface.preTrust.filter(runsOnOpen))
+    add({ kind: hit.kind, file: hit.file, name: hit.what });
   for (const hit of agent) add({ kind: hit.kind, file: hit.file, name: hit.name });
   if (items.length === 0) return null;
   return { dir, items: items.slice(0, MAX_ITEMS), more: Math.max(0, items.length - MAX_ITEMS) };
