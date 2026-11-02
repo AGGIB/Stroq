@@ -29,6 +29,7 @@ Older versions of Stroq stay gated: an agent still cannot run `npx @stroq/cli@<o
 ### Fixed
 
 - **`stroq inspect` no longer reports a git worktree or submodule made on this machine as a planted repository, and reads a worktree's real config.** A `.git` file that points into a real `.git` folder which points back at it is left alone, and the config of that repository is read in its place; any other `.git` file is still a finding.
+- **`stroq inspect` and the card no longer report a folder of ordinary clones for having `.git` folders.** Each clone's `.git` folder is judged by what it would make git run (the commands and includes in its config, the drivers its attributes route through them, the hooks git runs on checkout) and a clean one reports nothing. A bare repository under any other name, a `.git` that is a link, a `.git` file nobody vouches for and a folder that can be entered but not listed are still reported for being there.
 
 ## [0.29.0] - 2026-10-29
 

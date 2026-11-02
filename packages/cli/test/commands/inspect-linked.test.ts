@@ -63,9 +63,9 @@ posix('stroq inspect on a linked worktree', () => {
     expect(root.record).toMatchObject({ isRepo: true, findings: [] });
   });
 
-  it('still reports the .git folder of a repository in the folder it is given, and not its worktree', () => {
+  it('passes a folder that holds a repository and its worktree', () => {
     newWorktree(lab, join(lab.work, 'main'), join(lab.work, 'wt'));
-    expect(details(inspect(lab.work).record)).toEqual(['main/.git']);
+    expect(inspect(lab.work).record.findings).toEqual([]);
   });
 
   it('fails on a command in the config of the repository, named by the real path, at the worktree', () => {

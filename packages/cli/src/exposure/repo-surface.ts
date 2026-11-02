@@ -562,12 +562,23 @@ function nestedBareRepos(
     const names = namesOf(entries);
     const isBare = looksLikeGitDir(new Set(names.keys()));
     if (isBare && (dir !== root || withRoot)) {
+      // A `.git` folder as git makes it is judged by what git would run from it, as a repository is:
+      // that a clone has one is no finding. A bare repository under any other name, or a `.git`
+      // that is not shaped as git makes it, is one by being there.
+      const ordinary = folder && ordinaryGitFolder(dir, io);
       addOnce(hits, seen, [
-        { kind: 'nested-bare-repo', file: labelOf(root, dir, io), what: 'HEAD, objects, refs' },
+        ...(ordinary
+          ? []
+          : [
+              {
+                kind: 'nested-bare-repo' as const,
+                file: labelOf(root, dir, io),
+                what: 'HEAD, objects, refs',
+              },
+            ]),
         ...gitDirConfigHits(root, dir, names, io),
       ]);
-      // A `.git` folder as git makes it is also judged by what git would run from it.
-      if (folder && ordinaryGitFolder(dir, io))
+      if (ordinary)
         addOnce(hits, seen, homeHits(root, gitHomeOf(dirname(dir), undefined), judged, plat, io));
       // The root is walked on: what is under it is all this check reads.
       if (dir !== root) continue;

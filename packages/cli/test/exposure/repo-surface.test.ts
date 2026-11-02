@@ -240,6 +240,9 @@ describe('folderSurface — a folder with no .git', () => {
     expect(lines(folderSurface(root).preTrust)).toContain('git-config-exec CONFIG core.fsmonitor');
   });
 
+  // A `.git` folder shaped as git makes it (HEAD, objects, refs) was reported here for being there.
+  // That a clone has one is no finding now: what it would make git run is (the config below), and a
+  // bare repository under another name, or a `.git` file nobody vouches for, still is by existing.
   it('reports a .git folder or file deeper in, and the commands its config runs', () => {
     const root = folder({
       ...Object.fromEntries(Object.entries(BARE).map(([k, v]) => [`sub/.git/${k}`, v])),
@@ -248,7 +251,6 @@ describe('folderSurface — a folder with no .git', () => {
     });
     expect(lines(folderSurface(root).preTrust)).toEqual([
       'nested-bare-repo other/.git a .git file, which points git at the folder of another repository',
-      'nested-bare-repo sub/.git HEAD, objects, refs',
       'git-config-exec sub/.git/config core.fsmonitor',
     ]);
   });

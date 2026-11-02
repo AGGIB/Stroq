@@ -72,10 +72,9 @@ posix('a linked worktree made by git', () => {
     const main = join(lab.work, 'main');
     newWorktree(lab, main, join(lab.work, 'wt'));
     lab.git(main, 'worktree', 'add', '-q', '.claude/worktrees/x');
-    // The `.git` folder of an ordinary repository in a folder is still reported, as it was.
-    expect(lines(folderSurface(lab.work))).toEqual([
-      'nested-bare-repo main/.git HEAD, objects, refs',
-    ]);
+    // The `.git` folder of an ordinary repository was reported here for being there; it is judged
+    // by what it runs now (see ordinary-clones.test.ts), and this one runs nothing.
+    expect(lines(folderSurface(lab.work))).toEqual([]);
   });
 
   it('is not reported in the folder Claude Code keeps its worktrees in', () => {
@@ -114,8 +113,6 @@ posix('a linked worktree made by git', () => {
     // Inside the folder, the walk of the `.git` folder reports it, and the file adds nothing.
     newWorktree(lab, join(lab.work, 'again'), join(lab.work, 'wt'));
     expect(lines(folderSurface(lab.work))).toEqual([
-      'nested-bare-repo again/.git HEAD, objects, refs',
-      'nested-bare-repo main/.git HEAD, objects, refs',
       'git-config-exec main/.git/config core.fsmonitor',
     ]);
     expect(existsSync(lab.marker)).toBe(false);
@@ -178,7 +175,7 @@ posix('a linked worktree made by git', () => {
     writeFileSync(join(wt, '.git'), `gitdir: ${relative(wt, admin)}\n`);
     writeFileSync(join(admin, 'gitdir'), `${relative(admin, join(wt, '.git'))}\n`);
     expect(linkedGit(join(wt, '.git'), LEGACY_SURFACE_IO)?.kind).toBe('worktree');
-    expect(folderSurface(lab.work).preTrust.map((h) => h.file)).toEqual(['main/.git']);
+    expect(folderSurface(lab.work).preTrust).toEqual([]);
     expect(repoSurface(wt).preTrust).toEqual([]);
   });
 
@@ -211,9 +208,8 @@ posix('a repository a worktree leads to, and what the walk judged of it', () => 
     const hook = join(main, '.git', 'hooks', 'post-checkout');
     writeFileSync(hook, `#!/bin/sh\ntouch ${lab.marker}\n`);
     chmodSync(hook, 0o755);
-    expect(lines(folderSurface(lab.work)).sort()).toEqual([
+    expect(lines(folderSurface(lab.work))).toEqual([
       'git-hook-routine main/.git/hooks/post-checkout post-checkout',
-      'nested-bare-repo main/.git HEAD, objects, refs',
     ]);
     expect(existsSync(lab.marker)).toBe(false);
   });
@@ -270,9 +266,7 @@ posix('a submodule made by git', () => {
 
   it('is not reported in the folder that holds it', () => {
     make();
-    expect(lines(folderSurface(lab.work))).toEqual([
-      'nested-bare-repo super/.git HEAD, objects, refs',
-    ]);
+    expect(lines(folderSurface(lab.work))).toEqual([]);
   });
 
   it('is read at its root, and a hostile key in the config of its module is reported', () => {
