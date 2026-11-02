@@ -2,7 +2,7 @@ import { followedBy, type TextTest } from './followed-by.js';
 import { GIT_OUTPUT_OPTION, SELF_CONFIG_WRITE_COMMANDS, hasFileRedirect } from './self-config.js';
 import { flattened } from './shell-names.js';
 import { commandWord } from './shell-segments.js';
-import { resolve, type Word } from './shell-words.js';
+import { argv, resolve, type Word } from './shell-words.js';
 
 /**
  * Git configuration keys whose value git executes as a command.
@@ -21,6 +21,12 @@ import { resolve, type Word } from './shell-words.js';
  *
  * `include.path` and `includeIf.*.path` execute nothing themselves. They are here
  * because they are how a repository points git at a config file that does.
+ *
+ * The git-lfs keys that name a program are not in this pattern but in `LFS_EXEC_KEY`: a custom
+ * transfer agent's `path`, a standalone transfer agent (for all URLs or for one), and an extension's
+ * `clean` and `smudge`. Git LFS runs them from any `git lfs` command, and its hooks run `git lfs`
+ * on a checkout, a commit, a merge and a push. A subsection is any text, of any length, so they
+ * are read on a whole key, and in a command on its words, never by scanning its text for them.
  */
 export const GIT_EXEC_KEY =
   /\b(core\.(fsmonitor|hookspath|sshcommand|gitproxy|pager|editor|askpass|alternaterefscommand)|sequence\.editor|diff\.external|diff\.[\w-]+\.(textconv|command)|filter\.[\w-]+\.(clean|smudge|process)|merge\.[\w-]+\.driver|(mergetool|difftool)\.[\w-]+\.cmd|credential\.helper|(uploadpack|receivepack)\.[\w.-]+|remote\.[\w.-]+\.(uploadpack|receivepack|vcs)|protocol\.ext\.allow|alias\.[\w-]+|include\.path|includeif\.[^\s=]+\.path)\b/i;
@@ -82,6 +88,19 @@ export const GIT_EXEC_FILE =
 const EXEC_KEY_WHOLE = new RegExp(`^(?:${GIT_EXEC_KEY.source.replace(/^\\b|\\b$/g, '')})$`, 'i');
 
 /**
+ * The git-lfs keys that name a program, whole, with a subsection of any length and any text (a
+ * quoted one may hold dots, slashes and `=`). Anchored at the start and followed by one backtracking
+ * run to the end, so the cost is that of the key. `lfs.customtransfer.<name>.path`,
+ * `lfs.standalonetransferagent` and `lfs.<url>.standalonetransferagent`, and
+ * `lfs.extension.<name>.clean` and `.smudge`.
+ */
+const LFS_KEY =
+  'lfs\\.(?:customtransfer\\.[\\s\\S]*\\.path|(?:[\\s\\S]*\\.)?standalonetransferagent|extension\\.[\\s\\S]*\\.(?:clean|smudge))';
+const LFS_EXEC_KEY = new RegExp(`^${LFS_KEY}$`, 'i');
+/** The same at the start of a word of a command, followed by its value (`key=value`) or by nothing. */
+const LFS_EXEC_KEY_WORD = new RegExp(`^${LFS_KEY}(?:=|$)`, 'i');
+
+/**
  * True for a dotted git configuration key whose value git executes.
  *
  * Takes the key on its own, as an INI parser produces it, rather than a whole command
@@ -89,7 +108,7 @@ const EXEC_KEY_WHOLE = new RegExp(`^(?:${GIT_EXEC_KEY.source.replace(/^\\b|\\b$/
  * `filter.lfs.clean`, not about a segment that happens to mention it.
  */
 export function isGitExecKey(dottedKey: string): boolean {
-  return EXEC_KEY_WHOLE.test(dottedKey);
+  return EXEC_KEY_WHOLE.test(dottedKey) || LFS_EXEC_KEY.test(dottedKey);
 }
 
 /** True for a path a repository can use to make git, or an editor, run a command. */
@@ -256,6 +275,24 @@ function isWriteIntent(segment: string): boolean {
 }
 
 /**
+ * Whether a word of the command is a git-lfs key that runs a program, set or named: alone
+ * (`git config lfs.extension.x.clean …`), before its value (`-c key=value`, `--config-env=key=VAR`,
+ * `GIT_CONFIG_PARAMETERS='key=value'`), or as the value of a variable that names a key
+ * (`GIT_CONFIG_KEY_0=key`). The words are those a shell reads, with their quotes taken off.
+ */
+function namesLfsExecKey(segment: string): boolean {
+  if (!/lfs\./i.test(segment)) return false;
+  return argv(segment).some((word) => {
+    const text = word.value;
+    const eq = text.indexOf('=');
+    const rest = eq === -1 ? '' : text.slice(eq + 1);
+    return [text, rest, rest.replace(/^'/, '')].some((candidate) =>
+      LFS_EXEC_KEY_WORD.test(candidate),
+    );
+  });
+}
+
+/**
  * Signals for `config.git_exec`: the agent is installing repository-supplied
  * execution, either by setting one of the keys above or by writing one of the files
  * that carries them.
@@ -269,6 +306,9 @@ export function gitExecSignals(segments: readonly string[]): string[] {
       GIT_CONFIG_BY_ENVIRONMENT.test(seg);
     if (setsKey && GIT_EXEC_KEY.test(seg)) out.add('git-exec-key');
     if (gitConfigKeys(seg).some((key) => key !== null && isGitExecKey(key)))
+      out.add('git-exec-key');
+    // `-c key=value` sets a key whatever characters the key holds (`GIT_DASH_C` reads only plain ones).
+    if ((setsKey || gitConfigPairs(seg).length > 0) && namesLfsExecKey(seg))
       out.add('git-exec-key');
     if (isWriteIntent(seg) && GIT_EXEC_FILE.test(seg)) out.add('git-exec-file');
     if (

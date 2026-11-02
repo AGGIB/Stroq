@@ -5,7 +5,7 @@ import { isGitExecKey } from '@stroq/core';
 import { INSTALL_SCRIPT_NAMES } from './agent-editor.js';
 import { hookOutcome } from './hook-outcome.js';
 import type { Finding } from './findings.js';
-import { plainHookHits } from './plain-hook-folders.js';
+import { MAX_HOOK_FILES, plainHookHits } from './plain-hook-folders.js';
 import { FILE_NAMES, foldName, gitDirName, looksLikeGitDir } from './git-dir-names.js';
 import { MAX_CONFIG_BYTES, gitConfigEntries, parseGitConfig } from './git-config.js';
 import { linkedGit, ordinaryGitFolder, type LinkedGit } from './linked-git.js';
@@ -105,8 +105,16 @@ function configText(file: string, io: SurfaceReadContext): string | 'missing' | 
   }
 }
 
-/** The keys of a git config that run something, `label` being how the report names the file. */
-function gitConfigHits(file: string, label: string, io: SurfaceReadContext): RepoExecHit[] {
+/**
+ * The keys of a git config that run something, `label` being how the report names the file. A key
+ * `skip` says is left out: it is read, and judged, by the caller.
+ */
+function gitConfigHits(
+  file: string,
+  label: string,
+  io: SurfaceReadContext,
+  skip: (key: string) => boolean = () => false,
+): RepoExecHit[] {
   const hits: RepoExecHit[] = [];
   const text = configText(file, io);
   if (text === 'missing') return hits;
@@ -124,7 +132,7 @@ function gitConfigHits(file: string, label: string, io: SurfaceReadContext): Rep
       what: `${UNREAD_CONFIG_LINE} (line ${line})`,
     });
   for (const { key, value } of config.entries) {
-    if (!isGitExecKey(key)) continue;
+    if (!isGitExecKey(key) || skip(key)) continue;
     if (/^core\.fsmonitor$/i.test(key) && isBoolean(value)) continue;
     const include = /^include(if)?\./i.test(key);
     if (include || (key === 'core.hookspath' && (isAbsolute(value) || /[~$`]/.test(value))))
@@ -190,6 +198,15 @@ function runsAsGitHook(file: string, plat: NodeJS.Platform, io: SurfaceReadConte
   }
 }
 
+/**
+ * How hooks are read in a `.git` folder in a folder that is not a repository (see `gitHookHit`).
+ * `lfsOk` says the scripts Git LFS writes may be let through, which they are only while nothing
+ * sets a git-lfs key that runs a program (see `lfsKeysSet`).
+ */
+interface StrictHooks {
+  readonly lfsOk: boolean;
+}
+
 /** What a hook file that could not be read as text holds: not known, so not ordinary either. */
 const UNREAD_HOOK = '\u0000';
 
@@ -207,13 +224,18 @@ function gitHookHit(
   dir: string,
   name: string,
   io: SurfaceReadContext,
-  strict: boolean,
+  strict?: StrictHooks,
 ): RepoExecHit | undefined {
   const path = join(dir, name);
   const file = labelOf(root, path, io);
   const text = readTextOr(path, UNREAD_HOOK, io);
   const known = text === UNREAD_HOOK ? undefined : text;
-  if (strict && known !== undefined && isStockLfsHook(name, known) && isRegularFile(path, io))
+  if (
+    strict?.lfsOk === true &&
+    known !== undefined &&
+    isStockLfsHook(name, known) &&
+    isRegularFile(path, io)
+  )
     return undefined;
   const outcome = hookOutcome(name, known);
   if (outcome === 'routine') return { kind: 'git-hook-routine', file, what: name };
@@ -223,7 +245,7 @@ function gitHookHit(
       file,
       what: `${name}, whose text downloads and runs code, sends a secret out, or could not be read`,
     };
-  if (strict)
+  if (strict !== undefined)
     return {
       kind: 'git-hook-routine',
       file,
@@ -237,19 +259,28 @@ function gitHookHits(
   dir: string,
   plat: NodeJS.Platform,
   io: SurfaceReadContext,
-  strict = false,
+  strict?: StrictHooks,
 ): RepoExecHit[] {
   if (!io.exists(dir)) return [];
   try {
-    return io
+    const names = io
       .entries(dir)
       .map((entry) => entry.name)
       .filter((name) => !name.endsWith('.sample'))
-      .filter((name) => runsAsGitHook(join(dir, name), plat, io))
-      .flatMap((name) => gitHookHit(root, dir, name, io, strict) ?? []);
+      .filter((name) => runsAsGitHook(join(dir, name), plat, io));
+    // The folder a `core.hooksPath` names can hold anything: the first files are read, and the rest said.
+    const read = strict === undefined ? names : names.slice(0, MAX_HOOK_FILES);
+    const hits = read.flatMap((name) => gitHookHit(root, dir, name, io, strict) ?? []);
+    if (read.length < names.length)
+      hits.push({
+        kind: 'git-hook-routine',
+        file: labelOf(root, dir, io),
+        what: `${names.length - read.length} more hook files, which were not read`,
+      });
+    return hits;
   } catch {
     // A folder of hooks that can be entered but not listed may hold any of them.
-    return strict && mayHideRepository(dir, io)
+    return strict !== undefined && mayHideRepository(dir, io)
       ? [
           {
             kind: 'git-hook-routine',
@@ -353,12 +384,13 @@ function gitDirConfigHits(
   dir: string,
   names: ReadonlyMap<string, readonly string[]>,
   io: SurfaceReadContext,
+  skip?: (key: string) => boolean,
 ): RepoExecHit[] {
   const hits: RepoExecHit[] = [];
   const read = (folder: string, found: ReadonlyMap<string, readonly string[]>) => {
     for (const name of [...(found.get('config') ?? []), ...(found.get('config.worktree') ?? [])]) {
       const file = join(folder, name);
-      hits.push(...gitConfigHits(file, labelOf(root, file, io), io));
+      hits.push(...gitConfigHits(file, labelOf(root, file, io), io, skip));
     }
   };
   read(dir, names);
@@ -416,6 +448,8 @@ function namesIn(dir: string, io: SurfaceReadContext): Map<string, string[]> {
 
 /** The files and folder git reads from the git folder of a checkout. */
 interface GitHome {
+  /** The top of the working tree: where a relative `core.hooksPath` starts, and `.lfsconfig` is. */
+  readonly checkout: string;
   /** The folder that holds the repository: the same for every worktree of it. */
   readonly common: string;
   readonly config: string;
@@ -434,6 +468,7 @@ interface GitHome {
 function gitHomeOf(checkout: string, linked: LinkedGit | undefined): GitHome {
   const common = linked?.common ?? join(checkout, '.git');
   return {
+    checkout,
     common,
     config: join(common, 'config'),
     worktreeConfig: join(linked?.gitdir ?? common, 'config.worktree'),
@@ -476,14 +511,86 @@ const tryRealpath = (path: string, io: SurfaceReadContext): string => {
   }
 };
 
+/** Where a `core.hooksPath` leads from `checkout`; undefined for `~`, which the home folder decides. */
+function hooksFolder(value: string, checkout: string): string | undefined {
+  if (value.startsWith('~')) return undefined;
+  return isAbsolute(value) ? resolve(value) : resolve(checkout, value);
+}
+
+/** Whether two paths are one folder: by name, by real path, or by the file system's own identity. */
+function samePath(a: string, b: string, io: SurfaceReadContext): boolean {
+  if (a === b) return true;
+  const [x, y] = [tryRealpath(a, io), tryRealpath(b, io)];
+  if (x === y) return true;
+  try {
+    const [p, q] = [io.lstat(x), io.lstat(y)];
+    return p.ino !== 0 && p.ino === q.ino && p.dev === q.dev;
+  } catch {
+    return false;
+  }
+}
+
+/** A key of git-lfs that names a program to run (see `GIT_EXEC_KEY`), in the form a config gives it. */
+const isLfsExecKey = (key: string): boolean => /^lfs\./i.test(key) && isGitExecKey(key);
+
+/**
+ * Whether a key that makes Git LFS run a program may be set for this checkout: in the repository's
+ * config or `config.worktree`, or in the `.lfsconfig` at the top of the working tree. A file that
+ * cannot be read or parsed, or an include that brings in a file that is not read here, may set one,
+ * so it counts. A stock LFS hook runs `git lfs`, which obeys such a key, so it is let through only
+ * when this is false.
+ */
+function lfsKeysSet(home: GitHome, io: SurfaceReadContext): boolean {
+  return [home.config, home.worktreeConfig, join(home.checkout, '.lfsconfig')].some((file) => {
+    const text = configText(file, io);
+    if (text === 'missing') return false;
+    if (text === 'unread') return true;
+    const config = parseGitConfig(text);
+    return (
+      config.unplaced.length > 0 ||
+      config.entries.some(({ key }) => isLfsExecKey(key) || /^include(if)?\./i.test(key))
+    );
+  });
+}
+
+/**
+ * `core.hooksPath` sends git to a folder of hooks. In a folder that is not a repository that folder
+ * is the checkout's or the archive's own, so the key is a finding unless it names the repository's
+ * own `.git/hooks` (whatever way it spells it), and the executable hooks of the folder it names are
+ * judged as those of `.git/hooks` are. A relative path starts at the top of the working tree, so
+ * this is done for each checkout of a repository.
+ */
+function hooksPathHits(
+  root: string,
+  home: GitHome,
+  strict: StrictHooks,
+  plat: NodeJS.Platform,
+  io: SurfaceReadContext,
+): RepoExecHit[] {
+  const hits: RepoExecHit[] = [];
+  for (const file of [home.config, home.worktreeConfig]) {
+    for (const { key, value } of parseGitConfig(readTextOr(file, '', io)).entries) {
+      if (key !== 'core.hookspath') continue;
+      const folder = hooksFolder(value, home.checkout);
+      if (folder !== undefined && samePath(folder, home.hooks, io)) continue;
+      hits.push({ kind: 'git-config-exec', file: labelOf(root, file, io), what: key });
+      if (folder !== undefined) hits.push(...gitHookHits(root, folder, plat, io, strict));
+    }
+  }
+  return hits;
+}
+
 /**
  * What git would run from the git folder of one checkout: the commands its configs name, the
- * drivers its attributes route through them, and its executable hooks, all of them (`strict`, in
- * `gitHookHit`: an archive makes a `.git` folder as git does). `judged` holds the
- * real paths of the git folders whose `config` and hooks were read already, in this walk; those are
- * not read again, and the checkout's own `config.worktree` and attributes are. Coverage is only
- * what was read, never where a folder lies: a repository in a folder the walk does not enter, or
- * past its cap, is not in `judged`, and is read here.
+ * git-lfs keys that run a program (in the configs and in the `.lfsconfig` at the top of the working
+ * tree), the hooks a `core.hooksPath` names, the drivers its attributes route through them, and its
+ * executable hooks, all of them (`strict`, in `gitHookHit`: an archive makes a `.git` folder as git
+ * does). `judged` holds the real paths of the git folders whose shared `config` was read already,
+ * in this walk; that is not read again. Everything that depends on the checkout is: its
+ * `config.worktree`, its `.lfsconfig`, where a relative `core.hooksPath` leads, its attributes, and
+ * whether the scripts Git LFS wrote may be let through. Coverage is only what was read, never where
+ * a folder lies: a repository in a folder the walk does not enter, or past its cap, is not in
+ * `judged`, and is read here.
  */
 function homeHits(
   root: string,
@@ -495,12 +602,18 @@ function homeHits(
   const real = tryRealpath(home.common, io);
   const first = !judged.has(real);
   judged.add(real);
-  const configHits = (file: string) => gitConfigHits(file, labelOf(root, file, io), io);
+  const strict: StrictHooks = { lfsOk: !lfsKeysSet(home, io) };
+  // `core.hooksPath` is judged by `hooksPathHits`, which knows where the checkout is.
+  const configHits = (file: string) =>
+    gitConfigHits(file, labelOf(root, file, io), io, (key) => key === 'core.hookspath');
+  const lfsconfig = join(home.checkout, '.lfsconfig');
   return [
     ...(first ? configHits(home.config) : []),
     ...configHits(home.worktreeConfig),
+    ...gitConfigHits(lfsconfig, labelOf(root, lfsconfig, io), io, (key) => !isLfsExecKey(key)),
+    ...hooksPathHits(root, home, strict, plat, io),
     ...gitAttributesHits(root, [home.config, home.worktreeConfig], home.attributes, io),
-    ...(first ? gitHookHits(root, home.hooks, plat, io, true) : []),
+    ...gitHookHits(root, home.hooks, plat, io, strict),
   ];
 }
 
@@ -617,7 +730,14 @@ function nestedBareRepos(
                 what: 'HEAD, objects, refs',
               },
             ]),
-        ...gitDirConfigHits(root, dir, names, io),
+        // `core.hooksPath` of a `.git` folder as git makes it is judged where its checkout is known.
+        ...gitDirConfigHits(
+          root,
+          dir,
+          names,
+          io,
+          ordinary ? (key) => key === 'core.hookspath' : undefined,
+        ),
       ]);
       if (ordinary)
         addOnce(hits, seen, homeHits(root, gitHomeOf(dirname(dir), undefined), judged, plat, io));

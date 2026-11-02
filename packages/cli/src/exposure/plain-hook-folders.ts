@@ -173,7 +173,7 @@ const PLAIN_PATH = /^[A-Za-z0-9._@+-]+(?:\/[A-Za-z0-9._@+-]+)*\/?$/;
 /** The most bytes of one hook read; a longer one is not read, and fails. */
 const MAX_HOOK_BYTES = 256 * 1024;
 /** The most files of one folder read; past them, one finding fails. */
-const MAX_HOOK_FILES = 200;
+export const MAX_HOOK_FILES = 200;
 
 /** Why a commit hook fails before anyone commits. */
 const RUNS_ON_COMMIT =
