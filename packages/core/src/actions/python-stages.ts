@@ -1,8 +1,8 @@
 import { inlinePython, type PipeConsumer } from './pipe-consumer.js';
+import { printsOnly } from './print-only.js';
 import { quote, readPythonProcesses, type PythonProcess } from './python-processes.js';
 import type { Lexed, Stage } from './shell-lex.js';
 import { argv } from './shell-word-reader.js';
-import { resolve } from './shell-words.js';
 
 /**
  * The stages of a command that give Python a program with `-c`, each read for the processes it
@@ -39,15 +39,6 @@ const STARTS_A_PROCESS =
   /(?:subprocess|popen|Popen|system|spawn|exec[lv]|fork|check_output|check_call|getoutput|startfile|pty)/;
 /** A redirect that gives a command input: `<`, `<<`, `<<<`, `<&`, `<>`, with or without a descriptor. */
 const INPUT_REDIRECT = /^\d*<(?:<<|<-|<|&|>)?/;
-/** `2>&1`, `>&2`, `1>&-`: output sent to another descriptor, not to a file. */
-const DESCRIPTOR_COPY = /^\d*>&(?:\d+-?|-)$/;
-/** `>&` or `2>&` alone: the word after it is the descriptor, or the file. */
-const COPY_OPERATOR = /^\d*>&$/;
-const DESCRIPTOR = /^(?:\d+-?|-)$/;
-/** `1<>x` opens a file for reading and writing as the descriptor: output can go to it. */
-const READ_WRITE_REDIRECT = /^\d*<>/;
-/** `>x`, `2>>x`, `&>x`, `>|x`, with its target glued on or not. */
-const OUTPUT_REDIRECT = /^(?:\d*|&)>[>|]?(.*)$/;
 /**
  * The words of a stage beside its program that hold nothing to run: a name, a path, an option, an
  * assignment of a plain value, an output redirect. A stage with anything else beside its program
@@ -97,105 +88,6 @@ export function pythonCommandTexts(lexed: Lexed): string[] {
   return out;
 }
 
-/**
- * A redirect of a stage's output to anything but `/dev/null` or another descriptor (`2>&1`): the file may be
- * a script that is run next. A `>&` or `2>&` alone takes the next word, which is a descriptor or a file.
- */
-function redirectsOutput(text: string): boolean {
-  const words = argv(text);
-  return words.some((word, i) => {
-    if (!word.redirect) return false;
-    if (READ_WRITE_REDIRECT.test(word.value)) return true;
-    if (INPUT_REDIRECT.test(word.value) || DESCRIPTOR_COPY.test(word.value)) return false;
-    if (COPY_OPERATOR.test(word.value)) {
-      const next = words[i + 1]?.value;
-      return next === undefined || !(DESCRIPTOR.test(next) || next === '/dev/null');
-    }
-    const glued = OUTPUT_REDIRECT.exec(word.value)?.[1];
-    const target = glued !== undefined && glued !== '' ? glued : words[i + 1]?.value;
-    return target !== '/dev/null';
-  });
-}
-
-/**
- * Whether what a stage prints may be taken by something that runs it or keeps it: it is read out of a
- * substitution or a body (where its output goes is not kept), a redirect of output stands anywhere in the
- * command or in a text read from it (`exec >f`, `{ …; } > f`, `done > f` apply to the commands before them),
- * or a stage after it is not a filter that only prints.
- */
-function outputLeaves(
-  textIndex: number,
-  redirected: boolean,
-  pipeline: readonly Stage[],
-  at: number,
-  consumer: (command: string) => PipeConsumer,
-): boolean {
-  if (textIndex > 0 || redirected) return true;
-  return pipeline
-    .slice(at + 1)
-    .some((stage) => !(consumer(stage.text) === 'none' && onlyFilters(stage.text)));
-}
-
-/**
- * Programs that print what they filter and write no file of their own: not `tee`, `sponge`, `split`, which
- * are as much readers as `head` is, nor `uniq`, which takes the file to write as an operand.
- */
-const FILTERS: ReadonlySet<string> = new Set([
-  'head',
-  'tail',
-  'grep',
-  'egrep',
-  'fgrep',
-  'rg',
-  'wc',
-  'cut',
-  'tr',
-  'sort',
-  'cat',
-  'nl',
-  'fold',
-  'tac',
-  'rev',
-  'column',
-  'jq',
-]);
-/** `-o`, `-ro`, `--output=f`, and any prefix of the long option getopt reads as it (`--o`, `--outp f`). */
-const SORT_OUTPUT = /^-[A-Za-z]*o|^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(?:=|$)/;
-
-/**
- * Builtins that run text of their own in the shell of the line (`source <(…)`, `trap '…' EXIT`, `eval "$x"`),
- * where an `exec >f` may be. How a stage reaches one through `builtin`, `command`, `noglob`, `time`, `env` and
- * the like is read by `resolve`, the one reading of wrappers that the classifier has.
- */
-const RUNS_TEXT: ReadonlySet<string> = new Set(['.', 'source', 'eval', 'trap', 'fc', 'emulate']);
-
-/**
- * The stage redirects its output, or may run text that does: a builtin that runs text, a command word that is
- * an expansion, wrappers nested deeper than they are read, or an `exec` given a redirect (it changes the
- * descriptors of the shell for the rest of the line, whatever it is copied from).
- */
-function mayRedirectOutput(text: string): boolean {
-  if (redirectsOutput(text)) return true;
-  const found = resolve(text);
-  if (found === null) return false;
-  if (found.deep || found.evalProgram !== null || found.name.startsWith('$')) return true;
-  if (found.wrappers.includes('eval') || RUNS_TEXT.has(found.name)) return true;
-  const execs = found.name === 'exec' || found.wrappers.includes('exec');
-  return execs && argv(text).some((word) => word.redirect);
-}
-
-/**
- * The stage is one of `FILTERS`, by that name as it stands (not through a wrapper, a path or a variable set
- * for it) and with no option that names a file to write (`sort -o`).
- */
-function onlyFilters(text: string): boolean {
-  const found = resolve(text);
-  if (found === null || found.deep || found.assigned === true || found.wrappers.length > 0)
-    return false;
-  if (found.word !== found.name || !FILTERS.has(found.name)) return false;
-  return !(found.name === 'sort' && argv(text).some((word) => SORT_OUTPUT.test(word.value)));
-}
-
 /** Whether a stage is given input: a pipe into it, a here-document, or an input redirect. */
 function givenInput(stage: Stage): boolean {
   if (stage.piped || stage.heredoc !== null) return true;
@@ -236,14 +128,6 @@ export function readPythonStages(context: PythonStageContext): PythonStages {
     process.stdin === 'none' ||
     (process.stdin === 'inherit' && !input) ||
     (!MORE_THAN_ONE_COMMAND.test(process.command) && consumer(process.command) === 'none');
-  // Whether any stage of any text redirects its output, read once. A text read out of the command (an `eval`
-  // body, a `.` or `source` body) runs in the same shell as the command, and an `exec >f` or a closer with a
-  // redirect in one of them applies to the commands of the others.
-  let redirectedSomewhere: boolean | undefined;
-  const redirected = (): boolean =>
-    (redirectedSomewhere ??= stages.some((pipelines) =>
-      pipelines.some((pipeline) => pipeline.some((stage) => mayRedirectOutput(stage.text))),
-    ));
   stages.forEach((pipelines, textIndex) => {
     for (const [pipeline, at, stage] of pipelines.flatMap((p) =>
       p.map((s, i) => [p, i, s] as const),
@@ -275,10 +159,9 @@ export function readPythonStages(context: PythonStageContext): PythonStages {
         // the pattern would stop is the commands, and those are read here and judged as the commands they are.
         (seen && reading.unknownModules && reading.processes.length === 0) ||
         (reading.opaque && (reading.processes.length > 0 || seen)) ||
-        // What it decodes goes to its output; where that goes is known only when nothing takes it.
-        (reading.decodes &&
-          seen &&
-          outputLeaves(textIndex, redirected(), pipeline, at, consumer)) ||
+        // What it decodes goes to its output; where that goes is known only when the line is that one program
+        // and filters that print (`print-only.ts`).
+        (reading.decodes && seen && !printsOnly(stages, textIndex, pipeline, at)) ||
         !reading.processes.every((process) => readsOnly(process, input));
       if (notRead) {
         if (seen) signals.push(PAYLOAD);

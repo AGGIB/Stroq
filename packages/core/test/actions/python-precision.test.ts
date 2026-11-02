@@ -171,33 +171,123 @@ describe('decoded data that can reach a place that runs it is encoded execution'
   });
 });
 
-describe('decoded data that leaves the program by its output', () => {
+/**
+ * A decoding program is read as one that only prints just when the whole command is one pipeline: Python
+ * given a literal program, then read-only filters, and no redirect but those to /dev/null and `2>&1`.
+ * Every other shape keeps the answer it had on main (`print-only.ts`).
+ */
+describe('a decoding program that only prints', () => {
   const printed = `python3 -c "import base64; print(base64.b64decode('ZWNobyBoaQ==').decode())"`;
+  const PROGRAM = `"import base64; print(base64.b64decode('ZWNobyBoaQ==').decode())"`;
 
   it.each([
+    printed,
+    `${printed} 2>&1`,
+    `${printed} >/dev/null`,
+    `${printed} > /dev/null`,
+    `${printed} 2>/dev/null`,
+    `${printed} 2> /dev/null`,
+    `${printed} 2>&1 | head -2`,
+    `${printed} | head -5`,
+    `${printed} | head -n 5`,
+    `${printed} | tail -3`,
+    `${printed} | grep hi`,
+    `${printed} | grep -v hi`,
+    `${printed} | wc -l`,
+    `${printed} | sort`,
+    `${printed} | sort -rn | head -3`,
+    `${printed} | uniq -c`,
+    `${printed} | cut -d, -f1`,
+    `${printed} | tr a-z A-Z`,
+    `${printed} | jq .`,
+    `${printed} | less -R`,
+    `${printed} | cat`,
+    `${printed} | cat -n`,
+    `${printed} | head -1 > /dev/null`,
+    `python ${'-c'} ${PROGRAM}`,
+    `python3 -I -c ${PROGRAM}`,
+    `python3 -S -E -B -u -c ${PROGRAM}`,
+    `python3 -I -S -c ${PROGRAM} | head -1`,
+  ])('is read as it is: %s', (command) => {
+    expect(classes(command), command).toEqual([]);
+  });
+
+  it('is the Terminal-Pivot program', () => {
+    expect(classes(TERMINAL_PIVOT_JWT)).toEqual([]);
+  });
+
+  it.each([
+    // The output goes to the next command, which runs it, or to a file.
     `${printed} | sh`,
     `${printed} | bash`,
     `${printed} | python3`,
     `${printed} | xargs -I{} sh -c {}`,
     `${printed} | tee x.sh`,
+    `${printed} | tee /dev/null`,
     `${printed} | head -1 | sh`,
+    `${printed} | sponge x.sh`,
+    `${printed} | /tmp/head`,
+    `${printed} | command head -1`,
+    `${printed} | env head -1`,
+    `${printed} | PATH=./bin head -1`,
+    `${printed} | head -1 | tee x.sh`,
+    // Filters with an option that names a file or a program.
+    `${printed} | sort -o out.sh`,
+    `${printed} | sort -ro out.sh`,
+    `${printed} | sort -k1,1 -o out.sh`,
+    `${printed} | sort --o out.sh`,
+    `${printed} | sort --ou=out.sh`,
+    `${printed} | sort --outp out.sh`,
+    `${printed} | sort --outpu=out.sh`,
+    `${printed} | sort --output=out.sh`,
+    `${printed} | sort --compress-program=sh`,
+    `${printed} | sort --comp=sh`,
+    `${printed} | uniq in out.sh`,
+    `${printed} | uniq - out.sh`,
+    `${printed} | cat x.sh`,
+    `${printed} | cat > x.sh`,
+    `${printed} | less -o out.sh`,
+    `${printed} | less --log-file=out.sh`,
+    `${printed} | less -R x`,
+    // A redirect that is not one of the three.
     `${printed} > x.sh && sh x.sh`,
     `${printed} >> ~/.bashrc`,
     `${printed} | sort > out.txt`,
-    `${printed} | sort -o out.sh`,
-    `${printed} | uniq in out.sh`,
-    `${printed} | sponge x.sh`,
-    `${printed} | /tmp/head`,
     `${printed} 2> err.sh`,
     `${printed} &> out.sh`,
+    `${printed} &>/dev/null`,
     `${printed} >| out.sh`,
-    // A bare `>&` or `N>&` takes the next word as a file, unless it is a descriptor.
     `${printed} >& out.sh`,
     `${printed} 2>& out.sh`,
     `${printed} >&out.sh`,
     `${printed} &>> out.sh`,
     `${printed} 1<>out.sh`,
-    // An output redirect that stands elsewhere on the line may apply to it.
+    `${printed} >& 2`,
+    `${printed} 2>& 1`,
+    `${printed} 2>&-`,
+    `${printed} >& /dev/null`,
+    `${printed} >>/dev/null`,
+    `${printed} > /dev/null/x`,
+    `${printed} < /dev/null`,
+    `${printed} <<< hi`,
+    // Another command on the line, before it, after it or around it.
+    `${printed}; echo done`,
+    `${printed} && sh`,
+    `${printed} || sh`,
+    `${printed} &`,
+    `${printed}\nsh`,
+    `echo hi > notes.txt; ${printed}`,
+    `cd /workspace/project && ${printed}`,
+    `FOO=1 ${printed}`,
+    `env ${printed}`,
+    `command ${printed}`,
+    `time ${printed}`,
+    `exec ${printed}`,
+    `builtin ${printed}`,
+    `nohup ${printed}`,
+    `( ${printed} )`,
+    `{ ${printed}; }`,
+    `! ${printed}`,
     `exec >out.sh; ${printed}`,
     `exec 1>out.sh && ${printed}`,
     `{ ${printed}; } > out.sh`,
@@ -207,89 +297,45 @@ describe('decoded data that leaves the program by its output', () => {
     `while true; do ${printed}; break; done > out.sh`,
     `if true; then ${printed}; fi > out.sh`,
     `case x in x) ${printed};; esac > out.sh`,
-    `echo hi > notes.txt; ${printed}`,
-    // `sort` takes the file of `--output` by any prefix of the option.
-    `${printed} | sort --o out.sh`,
-    `${printed} | sort --ou=out.sh`,
-    `${printed} | sort --outp out.sh`,
-    `${printed} | sort --outpu=out.sh`,
-    `${printed} | sort --output=out.sh`,
-    `${printed} | sort -k1,1 -o out.sh`,
-    `${printed} | sort -ro out.sh`,
+    // Text another builtin runs in the shell of the line.
+    `eval 'exec >out.sh'; ${printed}`,
+    `builtin eval 'exec >out.sh'; ${printed}`,
+    `command eval 'exec >out.sh'; ${printed}`,
+    `command . ./x; ${printed}`,
+    `command source ./x; ${printed}`,
+    `noglob eval 'exec >out.sh'; ${printed}`,
+    `source <(echo 'exec >out.sh'); ${printed}`,
+    `trap 'exec >out.sh' EXIT; ${printed}`,
+    `fc -s; ${printed}`,
+    `emulate -c 'exec >out.sh'; ${printed}`,
+    `mapfile -C 'exec >out.sh' -c 1 a < /dev/null; ${printed}`,
+    `readarray -C ./x -c 1 a < /dev/null; ${printed}`,
+    `enable -f ./x.so name; ${printed}`,
+    `autoload -U x; ${printed}`,
+    `zmodload zsh/files; ${printed}`,
+    `x=eval; $x 'exec >out.sh'; ${printed}`,
+    // The output of the whole line, or of a text read from it.
     `sh -c "$(${printed})"`,
     `eval "$(${printed})"`,
     `bash <(${printed})`,
     `v=$(${printed})`,
+    `echo $(${printed})`,
     `bash -c '${printed.replaceAll("'", "'\\''")}'`,
-  ])('is encoded execution: %s', (command) => {
+    `eval '${printed.replaceAll("'", "'\\''")}'`,
+    // A program or a word that is not the literal shape.
+    `python3 -c ${PROGRAM} ZWNobyBoaQ==`,
+    `python3 -c ${PROGRAM} x`,
+    `python3 -Ic ${PROGRAM}`,
+    `python3.12 -c ${PROGRAM}`,
+    `python3 -W error -c ${PROGRAM}`,
+    `python3 -X dev -c ${PROGRAM}`,
+    `/usr/bin/python3 -c ${PROGRAM}`,
+    `./python3 -c ${PROGRAM}`,
+    `PYTHONSTARTUP=./x python3 -c ${PROGRAM}`,
+    `python3 -c "import base64; print(base64.b64decode('$X'))"`,
+    `python3 -c "import base64; print(base64.b64decode('\`id\`'))"`,
+  ])('keeps the deny of main: %s', (command) => {
     expect(denied(command), command).toBe(true);
-  });
-
-  it.each([
-    printed,
-    `${printed} 2>&1`,
-    `${printed} > /dev/null`,
-    `${printed} 2>/dev/null`,
-    `${printed} 2>& 1`,
-    `${printed} >& 2`,
-    `${printed} 2>&-`,
-    `${printed} 2>& -`,
-    `${printed} >& /dev/null`,
-    `${printed} 2>&1 | head -2`,
-    `${printed} &>/dev/null`,
-    `${printed} | head -5`,
-    `${printed} | grep hi`,
-    `${printed} | wc -l`,
-    `${printed} | sort -rn | head -3`,
-    `${printed}; echo done`,
-    `cd /workspace/project && ${printed}`,
-  ])('is not, where nothing takes it: %s', (command) => {
-    expect(classes(command), command).toEqual([]);
-  });
-});
-
-describe('a redirect in another text of the line, which runs in the same shell', () => {
-  // `eval`, `.` and `source` read text that the shell runs itself: an `exec >f` in it applies to the rest.
-  const bare = `python3 -c "import base64,sys; print(base64.b64decode(sys.argv[1]))" ZWNobyBoaQ==`;
-
-  it.each([
-    `exec >out.sh; eval '${bare}'`,
-    `eval 'exec >out.sh'; ${bare}`,
-    `eval 'exec 1>out.sh' && ${bare}`,
-    `eval '{ ${bare}; } > out.sh'`,
-    `eval 'for i in 1; do :; done > out.sh'; ${bare}`,
-    `source <(echo 'exec >out.sh'); ${bare}`,
-    `. <(echo 'exec >out.sh'); ${bare}`,
-    `eval 'exec >out.sh'; eval '${bare}'`,
-    `bash -c 'exec >out.sh'; ${bare}`,
-    `sh -c 'done > out.sh'; ${bare}`,
-    // A builtin that runs text, however it is reached through the words that pass it on.
-    `builtin eval 'exec >out.sh'; ${bare}`,
-    `command eval 'exec >out.sh'; ${bare}`,
-    `command . ./x; ${bare}`,
-    `command source ./x; ${bare}`,
-    `builtin source ./x; ${bare}`,
-    `noglob eval 'exec >out.sh'; ${bare}`,
-    `time source ./x; ${bare}`,
-    `env -i FOO=1 eval 'exec >out.sh'; ${bare}`,
-    `FOO=1 . ./x; ${bare}`,
-    `trap 'exec >out.sh' EXIT; ${bare}`,
-    `fc -s; ${bare}`,
-    `emulate -c 'exec >out.sh'; ${bare}`,
-    `x=eval; $x 'exec >out.sh'; ${bare}`,
-    `"eval" 'exec >out.sh'; ${bare}`,
-    `\\eval 'exec >out.sh'; ${bare}`,
-    `exec 3>out.sh; ${bare}`,
-    `exec > out.sh; ${bare}`,
-    `exec &>out.sh; ${bare}`,
-    `exec >&3; ${bare}`,
-  ])('keeps the deny: %s', (command) => {
-    expect(denied(command), command).toBe(true);
-  });
-
-  it('stays allowed with no redirect anywhere', () => {
-    expect(classes(bare)).toEqual([]);
-    expect(classes(`${bare} 2>&1`)).toEqual([]);
   });
 });
 

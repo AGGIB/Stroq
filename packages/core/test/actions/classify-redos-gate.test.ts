@@ -155,6 +155,15 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
   ['python decoder, bare descriptor operators', (r) => `python3 -c 'import base64' ${r('>& ')}`],
   ['python decoder, read-write redirects', (r) => `python3 -c 'import base64' ${r('1<>x ')}`],
   ['python decoder, long sort options', (r) => `python3 -c 'import base64' | sort ${r('--o')}`],
+  ['python decoder, head counts', (r) => `python3 -c 'import base64' | head ${r('-n 1 ')}`],
+  ['python decoder, uniq flags', (r) => `python3 -c 'import base64' | uniq ${r('-c')}`],
+  ['python decoder, cat flags', (r) => `python3 -c 'import base64' | cat ${r('-n ')}`],
+  ['python decoder, interpreter flags', (r) => `python3 ${r('-I ')}-c 'import base64'`],
+  ['python decoder, null redirects', (r) => `python3 -c 'import base64' ${r('2>/dev/null ')}`],
+  [
+    'python decoder, split null redirects',
+    (r) => `python3 -c 'import base64' ${r('> /dev/null ')}`,
+  ],
   [
     'python decoder, redirects before it',
     (r) => `${r('exec >/dev/null; ')}python3 -c 'import base64'`,
