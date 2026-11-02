@@ -39,7 +39,12 @@ const STARTS_A_PROCESS =
 /** A redirect that gives a command input: `<`, `<<`, `<<<`, `<&`, `<>`, with or without a descriptor. */
 const INPUT_REDIRECT = /^\d*<(?:<<|<-|<|&|>)?/;
 /** `2>&1`, `>&2`, `1>&-`: output sent to another descriptor, not to a file. */
-const DESCRIPTOR_COPY = /^\d*>&\d*-?$/;
+const DESCRIPTOR_COPY = /^\d*>&(?:\d+-?|-)$/;
+/** `>&` or `2>&` alone: the word after it is the descriptor, or the file. */
+const COPY_OPERATOR = /^\d*>&$/;
+const DESCRIPTOR = /^(?:\d+-?|-)$/;
+/** `1<>x` opens a file for reading and writing as the descriptor: output can go to it. */
+const READ_WRITE_REDIRECT = /^\d*<>/;
 /** `>x`, `2>>x`, `&>x`, `>|x`, with its target glued on or not. */
 const OUTPUT_REDIRECT = /^(?:\d*|&)>[>|]?(.*)$/;
 /**
@@ -93,13 +98,18 @@ export function pythonCommandTexts(lexed: Lexed): string[] {
 
 /**
  * A redirect of a stage's output to anything but `/dev/null` or another descriptor (`2>&1`): the file may be
- * a script that is run next.
+ * a script that is run next. A `>&` or `2>&` alone takes the next word, which is a descriptor or a file.
  */
 function redirectsOutput(text: string): boolean {
   const words = argv(text);
   return words.some((word, i) => {
-    if (!word.redirect || INPUT_REDIRECT.test(word.value) || DESCRIPTOR_COPY.test(word.value))
-      return false;
+    if (!word.redirect) return false;
+    if (READ_WRITE_REDIRECT.test(word.value)) return true;
+    if (INPUT_REDIRECT.test(word.value) || DESCRIPTOR_COPY.test(word.value)) return false;
+    if (COPY_OPERATOR.test(word.value)) {
+      const next = words[i + 1]?.value;
+      return next === undefined || !(DESCRIPTOR.test(next) || next === '/dev/null');
+    }
     const glued = OUTPUT_REDIRECT.exec(word.value)?.[1];
     const target = glued !== undefined && glued !== '' ? glued : words[i + 1]?.value;
     return target !== '/dev/null';
@@ -108,23 +118,21 @@ function redirectsOutput(text: string): boolean {
 
 /**
  * Whether what a stage prints may be taken by something that runs it or keeps it: it is read out of a
- * substitution or a body (where its output goes is not kept), a stage after it is not known to only read,
- * or the output of any stage from it on is written to a file.
+ * substitution or a body (where its output goes is not kept), a redirect of output stands anywhere on the
+ * line (`exec >f`, `{ …; } > f`, `done > f` apply to the commands before them), or a stage after it is
+ * not a filter that only prints.
  */
 function outputLeaves(
   textIndex: number,
+  redirected: boolean,
   pipeline: readonly Stage[],
   at: number,
   consumer: (command: string) => PipeConsumer,
 ): boolean {
-  if (textIndex > 0) return true;
+  if (textIndex > 0 || redirected) return true;
   return pipeline
-    .slice(at)
-    .some(
-      (stage, i) =>
-        redirectsOutput(stage.text) ||
-        (i > 0 && !(consumer(stage.text) === 'none' && onlyFilters(stage.text))),
-    );
+    .slice(at + 1)
+    .some((stage) => !(consumer(stage.text) === 'none' && onlyFilters(stage.text)));
 }
 
 /**
@@ -151,13 +159,15 @@ const FILTERS: ReadonlySet<string> = new Set([
   'jq',
 ]);
 const ASSIGNMENT_WORD = /^[A-Za-z_]\w*=/;
+/** `-o`, `-ro`, `--output=f`, and any prefix of the long option getopt reads as it (`--o`, `--outp f`). */
+const SORT_OUTPUT = /^-[A-Za-z]*o|^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(?:=|$)/;
 
 /** The stage is one of `FILTERS`, by that name and with no option that names a file to write (`sort -o`). */
 function onlyFilters(text: string): boolean {
   const words = argv(text).filter((word) => !word.redirect);
   const first = words.find((word) => !ASSIGNMENT_WORD.test(word.value));
   if (first === undefined || !FILTERS.has(first.value)) return false;
-  return !words.some((word) => /^-[A-Za-z]*o|^--output/.test(word.value) && first.value === 'sort');
+  return !(first.value === 'sort' && words.some((word) => SORT_OUTPUT.test(word.value)));
 }
 
 /** Whether a stage is given input: a pipe into it, a here-document, or an input redirect. */
@@ -200,6 +210,18 @@ export function readPythonStages(context: PythonStageContext): PythonStages {
     process.stdin === 'none' ||
     (process.stdin === 'inherit' && !input) ||
     (!MORE_THAN_ONE_COMMAND.test(process.command) && consumer(process.command) === 'none');
+  // Whether any stage of a text redirects its output, read once for the text.
+  const redirectsOf = new Map<number, boolean>();
+  const redirected = (textIndex: number): boolean => {
+    let found = redirectsOf.get(textIndex);
+    if (found === undefined) {
+      found = (stages[textIndex] ?? []).some((pipeline) =>
+        pipeline.some((stage) => redirectsOutput(stage.text)),
+      );
+      redirectsOf.set(textIndex, found);
+    }
+    return found;
+  };
   stages.forEach((pipelines, textIndex) => {
     for (const [pipeline, at, stage] of pipelines.flatMap((p) =>
       p.map((s, i) => [p, i, s] as const),
@@ -232,7 +254,9 @@ export function readPythonStages(context: PythonStageContext): PythonStages {
         (seen && reading.unknownModules && reading.processes.length === 0) ||
         (reading.opaque && (reading.processes.length > 0 || seen)) ||
         // What it decodes goes to its output; where that goes is known only when nothing takes it.
-        (reading.decodes && seen && outputLeaves(textIndex, pipeline, at, consumer)) ||
+        (reading.decodes &&
+          seen &&
+          outputLeaves(textIndex, redirected(textIndex), pipeline, at, consumer)) ||
         !reading.processes.every((process) => readsOnly(process, input));
       if (notRead) {
         if (seen) signals.push(PAYLOAD);
