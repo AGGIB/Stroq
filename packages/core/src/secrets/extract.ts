@@ -295,10 +295,17 @@ export function extractDockerAuths(text: string): ExtractedSecret[] {
   });
 }
 
+/**
+ * Variables a shell or terminal sets for itself under a key-like name, whose value is no secret:
+ * Starship sets `STARSHIP_SESSION_KEY` to a random number per shell, for its own log files. Matched
+ * exactly; a variable a person names like it is not on the list.
+ */
+const NOT_SECRET_ENV: ReadonlySet<string> = new Set(['STARSHIP_SESSION_KEY']);
+
 /** Environment variables whose names or values look credential-like. */
 export function extractEnv(env: Readonly<Record<string, string | undefined>>): ExtractedSecret[] {
   return Object.entries(env).flatMap(([name, value]) => {
-    if (typeof value !== 'string') return [];
+    if (typeof value !== 'string' || NOT_SECRET_ENV.has(name)) return [];
     const found = classify(name, value.slice(0, MAX_LINE_CHARS));
     return found ? [found] : [];
   });

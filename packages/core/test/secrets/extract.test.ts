@@ -175,6 +175,15 @@ describe('extractEnv', () => {
     expect(names(found)).toEqual(['GITHUB_TOKEN', 'AWS_ACCESS_KEY_ID', 'STROQ_CANARY_KEY']);
     expect(found.find((e) => e.name === 'STROQ_CANARY_KEY')?.canary).toBe(true);
   });
+
+  it("leaves out Starship's session number, and only that exact name", () => {
+    const found = extractEnv({
+      STARSHIP_SESSION_KEY: '6281937465019283',
+      MY_SESSION_KEY: 'k3y-0123456789abcdefghij',
+      starship_session_key: 'k3y-0123456789abcdefghij',
+    });
+    expect(names(found)).toEqual(['MY_SESSION_KEY', 'starship_session_key']);
+  });
 });
 
 describe('size caps', () => {
