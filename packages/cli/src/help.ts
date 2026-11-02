@@ -206,7 +206,7 @@ export const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'card',
-    synopsis: 'card [--days <n>] [--json] [--share]',
+    synopsis: 'card [--days <n>] [--json] [--share] [--plain] [--no-animation]',
     about: [
       'what your agents did in the last days, from your own Claude Code and Codex sessions:',
       'commands run, how many a text they had read told them to run, keys sent to another',
@@ -218,6 +218,8 @@ export const COMMANDS: readonly CommandHelp[] = [
       ['--days <n>', 'how many days back (1 to 365; default 30)'],
       ['--json', 'the same as JSON (schema stroq-card/1): counts, moments, coverage, timing'],
       ['--share', 'one line of counts only, with no path, name or host, to post'],
+      ['--plain', 'the text alone, without the owl (also STROQ_NO_MASCOT=1)'],
+      ['--no-animation', 'the owl stands still (also STROQ_NO_ANIMATION=1)'],
     ],
   },
   {

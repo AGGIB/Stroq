@@ -130,12 +130,24 @@ describe('stroq --help and stroq help --all', () => {
   const listed = (text: string): string[] =>
     [...text.matchAll(/^ {0,2}stroq ([a-z][a-z-]*)/gm)].map((match) => match[1] ?? '');
 
-  it('prints the same short screen for stroq, stroq --help, stroq -h and stroq help', () => {
+  it('prints the same short screen for stroq --help, stroq -h and stroq help', () => {
     const screen = run('--help');
     expect(screen.status).toBe(0);
     expect(screen.stderr).toBe('');
-    for (const args of [[], ['-h'], ['help']])
+    for (const args of [['-h'], ['help']])
       expect(run(...args).stdout, args.join(' ')).toBe(screen.stdout);
+  });
+
+  it('runs the card for a bare `stroq`, and passes the card its own flags', () => {
+    // The home of this test holds no session: the card says so, as plain text (no terminal, no owl).
+    const bare = run();
+    expect(bare.status).toBe(0);
+    expect(bare.stdout).toMatch(/^Hoo found no agent sessions in the last 30 days\./);
+    expect(bare.stdout).not.toContain('\u001b[');
+    expect(run('card').stdout).toBe(bare.stdout);
+    expect(run('--days', '7').stdout).toMatch(/^Hoo found no agent sessions in the last 7 days\./);
+    expect(JSON.parse(run('--json').stdout)).toMatchObject({ schema: 'stroq-card/1' });
+    expect(run('--share').stdout).toMatch(/npx @stroq\/cli\n$/);
   });
 
   it('lists the bare `stroq` and the four core commands on that screen, in under 20 lines', () => {

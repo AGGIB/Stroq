@@ -7,8 +7,11 @@ import type { CardData } from './data.js';
 import { SHOWN } from './data.js';
 import { num, plural, shortPath, wrap } from './text.js';
 
-/** The widest a line of the card is. */
-export const WIDTH = 60;
+/**
+ * The widest a line of the card is. Beside the owl (2 blanks, 20 columns, 3 blanks) that makes
+ * 2 + 20 + 3 + 55 = 80 columns, the width of a default macOS Terminal window.
+ */
+export const WIDTH = 55;
 
 export const INIT_COMMAND = 'npx @stroq/cli init';
 export const ATTACK_COMMAND = 'npx @stroq/cli attack';

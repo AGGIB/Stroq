@@ -136,6 +136,8 @@ export interface PlayOptions {
    * stopped or failed: this is where "greeted" is written down. It must not throw.
    */
   readonly onFinished?: () => void;
+  /** The frame the greeting ends on, in place of its own last one: what the owl says about the result. */
+  readonly finalFrame?: FrameName;
   /** For tests: where the text goes, and how time passes. */
   readonly write?: (text: string) => void;
   readonly sleep?: (ms: number, signal: AbortSignal) => Promise<void>;
@@ -210,7 +212,10 @@ export async function playGreeting(options: PlayOptions): Promise<GreetingOutcom
     write(HIDE_CURSOR);
     for (const [index, beat] of GREETING.entries()) {
       if (control.signal.aborted) return 'interrupted';
-      const lines = card(beat.frame);
+      const last = index === GREETING.length - 1;
+      const lines = card(
+        last && options.finalFrame !== undefined ? options.finalFrame : beat.frame,
+      );
       write(`${index === 0 ? '' : cursorUp(lines.length)}${lines.join('\n')}\n`);
       try {
         await sleep(beat.ms, control.signal);

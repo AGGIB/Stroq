@@ -50,15 +50,16 @@ describe('the card: something was found', () => {
         '1,756 sessions · Claude Code and Codex · this machine',
         '',
         '  31,785  commands your agent ran',
-        '       3  came from text it read: a README, page, issue or',
-        '          tool result',
-        '       1  key sent to another company (2 more were stopped',
-        '          before they left)',
+        '       3  came from text it read: a README, page, issue',
+        '          or tool result',
+        '       1  key sent to another company (2 more were',
+        '          stopped before they left)',
         '       2  repos run code as soon as an agent opens them',
         '',
         'Worth a look',
-        '1  A web page told your agent to download and run a script.',
-        '   It did. Whoever wrote that text can steer your agent.',
+        '1  A web page told your agent to download and run a',
+        '   script. It did. Whoever wrote that text can steer',
+        '   your agent.',
         '   stroq show 1',
         '2  Your agent sent STRIPE_SECRET_KEY to',
         '   hooks.example.invalid. Treat that key as leaked.',
@@ -113,8 +114,8 @@ describe('the card: nothing was found', () => {
         '1,756 sessions · Claude Code and Codex · this machine',
         '',
         '  31,785  commands your agent ran',
-        '       0  came from text it read: a README, page, issue or',
-        '          tool result',
+        '       0  came from text it read: a README, page, issue',
+        '          or tool result',
         '       0  keys sent to another company',
         '       0  repos run code as soon as an agent opens them',
         '',
@@ -141,8 +142,8 @@ describe('the card: no sessions at all', () => {
     expect(text(renderCard(none, HOME))).toBe(
       [
         'Hoo found no agent sessions in the last 30 days.',
-        'Looked for Claude Code in ~/.claude/projects and Codex in',
-        '~/.codex/sessions.',
+        'Looked for Claude Code in ~/.claude/projects and Codex',
+        'in ~/.codex/sessions.',
         '',
         'See what Stroq stops:  npx @stroq/cli attack',
       ].join('\n'),
@@ -178,7 +179,9 @@ describe('the card: the time ran out', () => {
     expect(out).toContain('2 sessions were too large to check.');
     expect(out).toContain('1 session could not be read.');
     expect(out).toContain('The key check did not finish; run again.');
-    expect(out).toContain('Looked at 150 of 200 folders for code that runs on open.');
+    expect(out.replace(/\s+/g, ' ')).toContain(
+      'Looked at 150 of 200 folders for code that runs on open.',
+    );
   });
 
   it('says a single agent by its name', () => {

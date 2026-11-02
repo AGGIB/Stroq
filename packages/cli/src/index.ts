@@ -104,8 +104,15 @@ export async function main(argv: readonly string[]): Promise<number> {
   }
 }
 
+/** The flags `stroq` with no command passes to the card: `npx @stroq/cli --share` is the card's. */
+const CARD_FLAGS = new Set(['--days', '--json', '--share', '--plain', '--no-animation']);
+
 async function report(command: string | undefined, rest: readonly string[]): Promise<number> {
-  if (command === undefined || command === '--help' || command === '-h') {
+  // The front door: `stroq` alone is the card about the person's own sessions.
+  if (command === undefined || CARD_FLAGS.has(command.split('=')[0] ?? '')) {
+    return report('card', command === undefined ? rest : [command, ...rest]);
+  }
+  if (command === '--help' || command === '-h') {
     process.stdout.write(rest[0] === '--all' ? usageAll() : usage());
     return 0;
   }

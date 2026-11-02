@@ -7,6 +7,7 @@
 import { homedir } from 'node:os';
 import { parseArgs } from 'node:util';
 import { buildCard } from '../card/build.js';
+import { owlFrame, printCardWithOwl } from '../card/owl.js';
 import { shareLine, renderCard } from '../card/render.js';
 import { writeLastCard } from '../card/store.js';
 import { stroqHome } from '../paths.js';
@@ -27,7 +28,13 @@ export function parseDays(raw: string | undefined): number | null {
 export async function runCard(args: readonly string[]): Promise<number> {
   const { values } = parseArgs({
     args: [...args],
-    options: { days: { type: 'string' }, json: { type: 'boolean' }, share: { type: 'boolean' } },
+    options: {
+      days: { type: 'string' },
+      json: { type: 'boolean' },
+      share: { type: 'boolean' },
+      'no-animation': { type: 'boolean' },
+      plain: { type: 'boolean' },
+    },
     allowPositionals: false,
   });
   const days = parseDays(values.days);
@@ -73,6 +80,10 @@ export async function runCard(args: readonly string[]): Promise<number> {
   }
   if (values.json === true) process.stdout.write(`${JSON.stringify(data, null, 2)}\n`);
   else if (values.share === true) process.stdout.write(`${shareLine(data)}\n`);
-  else process.stdout.write(`${renderCard(data, home).join('\n')}\n`);
+  else
+    await printCardWithOwl(renderCard(data, home), owlFrame(data), {
+      ...(values.plain === true ? { plain: true } : {}),
+      ...(values['no-animation'] === true ? { noAnimation: true } : {}),
+    });
   return 0;
 }
