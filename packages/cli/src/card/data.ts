@@ -9,9 +9,13 @@ export interface CardCounts {
   readonly commands: number;
   /** Of them, the ones a text the agent had read told it to run (the strict rule). */
   readonly toldByText: number;
-  /** Keys sent to another company. */
+  /**
+   * Keys that left this machine: every key `stroq sent` puts under "sent to another company", whatever
+   * the destination (a server the user logs in to by ssh is in it: it may be theirs, and the words of the
+   * moment say so).
+   */
   readonly keysSent: number;
-  /** Keys a call to another company tried to send and was stopped; not in `keysSent`. */
+  /** Keys a call tried to send out of this machine and was stopped; not in `keysSent`. */
   readonly keysStopped: number;
   /** Keys the AI saw (and none was seen leaving). */
   readonly keysSeen: number;

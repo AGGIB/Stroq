@@ -64,7 +64,7 @@ function rowsOf(data: CardData): Row[] {
     { count: c.toldByText, text: 'came from text it read: a README, page, issue or tool result' },
     {
       count: c.keysSent,
-      text: `${c.keysSent === 1 ? 'key' : 'keys'} sent to another company${stopped}`,
+      text: `${c.keysSent === 1 ? 'key' : 'keys'} that left this machine${stopped}`,
     },
     {
       count: c.autorunRepos,
@@ -148,7 +148,7 @@ export function shareLine(data: CardData): string {
   return (
     `Hoo checked ${days(data.days)} of my agent sessions: ` +
     `${plural(c.commands, 'command', 'commands')}, ${num(c.toldByText)} came from text the agent read, ` +
-    `${plural(c.keysSent, 'key', 'keys')} sent to another company, ` +
+    `${plural(c.keysSent, 'key', 'keys')} left this machine, ` +
     `${plural(c.autorunRepos, 'repo runs', 'repos run')} code as soon as an agent opens ${c.autorunRepos === 1 ? 'it' : 'them'}. ` +
     SHARE_TAIL
   );

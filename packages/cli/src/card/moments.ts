@@ -1,25 +1,21 @@
 // The moments worth a look, in plain words, ranked.
 //
-// Order: commands a text told the agent to run, then keys sent to another company, then keys the AI
+// Order: commands a text told the agent to run, then keys that left this machine, then keys the AI
 // saw, then folders that run code when an agent opens them. Each moment is one sentence for the card
 // and the rows `stroq show` prints for it. Every word that came from a transcript, a repository or a
 // key file goes through `clean`; the words around them are fixed here and name no rule, no score and
 // none of the internal terms of the guard.
 import { isShellTool } from '@stroq/core';
-import { tryCommandLine, type Piece } from '../shell-quote.js';
+import { when } from '../sent/phrases.js';
 import type { Finding } from '../sent/findings.js';
-import { describePlace, doLine, when } from '../sent/phrases.js';
 import type { AutorunItem, AutorunRepo } from './autorun.js';
 import { KEPT } from './data.js';
-import { AGENTS, type CardAgent, type Moment, type ToldMoment } from './schema.js';
+import { keyMoments } from './key-moments.js';
+import { pasteable, sessionRows, withTranscript, type SessionPlace } from './moment-parts.js';
+import type { Moment, ToldMoment } from './schema.js';
 import { clean, shortPath } from './text.js';
 
-export interface SessionPlace {
-  readonly agent: CardAgent;
-  readonly id: string;
-  readonly path: string;
-  readonly cwd: string | null;
-}
+export type { SessionPlace };
 
 export interface ToldInput {
   readonly moment: ToldMoment;
@@ -31,33 +27,6 @@ export interface MomentInputs {
   readonly findings: readonly Finding[];
   readonly repos: readonly AutorunRepo[];
   readonly home: string;
-}
-
-const AGENT_NAME: Readonly<Record<CardAgent, string>> = {
-  'claude-code': 'Claude Code',
-  codex: 'Codex',
-};
-
-/** A command line the person may paste, or none when a path in it cannot be quoted safely. */
-function pasteable(pieces: readonly Piece[]): string[] {
-  const result = tryCommandLine(pieces);
-  return result.line === null ? [] : [result.line];
-}
-
-const withTranscript = (command: string, path: string): string[] =>
-  pasteable(['stroq', command, { flag: '--transcript', value: path, what: 'path' }]);
-
-const isAgent = (name: string): name is CardAgent => (AGENTS as readonly string[]).includes(name);
-
-function sessionRows(session: SessionPlace, home: string): [string, string][] {
-  return [
-    ['Agent', AGENT_NAME[session.agent]],
-    ['Session', clean(session.id, 80)],
-    ...(session.cwd === null
-      ? []
-      : ([['Folder', shortPath(session.cwd, home, 70)]] as [string, string][])),
-    ['Transcript', shortPath(session.path, home, 70)],
-  ];
 }
 
 // -- A command a text told the agent to run ------------------------------------------------------------
@@ -141,61 +110,6 @@ function toldMoment({ moment, session }: ToldInput, home: string): Omit<Moment, 
   };
 }
 
-// -- A key -----------------------------------------------------------------------------------------
-
-function keyRows(f: Finding, home: string): [string, string][] {
-  return [
-    ['Key', clean(f.name, 80)],
-    ['Kept in', shortPath(f.source, home, 70)],
-    ['Where it went', clean(describePlace(f.place), 200)],
-    ['When', when(f.at)],
-    ['What to do', clean(doLine(f), 200)],
-  ];
-}
-
-function placeOf(f: Finding): SessionPlace | null {
-  const agent = f.session.agent;
-  return isAgent(agent)
-    ? { agent, id: f.session.id, path: f.session.path, cwd: f.session.cwd }
-    : null;
-}
-
-function keyMoment(f: Finding, line: string, home: string): Omit<Moment, 'n'> {
-  const session = placeOf(f);
-  return {
-    kind: f.tier === 'third_party' ? 'key-sent' : 'key-seen',
-    line,
-    ...(session === null ? {} : { session }),
-    groups: [
-      { title: 'What happened', rows: keyRows(f, home) },
-      ...(session === null
-        ? []
-        : [{ title: 'Where to find it', rows: sessionRows(session, home) }]),
-    ],
-    next: session === null ? [] : withTranscript('sent', session.path),
-  };
-}
-
-function sentMoment(f: Finding, home: string): Omit<Moment, 'n'> {
-  const host = f.place.host === undefined ? 'another company' : clean(f.place.host, 60);
-  return keyMoment(
-    f,
-    `Your agent sent ${clean(f.name, 60)} to ${host}. Treat that key as leaked.`,
-    home,
-  );
-}
-
-function seenMoment(f: Finding, home: string): Omit<Moment, 'n'> {
-  const name = clean(f.name, 60);
-  const read = f.place.tool === 'Read' && f.place.route === 'result' ? f.place.detail : undefined;
-  const folder = f.session.cwd === null ? '' : ` in ${shortPath(f.session.cwd, home, 30)}`;
-  const line =
-    read === undefined
-      ? `The AI saw ${name}: ${clean(describePlace(f.place), 90)}.`
-      : `Your agent read ${clean(read.slice(read.lastIndexOf('/') + 1), 40)}${folder}; the AI saw ${name}.`;
-  return keyMoment(f, line, home);
-}
-
 // -- A folder that runs code by itself -----------------------------------------------------------------
 
 const KIND_WORDS: Readonly<Record<string, string>> = {
@@ -260,14 +174,11 @@ export function buildMoments(inputs: MomentInputs): Moment[] {
         newestFirst(a.moment.at, b.moment.at),
     )
     .map((input) => toldMoment(input, home));
-  const sent = inputs.findings
-    .filter((f) => f.tier === 'third_party')
-    .map((f) => sentMoment(f, home));
-  const seen = inputs.findings.filter((f) => f.tier === 'seen').map((f) => seenMoment(f, home));
+  const keys = keyMoments(inputs.findings, home);
   const repos = [...inputs.repos]
     .sort((a, b) => b.items.length + b.more - (a.items.length + a.more) || (a.dir < b.dir ? -1 : 1))
     .map((repo) => repoMoment(repo, home));
-  return [...told, ...sent, ...seen, ...repos]
+  return [...told, ...keys.sent, ...keys.seen, ...repos]
     .slice(0, KEPT)
     .map((moment, i) => ({ ...moment, n: i + 1 }));
 }

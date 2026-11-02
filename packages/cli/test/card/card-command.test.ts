@@ -83,7 +83,7 @@ describe('stroq card', () => {
     expect(data.timing.replayed).toBe(4);
     // A second run with no cache and no threads gives the same card.
     const cache = join(cardDirIn(m.stroqHome), 'sessions.json');
-    expect(readFileSync(cache, 'utf8')).toContain('stroq-card-sessions/1');
+    expect(readFileSync(cache, 'utf8')).toContain('stroq-card-sessions/2');
     const single = stroq(['card', '--json'], {
       STROQ_CARD_THREADS: '0',
       STROQ_HOME: join(m.root, 'stroq2'),

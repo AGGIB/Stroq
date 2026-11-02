@@ -52,7 +52,7 @@ describe('the card: something was found', () => {
         '  31,785  commands your agent ran',
         '       3  came from text it read: a README, page, issue',
         '          or tool result',
-        '       1  key sent to another company (2 more were',
+        '       1  key that left this machine (2 more were',
         '          stopped before they left)',
         '       2  repos run code as soon as an agent opens them',
         '',
@@ -101,7 +101,7 @@ describe('the card: something was found', () => {
     });
     const out = text(renderCard(one, HOME));
     expect(out).toContain('1  command your agent ran');
-    expect(out).toContain('1  key sent to another company');
+    expect(out).toContain('1  key that left this machine');
     expect(out).toContain('1  repo runs code as soon as an agent opens it');
   });
 });
@@ -116,7 +116,7 @@ describe('the card: nothing was found', () => {
         '  31,785  commands your agent ran',
         '       0  came from text it read: a README, page, issue',
         '          or tool result',
-        '       0  keys sent to another company',
+        '       0  keys that left this machine',
         '       0  repos run code as soon as an agent opens them',
         '',
         'Nothing worth a look in these sessions.',
@@ -239,7 +239,7 @@ describe('the share line', () => {
     );
     expect(line).toBe(
       'Hoo checked 30 days of my agent sessions: 31,785 commands, 3 came from text the agent read, ' +
-        '1 key sent to another company, 2 repos run code as soon as an agent opens them. npx @stroq/cli',
+        '1 key left this machine, 2 repos run code as soon as an agent opens them. npx @stroq/cli',
     );
     expect(line).not.toContain('\n');
     expect(line).not.toMatch(/STRIPE|invalid|\/Users|~/);

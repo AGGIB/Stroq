@@ -112,23 +112,27 @@ describe('the session cache', () => {
     ['not JSON', 'nope'],
     ['another schema', JSON.stringify({ schema: 'x/1', entries: {} })],
     [
+      'the schema before the window by event time',
+      JSON.stringify({ schema: 'stroq-card-sessions/1', entries: {} }),
+    ],
+    [
       'a summary with an extra field',
       JSON.stringify({
-        schema: 'stroq-card-sessions/1',
+        schema: 'stroq-card-sessions/2',
         entries: { '/a': { ...entry('a'), extra: 1 } },
       }),
     ],
     [
       'a count that is not a count',
       JSON.stringify({
-        schema: 'stroq-card-sessions/1',
+        schema: 'stroq-card-sessions/2',
         entries: { '/a': { ...entry('a'), summary: { ...summary('a'), commands: -1 } } },
       }),
     ],
     [
       'a huge string',
       JSON.stringify({
-        schema: 'stroq-card-sessions/1',
+        schema: 'stroq-card-sessions/2',
         entries: {
           '/a': { ...entry('a'), summary: { ...summary('a'), sessionId: 'x'.repeat(5000) } },
         },
