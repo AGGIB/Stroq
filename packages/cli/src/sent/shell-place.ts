@@ -25,6 +25,7 @@ import {
 import { embedsPrinter, printsEnvironment } from './env-printers.js';
 import { plainText, valueHolds } from './key-text.js';
 import { linkedByReach, type Link } from './link-by-reach.js';
+import { isDataHeredoc } from './heredoc-programs.js';
 import { runsQuotedText } from './quoted-cut.js';
 import { inStringPosition } from './string-positions.js';
 import { baseName, isAbsolutePath, joinPath, normalPath } from './path-form.js';
@@ -136,6 +137,21 @@ function wordsWritten(args: readonly Word[], body: string): string {
 }
 
 /**
+ * The stages whose heredoc is text: the program only reads text (`cat > f <<EOF`), nothing is piped on from it and it
+ * is not written to a network address.
+ */
+function dataBodies(reading: CommandReading): Set<Stage> {
+  const text = new Set<Stage>();
+  for (const pipelines of reading.run)
+    for (const stages of pipelines)
+      stages.forEach((stage, at) => {
+        if (stage.body === '' || at !== stages.length - 1) return;
+        if (isDataHeredoc(stage.text, '')) text.add(stage);
+      });
+  return text;
+}
+
+/**
  * Every place a command put a text `holds` finds in it: each stage reached in each text the core
  * reads, then the plain cut for what sends. `sendOnly` places only what sends. Every file a stage
  * reached writes is kept with every text written to it.
@@ -148,7 +164,10 @@ function placeIn(
   sendOnly: boolean,
   link?: Link,
 ): Placed {
-  const has = (stage: Stage): boolean => holds(stage.text) || holds(stage.body);
+  // The heredocs that are text, where the link asks for them to be left out.
+  const textBodies = link?.ignoreDataBodies === true ? dataBodies(reading) : null;
+  const has = (stage: Stage): boolean =>
+    holds(stage.text) || (textBodies?.has(stage) !== true && holds(stage.body));
   let place: Place | null = null;
   const written = new Map<string, string>();
   let writtenCut = false;
@@ -598,6 +617,7 @@ export function fileUse(
   const quotedIsCode = runsQuotedText(command);
   // The word that named the file in the pass that placed it, for the evidence.
   let namedBy = '';
+  let namedByEnd = false;
   // `glob`: null any naming, false only a naming by the file's own name, true only a pattern.
   const namesAs =
     (kind: 'file' | 'folder', sure: boolean, glob: boolean | null) =>
@@ -613,7 +633,10 @@ export function fileUse(
         );
       });
       if (hit === undefined || skips(text)) return false;
-      if (namedBy === '') namedBy = hit.text;
+      if (namedBy === '') {
+        namedBy = hit.text;
+        namedByEnd = namesFileHow(hit, target, folders)?.byEnd === true;
+      }
       return true;
     };
   // Whether every word of a stage that names the folder stands where its program takes a string.
@@ -644,40 +667,41 @@ export function fileUse(
       sure: true,
       glob: false,
       how: 'file',
-      link: { via: 'pattern', proof: 'named' },
+      link: { via: 'pattern', proof: 'named', ignoreDataBodies: true },
     },
     {
       kind: 'file',
       sure: true,
       glob: true,
       how: 'pattern',
-      link: { via: 'pattern', proof: 'named' },
+      link: { via: 'pattern', proof: 'named', ignoreDataBodies: true },
     },
     {
       kind: 'folder',
       sure: true,
       glob: null,
       how: 'folder',
-      link: { via: 'folder', proof: 'named', strings },
+      link: { via: 'folder', proof: 'named', strings, ignoreDataBodies: true },
     },
     {
       kind: 'file',
       sure: false,
       glob: null,
       how: 'pattern',
-      link: { via: 'pattern', proof: 'named' },
+      link: { via: 'pattern', proof: 'named', ignoreDataBodies: true },
     },
     {
       kind: 'folder',
       sure: false,
       glob: null,
       how: 'folder',
-      link: { via: 'folder', proof: 'named', strings },
+      link: { via: 'folder', proof: 'named', strings, ignoreDataBodies: true },
     },
   ];
   for (const { kind, sure, glob, how, link } of passes) {
     if (!kinds.has(sure ? kind : `${kind}?`)) continue;
     namedBy = '';
+    namedByEnd = false;
     const { place } = placeIn(
       reading,
       namesAs(kind, sure, glob),
@@ -688,7 +712,8 @@ export function fileUse(
     );
     if (place !== null && place.tier !== 'seen')
       return {
-        place: sure ? place : atMostMaybe(place),
+        // A folder named by a word that is only its name, where the cut is not sure of the command: a maybe.
+        place: sure && (reading.certain || !namedByEnd) ? place : atMostMaybe(place),
         folder: kind === 'folder',
         how,
         word: namedBy,
@@ -733,7 +758,7 @@ export function environmentUse(command: string, ctx: ShellContext): Place | null
     NO_KEY,
     ctx.cwd,
     true,
-    { via: 'environment', proof: 'piped', embeds: embedsPrinter },
+    { via: 'environment', proof: 'piped', embeds: embedsPrinter, ignoreDataBodies: true },
   );
   return place === null || place.tier === 'seen' ? null : place;
 }

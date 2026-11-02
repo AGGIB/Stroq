@@ -24,6 +24,12 @@ export interface Link {
    * (`gh pr list svc`), so that nothing of the folder goes.
    */
   readonly strings?: (stageText: string) => boolean;
+  /**
+   * The heredoc a stage reads as text (`cat > f <<EOF`, `tee f <<EOF`) holds no printer and no word that names a
+   * file: it is the text of a file, not code (`heredoc-programs.ts`). A key in it is another matter and is found as
+   * before.
+   */
+  readonly ignoreDataBodies?: true;
 }
 
 /** A place a stage gave, as a maybe unless the link is the proof of a send. */
@@ -38,7 +44,9 @@ export function linkedByReach(
       ? reach.piped || (reach.direct && link.strings?.(reach.stage.text) !== true)
       : link.proof === 'piped' &&
         ((reach.piped && !reach.direct) ||
-          (reach.direct && link.embeds?.(reach.stage.text) === true));
+          (reach.direct &&
+            (link.embeds?.(reach.stage.text) === true ||
+              link.embeds?.(reach.stage.body) === true)));
   if (flows) return place;
   // Reached only because an earlier step held the text: it is no more than that.
   return linkedPlace(place, reach.direct || reach.piped ? link.via : 'earlier-step');

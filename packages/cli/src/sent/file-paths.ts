@@ -24,7 +24,7 @@
 // never as patterns. Nothing backtracks.
 import { baseName, driveOf, isAbsolutePath, joinPath, normalPath, slashed } from './path-form.js';
 import { lex, REDIRECT, resolve, splitCommand, type Resolved, type Word } from '@stroq/core';
-import { runsQuotedText } from './quoted-cut.js';
+import { quotedStageTexts, runsQuotedText } from './quoted-cut.js';
 import { readBudgetLeft } from './shell-read.js';
 
 /** The words of a text a file could be named by: cut at blanks, quotes and the shell's operators. */
@@ -158,6 +158,60 @@ function unbalancedStage(text: string): boolean {
   }
 }
 
+/** Programs whose words are a message, and not a path. */
+const PRINTERS: ReadonlySet<string> = new Set(['echo', 'printf']);
+/** Programs whose first word, unless an option gives it, is a pattern or a program, and the rest are files. */
+const PATTERN_FIRST: ReadonlySet<string> = new Set([
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'ag',
+  'sed',
+  'awk',
+  'gawk',
+  'jq',
+]);
+/** Options that give the pattern or the program of those programs, so that every word is a file. */
+const PATTERN_OPTIONS: ReadonlySet<string> = new Set([
+  '-e',
+  '--regexp',
+  '--expression',
+  '-f',
+  '--file',
+  '--from-file',
+]);
+
+/**
+ * The indexes of the words of a stage that are text and not paths: everything `echo` and `printf` are given, and the
+ * pattern or program of `grep`, `sed`, `awk` and `jq` (the first word that is no option, or what `-e` gives). A
+ * pattern is not a path even where it spells one; the files that follow are.
+ */
+function textArguments(program: string, args: readonly Word[]): Set<number> {
+  const text = new Set<number>();
+  if (PRINTERS.has(program)) {
+    args.forEach((word, at) => {
+      if (!word.redirect) text.add(at);
+    });
+    return text;
+  }
+  if (!PATTERN_FIRST.has(program)) return text;
+  let given = false;
+  args.forEach((word, at) => {
+    if (word.redirect) return;
+    if (/^(?:-e|--regexp|--expression)$/.test(args[at - 1]?.value ?? '')) text.add(at);
+    if (
+      PATTERN_OPTIONS.has(word.value) ||
+      /^--(?:regexp|expression|file|from-file)=/.test(word.value)
+    )
+      given = true;
+  });
+  if (given) return text;
+  const first = args.findIndex((word) => !word.redirect && !word.value.startsWith('-'));
+  if (first >= 0) text.add(first);
+  return text;
+}
+
 /**
  * The words of one stage, as the core resolves it, with how sure each wildcard is. A wildcard
  * outside quotes, by the word's own text, is the shell's: sure, unless this stage's quotes do not
@@ -174,7 +228,9 @@ function stageWords(text: string): PathWord[] {
   const unbalanced = unbalancedStage(text);
   const tarWildcards = found.args.some((w) => w.value === '--wildcards');
   const out: PathWord[] = [];
+  const pattern = textArguments(found.name, found.args);
   for (const [at, word] of found.args.entries()) {
+    if (pattern.has(at)) continue;
     const value = valueOf(word);
     if (value === '') continue;
     const shellGlob =
@@ -252,12 +308,19 @@ export function commandPathWords(text: string, quotedIsCode = false): PathWord[]
       // The words only the plain cut of a stage sees, by whether its program only handles text.
       const printed = new Set<string>();
       const other = new Set<string>();
-      for (const each of [text, ...nested])
-        for (const stage of lex(each).pipelines.flat()) {
-          words.push(...stageWords(stage.text));
-          const into = TEXT_PROGRAMS.has(programOf(stage.text)) ? printed : other;
-          for (const w of plainWords(stage.text, true)) into.add(w.text);
+      for (const each of [text, ...nested]) {
+        const lexed = lex(each).pipelines.flat();
+        for (const stage of lexed) words.push(...stageWords(stage.text));
+        // The stages whose quoted text is told apart by program are the quote-aware ones: a `$(…)` or a loop
+        // body is cut out of the stage that holds it, so its `grep 'users'` is a grep and not part of a `for`.
+        const stages =
+          quotedStageTexts(each, (t) => splitCommand(t).pipelines) ??
+          lexed.map((stage) => stage.text);
+        for (const stage of stages) {
+          const into = TEXT_PROGRAMS.has(programOf(stage)) ? printed : other;
+          for (const w of plainWords(stage, true)) into.add(w.text);
         }
+      }
       // What only the plain cut sees (a path a quoted script spells) is read as that path, and a
       // wildcard in it as a pattern someone may fill in: never as a plain name. Not a word that names every
       // folder (`/`, `~`, a stray `\`) or `.`, which are a stage's own argument or name nothing; and not a word
@@ -352,6 +415,8 @@ export interface Naming {
    * counts only where the folder is archived or uploaded (`tar czf - ~ | curl -T -`, `rsync -a ~/ host:`).
    */
   readonly broad?: true;
+  /** The folder is named by the end of its path, a word that is a name: not an explicit path. */
+  readonly byEnd?: true;
 }
 
 /**
@@ -436,21 +501,52 @@ const endOf = (path: string): string =>
     .join('/');
 
 /**
- * How a relative path names a file as the end of its path: `leak.txt` and `work/leak.txt` name
- * `/tmp/work/leak.txt`, `work` a folder it is in. `bases`, the folders the command runs in when all
- * of them are known: a word that names only a folder the file is in (`svc`, a search term, a branch, a
- * repository) names it only if it is under one of them. Without them the end is all there is to go by.
+ * Whether a folder is the root, the home folder, or a folder the home folder is under (`/Users`, `/home`): every
+ * key file of the machine is under one, so no word names it by its name.
  */
-function endNames(path: string, file: string, bases: readonly string[] | null): Naming | null {
+function aboveHome(folder: string, home: string | undefined): boolean {
+  if (folder === '' || folder === '/' || /^[A-Za-z]:\/?$/.test(folder)) return true;
+  if (home === undefined) return false;
+  const h = trimSep(normalPath(home));
+  return h === folder || h.startsWith(`${folder}/`);
+}
+
+/** Whether a folder is a folder a command runs in, or is inside one: inside the session's project. */
+const insideAny = (folder: string, bases: readonly string[]): boolean =>
+  bases.some((b) => {
+    const base = trimSep(normalPath(b));
+    return folder === base || folder.startsWith(`${base}/`);
+  });
+
+/**
+ * How a relative path names a file as the end of its path: `leak.txt` and `work/leak.txt` name
+ * `/tmp/work/leak.txt`. A folder it is in is named in two ways, and only these. The path resolves, joined to a
+ * folder the command runs in, to a folder the file is in (`tar czf - Documents` run in the home folder). Or, when
+ * the folders the command runs in are not all known, its name is the end of such a folder's path, spelled
+ * exactly, and the folder is the file's own or is inside a folder the command runs in; never the home folder or
+ * one it is under (`/Users`, `Documents` as a word in a search term), and never in another letter case. A word
+ * that is a name and no path (`svc`, a branch, a term) is named by its name only.
+ */
+function endNames(path: string, file: string, where: Folders): Naming | null {
   const fold = foldFor(file);
   const rest = fold(endOf(path));
   if (rest === '') return null;
   const target = fold(file);
   if (target === `/${rest}` || target.endsWith(`/${rest}`)) return { kind: 'file', sure: true };
-  if (!target.includes(`/${rest}/`)) return null;
-  if (bases !== null && !bases.some((b) => absoluteNames(joinPath(b, path), file, false) !== null))
-    return null;
-  return { kind: 'folder', sure: true };
+  const bases = basesOf(where);
+  if (bases.some((b) => absoluteNames(joinPath(b, path), file, false) !== null))
+    return { kind: 'folder', sure: true, byEnd: true };
+  // All the folders the command runs in are known: the path resolves under one of them, or it names nothing.
+  if (where.exact === true && !path.startsWith('~')) return null;
+  const name = endOf(path);
+  const own = file.slice(0, file.lastIndexOf('/'));
+  for (let at = file.indexOf(`/${name}/`); at >= 0; at = file.indexOf(`/${name}/`, at + 1)) {
+    const folder = file.slice(0, at + 1 + name.length);
+    if (aboveHome(folder, where.home)) continue;
+    if (folder === own || insideAny(folder, bases))
+      return { kind: 'folder', sure: true, byEnd: true };
+  }
+  return null;
 }
 
 /** A word as a path under the home folder when it starts with `~`, `$HOME` or `${HOME}`; null otherwise. */
@@ -506,6 +602,7 @@ export function namesFileHow(
             sure: n.sure && word.sure,
             ...(n.glob === true ? { glob: true as const } : {}),
             ...(n.broad === true ? { broad: true as const } : {}),
+            ...(n.byEnd === true ? { byEnd: true as const } : {}),
           };
     // `~`, `$HOME` and `${HOME}` are the home folder when it is known.
     const homed = where.home === undefined ? null : homeSpelling(c, where.home);
@@ -521,14 +618,8 @@ export function namesFileHow(
         for (const base of basesOf(where))
           found = better(found, take(absoluteNames(joinPath(base, c), file, pattern)));
       // Any other relative path is read as the end of a path below, whatever folder it is under.
-      if (!pattern)
-        found = better(
-          found,
-          // A path from the home folder is not under the folders above: the end is all there is to go by.
-          take(
-            endNames(c, file, where.exact === true && !c.startsWith('~') ? basesOf(where) : null),
-          ),
-        );
+      // A path from the home folder is read against it when it is known; else by its end.
+      if (!pattern && homed === null) found = better(found, take(endNames(c, file, where)));
     }
     if (found?.kind === 'file' && found.sure && found.glob !== true) return found;
   }

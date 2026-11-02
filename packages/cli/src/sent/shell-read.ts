@@ -289,6 +289,11 @@ export interface CommandReading {
   readonly run: readonly (readonly (readonly Stage[])[])[];
   /** The plain cut of the command and what it nests, read for sends only. */
   readonly plain: readonly (readonly Stage[])[];
+  /**
+   * The cut is sure of the command: the lexer was, its quotes close, and it hands no text to a program that runs
+   * it. Where it is not, a word that is only a folder's name links the folder as a maybe at most.
+   */
+  readonly certain: boolean;
   /** The stages that hand the whole shell's output to a descriptor (`exec >file`, `exec 3<>…`). */
   readonly execSink: boolean;
   /** Whether the command makes a request somewhere, or may. */
@@ -317,13 +322,14 @@ const safeResolve = (text: string): Resolved | null => {
 function cutOf(command: string): {
   readonly run: Stage[][][];
   readonly plain: Stage[][];
+  readonly certain: boolean;
 } {
   let split: ReturnType<typeof splitCommand>;
   try {
     split = splitCommand(command);
   } catch {
     const whole = [[{ text: command, body: '', piped: false }]];
-    return { run: [whole], plain: whole };
+    return { run: [whole], plain: whole, certain: false };
   }
   const blind = split.pipelines.map((stages) =>
     stages.map((text, i) => ({ text, body: '', piped: i > 0 })),
@@ -361,16 +367,16 @@ function cutOf(command: string): {
   // The lexer was not sure, or there are more texts than are read: the blind cut is read in full.
   if (unsure || split.texts.length > MAX_TEXTS) {
     run.push(blind);
-    return { run, plain: blind };
+    return { run, plain: blind, certain: false };
   }
-  return { run, plain };
+  return { run, plain, certain: masked !== null };
 }
 
 /** Reads a command once: its classes, its cut, and the facts of each stage asked about. */
 export function readCommand(command: string, cwd: string | null): CommandReading {
   const at = cwd ?? '/';
   const classes = classesOf(command, at);
-  const { run, plain } = cutOf(command);
+  const { run, plain, certain } = cutOf(command);
   let reads: (stage: string) => boolean;
   try {
     reads = stageReader(command);
@@ -452,7 +458,7 @@ export function readCommand(command: string, cwd: string | null): CommandReading
     known.set(key, result);
     return result;
   };
-  return { command, classes, run, plain, execSink, sends: commandSends, facts };
+  return { command, classes, run, plain, certain, execSink, sends: commandSends, facts };
 }
 
 function safeReads(reads: (stage: string) => boolean, text: string): boolean {
