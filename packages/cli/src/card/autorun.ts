@@ -6,8 +6,12 @@
 // guard off (hooks, auto-approved MCP servers, autorun tasks). The ordinary things many honest
 // repositories have (a husky hook, a `prepare` script) are not counted: `inspect` lists them as "not
 // findings" and a count of them would be a count of every repository there is.
+import { realpathSync } from 'node:fs';
+import { sep } from 'node:path';
 import { isFailing, tagChanges } from '../exposure/agent-change.js';
+import type { AgentHit } from '../exposure/agent-kinds.js';
 import { agentSurface } from '../exposure/agent-tree.js';
+import { stroqHome } from '../paths.js';
 import { folderSurface, repoSurface, type RepoExecHit } from '../exposure/repo-surface.js';
 
 /** One thing in a folder that runs by itself. */
@@ -47,6 +51,51 @@ const LATER_HOOKS: ReadonlySet<string> = new Set([
   'sendemail-validate',
 ]);
 
+/**
+ * The hook line `stroq init` writes (`hook-command.ts`): the node binary, Stroq's own entry file and
+ * `hook <agent>`, each path in double quotes, nothing else. A handler with any other field (an `env`,
+ * a `cwd`) has more than this in its value and does not match.
+ */
+const STROQ_HOOK_LINE =
+  /^"([^"\n]+)" "([^"\n]+)" hook (?:claude-code|cursor|codex|windsurf|copilot|openclaw|antigravity)(?: (?:pre|post|preinvocation))?$/;
+/** Where an installed Stroq keeps its entry file, below a `node_modules` folder. */
+const PACKAGE_ENTRY = `${sep}node_modules${sep}@stroq${sep}cli${sep}dist${sep}index.js`;
+
+const realOrNull = (path: string): string | null => {
+  try {
+    return realpathSync(path);
+  } catch {
+    return null;
+  }
+};
+
+const isWithin = (path: string, folder: string): boolean =>
+  path === folder || path.startsWith(folder.endsWith(sep) ? folder : `${folder}${sep}`);
+
+/**
+ * Whether an agent hook is Stroq's own, as `stroq init` wrote it: the exact line, a node binary, and an
+ * entry file that really is under the Stroq home or an installed `@stroq/cli`, outside the folder looked
+ * at (a repository cannot vouch for a copy of Stroq it carries itself). Anything else counts: a line
+ * shaped like Stroq's that runs another file is exactly what a planted hook would look like.
+ */
+export function isStroqOwnHook(value: string, dir: string, home: string = stroqHome()): boolean {
+  const line = STROQ_HOOK_LINE.exec(value);
+  if (line === null) return false;
+  const [, node = '', entry = ''] = line;
+  // The last part of the node path, whichever separator wrote it (a Windows line keeps its `\`).
+  if (!/^node(?:\.exe)?$/i.test(node.split(/[\\/]/).at(-1) ?? '')) return false;
+  const real = realOrNull(entry);
+  const folder = realOrNull(dir);
+  if (real === null || folder === null || isWithin(real, folder)) return false;
+  const stroq = realOrNull(home);
+  return (stroq !== null && isWithin(real, stroq)) || real.endsWith(PACKAGE_ENTRY);
+}
+
+const notOwnHook =
+  (dir: string) =>
+  (hit: AgentHit): boolean =>
+    !(hit.kind === 'agent-hook' && isStroqOwnHook(hit.value, dir));
+
 /** Whether a finding runs when an agent opens the folder, rather than when it later commits or pushes. */
 export function runsOnOpen(hit: Pick<RepoExecHit, 'kind' | 'what' | 'hooksJudged'>): boolean {
   if (hit.kind === 'git-hook-routine') {
@@ -66,7 +115,9 @@ export function runsOnOpen(hit: Pick<RepoExecHit, 'kind' | 'what' | 'hooksJudged
 export function autorunOf(dir: string): AutorunRepo | null {
   const inRepo = repoSurface(dir);
   const surface = inRepo.isRepo ? inRepo : folderSurface(dir);
-  const agent = tagChanges(agentSurface(dir).hits, null).filter((h) => isFailing(h, 'any'));
+  const agent = tagChanges(agentSurface(dir).hits, null)
+    .filter((h) => isFailing(h, 'any'))
+    .filter(notOwnHook(dir));
   const seen = new Set<string>();
   const items: AutorunItem[] = [];
   const add = (item: AutorunItem): void => {
