@@ -28,6 +28,7 @@ import { foldName } from './git-dir-names.js';
 import { opencodeConfig, pluginCode, zedSettings } from './agent-others.js';
 import { geminiSettings } from './agent-switches.js';
 import { agentDefinition, instructionFile } from './agent-text.js';
+import type { LargeScan } from './large-text.js';
 import { codexConfig } from './agent-toml.js';
 import { lineOf, stripJsonc } from './jsonc.js';
 import { parseToml } from './toml-lite.js';
@@ -432,7 +433,11 @@ export function scanFile(path: string, text: string, onParseGap?: () => void): r
 /** What a source found at a path. */
 export type SourceRead =
   | { readonly kind: 'text'; readonly text: string }
-  | { readonly kind: 'too-large'; readonly size: number }
+  /**
+   * Over the cap of bytes read whole. `scan` is the scan of all of it for characters nobody would see,
+   * when it was made (see `large-text.ts`); a file with none was not scanned.
+   */
+  | { readonly kind: 'too-large'; readonly size: number; readonly scan?: LargeScan }
   /** Past the budget of bytes one check reads, so not read; reported like a file too large. */
   | { readonly kind: 'over-budget'; readonly budget: number }
   | { readonly kind: 'outside'; readonly target: string }
@@ -479,13 +484,14 @@ function inSkillData(path: string): boolean {
 }
 
 /**
- * A large data file of a skill: one that no reader but the instruction reader takes, in a skill's
- * `data` or `scripts` folder, under the name as written and under every name a disk may open it as.
- * An agent does not load it as instructions, so that it was too large to read is a notice and not a
- * failure. Everything else keeps failing, an instruction file of a skill among it: padding one past
- * the cap would switch its check for invisible characters off.
+ * A data file of a skill: one that no reader but the instruction reader takes, in a skill's `data`
+ * or `scripts` folder, under the name as written and under every name a disk may open it as. An agent
+ * does not load it as instructions, so when it is too large to read whole it is a notice and not a
+ * failure, but only after all of it was scanned for characters nobody would see and none was found
+ * (see `large-text.ts`). Everything else keeps failing, an instruction file of a skill among it:
+ * padding one past the cap would switch its check for invisible characters off.
  */
-function isSkillDataFile(path: string): boolean {
+export function isSkillDataFile(path: string): boolean {
   const readers = readersFor(path);
   return (
     readers.length > 0 &&
@@ -528,11 +534,19 @@ export function hitsForRead(
       ? `too large to read (${read.size} bytes)`
       : `past the ${read.budget} bytes one check reads`;
   // An instruction file too, though its only check is for hidden characters: padding it past
-  // the cap would otherwise switch that check off. A skill's data file is not one.
-  if (isSkillDataFile(path))
-    return [
-      hit('instruction-file', path, 1, 'size', `${why}; a data file of a skill, not instructions`),
-    ];
+  // the cap would otherwise switch that check off. A skill's data file is not one, once all of it
+  // was scanned: one that was not (past the cap, past the budget, read some other way) fails.
+  if (read.kind === 'too-large' && read.scan !== undefined && isSkillDataFile(path)) {
+    const found = read.scan.kind === 'hidden';
+    const notice = hit(
+      'instruction-file',
+      path,
+      1,
+      'size',
+      `${why}; a data file of a skill, scanned all through for characters nobody would see, and ${found ? 'some were found' : 'none was found'}`,
+    );
+    return read.scan.kind === 'hidden' ? [read.scan.hit, notice] : [notice];
+  }
   return [hit('unreadable-config', path, 1, 'size', why)];
 }
 

@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { agentDefinitionHasHooks } from '@stroq/core';
 import { isPlainObject } from '../commands/config-file.js';
 import { readFrontmatter } from '../install/inspect/frontmatter.js';
@@ -11,7 +12,6 @@ import {
   tooMany,
 } from './agent-json.js';
 import { asProtection, boundedJson, byLine, digestOf, hit, type AgentHit } from './agent-kinds.js';
-import { lineAt } from './jsonc.js';
 
 type KeyLines = ReadonlyMap<string, number>;
 
@@ -83,42 +83,121 @@ function joinedFrom(text: string, at: number): number {
 
 const codeName = (code: number): string => `U+${code.toString(16).toUpperCase().padStart(4, '0')}`;
 
+const countNewlines = (text: string, from: number, to: number): number => {
+  let count = 0;
+  for (let i = text.indexOf('\n', from); i !== -1 && i < to; i = text.indexOf('\n', i + 1))
+    count += 1;
+  return count;
+};
+const isLowSurrogate = (unit: number): boolean => unit >= 0xdc00 && unit <= 0xdfff;
+
+/** Units of text kept before the part not yet examined: the emoji checks look back at most four. */
+const CONTEXT = 8;
+/** Units of text at the end of what is fed that wait for the next piece: the checks look ahead at most two. */
+const HOLD = 8;
+
 /**
- * The hidden characters of `text`, counted by code point, in the order they come, and the offset
- * of the first. A byte order mark at the very start is how some editors save a file, a carriage
- * return before a line feed ends a line, and a style selector or a joiner that spells an emoji
- * hides nothing; anything else this cannot place as one of those counts.
+ * The scan for the hidden characters of a text, which can take its text in pieces. A piece may end
+ * anywhere that is not inside a code point. The hidden characters are counted by code point, in the
+ * order they come, with the offset of the first. A byte order mark at the very start is how some
+ * editors save a file, a carriage return before a line feed ends a line, and a style selector or a
+ * joiner that spells an emoji hides nothing; anything else this cannot place as one of those counts.
+ *
+ * A few characters before and after each piece are kept to decide those, and nothing else of the
+ * text is: the counts, a running digest of the characters in order and the line of the first are all
+ * it holds, so a file of any size is scanned in constant memory. Given a `limit` it stops counting
+ * at that many hidden characters, the first ones, whatever the pieces were.
  */
-function hiddenCharacters(text: string): {
-  counts: Map<number, number>;
-  order: string;
-  first: number;
-} {
-  const counts = new Map<number, number>();
-  const order: string[] = [];
-  let first = -1;
-  // The joiners of the emoji being spelled: where its next pictograph starts, and how many.
-  let next = -1;
-  let joins = 0;
-  for (const match of text.matchAll(HIDDEN)) {
-    const at = match.index;
-    const code = match[0].codePointAt(0) ?? 0;
-    if (at === 0 && code === BYTE_ORDER_MARK) continue;
-    if (code === CARRIAGE_RETURN && text.charCodeAt(at + 1) === LINE_FEED) continue;
-    if (EMOJI_STYLE.has(code) && stylesEmoji(text, at)) continue;
-    if (code === ZERO_WIDTH_JOINER) {
-      const from = joinedFrom(text, at);
-      if (from !== -1) {
-        joins = from === next ? joins + 1 : 1;
-        next = at + 1;
-        if (joins <= MAX_JOINS) continue;
-      }
-    }
-    counts.set(code, (counts.get(code) ?? 0) + 1);
-    order.push(match[0]);
-    if (first === -1) first = at;
+export class HiddenScan {
+  private readonly counts = new Map<number, number>();
+  private readonly order = createHash('sha256');
+  private total = 0;
+  /** The text kept from the pieces so far: context already examined, then what waits. */
+  private tail = '';
+  /** How many units at the start of `tail` were examined already. */
+  private seen = 0;
+  /** The offset in the whole text of `tail[0]`. */
+  private start = 0;
+  /** The newlines in the whole text before the part examined. */
+  private newlines = 0;
+  private first = -1;
+  private line = 1;
+  /** The joiners of the emoji being spelled: where its next pictograph starts, and how many. */
+  private next = -1;
+  private joins = 0;
+
+  constructor(private readonly limit: number = Number.POSITIVE_INFINITY) {}
+
+  /** Whether any hidden character was counted. */
+  get found(): boolean {
+    return this.total > 0;
   }
-  return { counts, order: order.join(''), first };
+
+  /** Whether the limit was reached: nothing more is counted. */
+  get full(): boolean {
+    return this.total >= this.limit;
+  }
+
+  /** How many units of text are kept: a few, however much was fed. */
+  get kept(): number {
+    return this.tail.length;
+  }
+
+  feed(text: string): void {
+    if (!this.full) this.examine(this.tail + text, false);
+  }
+
+  /** The end of the text: the finding, or none. Call once. */
+  finish(path: string): AgentHit | undefined {
+    if (!this.full) this.examine(this.tail, true);
+    if (this.counts.size === 0) return undefined;
+    const value = [...this.counts.entries()]
+      .sort(([a], [b]) => a - b)
+      .map(([code, count]) => `${codeName(code)} x${count}`)
+      .join(', ');
+    const digest = `sha256:${this.order.digest('hex').slice(0, 16)}`;
+    return hit('instruction-hidden-text', path, this.line, 'hidden', `${value} (${digest})`);
+  }
+
+  /** Examines `window`, which is the kept text and then the new, up to the units that wait. */
+  private examine(window: string, final: boolean): void {
+    const end = final ? window.length : Math.max(this.seen, window.length - HOLD);
+    const picked: string[] = [];
+    for (const match of window.matchAll(HIDDEN)) {
+      const at = match.index;
+      if (at < this.seen) continue;
+      if (at >= end) break;
+      const absolute = this.start + at;
+      const code = match[0].codePointAt(0) ?? 0;
+      if (absolute === 0 && code === BYTE_ORDER_MARK) continue;
+      if (code === CARRIAGE_RETURN && window.charCodeAt(at + 1) === LINE_FEED) continue;
+      if (EMOJI_STYLE.has(code) && stylesEmoji(window, at)) continue;
+      if (code === ZERO_WIDTH_JOINER) {
+        const from = joinedFrom(window, at);
+        if (from !== -1) {
+          this.joins = this.start + from === this.next ? this.joins + 1 : 1;
+          this.next = absolute + 1;
+          if (this.joins <= MAX_JOINS) continue;
+        }
+      }
+      this.counts.set(code, (this.counts.get(code) ?? 0) + 1);
+      picked.push(match[0]);
+      this.total += 1;
+      if (this.first === -1) {
+        this.first = absolute;
+        this.line = 1 + this.newlines + countNewlines(window, this.seen, at);
+      }
+      if (this.full) break;
+    }
+    if (picked.length > 0) this.order.update(picked.join(''));
+    if (this.first === -1) this.newlines += countNewlines(window, this.seen, end);
+    // Keep the context of what comes next, from a whole code point.
+    let from = Math.max(0, end - CONTEXT);
+    if (from > 0 && isLowSurrogate(window.charCodeAt(from))) from -= 1;
+    this.tail = window.slice(from);
+    this.seen = end - from;
+    this.start += from;
+  }
 }
 
 /**
@@ -127,19 +206,9 @@ function hiddenCharacters(text: string): {
  * change.
  */
 export function hiddenTextHit(path: string, text: string): AgentHit | undefined {
-  const { counts, order, first } = hiddenCharacters(text);
-  if (counts.size === 0) return undefined;
-  const value = [...counts.entries()]
-    .sort(([a], [b]) => a - b)
-    .map(([code, count]) => `${codeName(code)} x${count}`)
-    .join(', ');
-  return hit(
-    'instruction-hidden-text',
-    path,
-    lineAt(text, first),
-    'hidden',
-    `${value} (${digestOf(order)})`,
-  );
+  const scan = new HiddenScan();
+  scan.feed(text);
+  return scan.finish(path);
 }
 
 /** Base names a host reads as instructions wherever they are. */
