@@ -55,9 +55,18 @@ const LATER_HOOKS: ReadonlySet<string> = new Set([
  * The hook line `stroq init` writes (`hook-command.ts`): the node binary, Stroq's own entry file and
  * `hook <agent>`, each path in double quotes, nothing else. A handler with any other field (an `env`,
  * a `cwd`) has more than this in its value and does not match.
+ *
+ * Copilot's and Windsurf's handlers have a second command field, `powershell`, and `init` writes it
+ * as `& ` and the same line (`&` is PowerShell's call operator: without it a quoted path is echoed,
+ * not run). Each command field is a hook of its own to the reading, so each is judged on its own, and
+ * that one is Stroq's when it is `& ` and the exact line. What follows `& ` is checked as the bare
+ * line is, so the only program it can start is Stroq's verified entry. The other agents write one
+ * command field and no `& `.
  */
 const STROQ_HOOK_LINE =
-  /^"([^"\n]+)" "([^"\n]+)" hook (?:claude-code|cursor|codex|windsurf|copilot|openclaw|antigravity)(?: (?:pre|post|preinvocation))?$/;
+  /^(& )?"([^"\n]+)" "([^"\n]+)" hook (claude-code|cursor|codex|windsurf|copilot|openclaw|antigravity)(?: (?:pre|post|preinvocation))?$/;
+/** The agents whose handler `init` gives a `powershell` field, with the line after `& `. */
+const POWERSHELL_AGENTS: ReadonlySet<string> = new Set(['copilot', 'windsurf']);
 /** The characters a path of a hook line may hold: none that a shell expands (`$`, a backquote, `~`, `%`, `!`). */
 const SAFE_PATH = /^[A-Za-z0-9_./\\:@+ -]+$/;
 /** Where an installed Stroq keeps its entry file, below a `node_modules` folder. */
@@ -91,7 +100,8 @@ const isWithin = (path: string, folder: string): boolean =>
 export function isStroqOwnHook(value: string, dir: string, home: string = stroqHome()): boolean {
   const line = STROQ_HOOK_LINE.exec(value);
   if (line === null) return false;
-  const [, node = '', entry = ''] = line;
+  const [, call, node = '', entry = '', agent = ''] = line;
+  if (call !== undefined && !POWERSHELL_AGENTS.has(agent)) return false;
   // No character a shell would expand or quote differently, and both paths written out in full.
   if (![node, entry].every((path) => SAFE_PATH.test(path) && isAbsolute(path))) return false;
   const folder = realOrNull(dir);

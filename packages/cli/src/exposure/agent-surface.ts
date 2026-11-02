@@ -449,6 +449,52 @@ export const MAX_FILE_BYTES = 1024 * 1024;
 /** What a Git LFS pointer starts with: the file a checkout writes here is fetched from elsewhere. */
 const LFS_POINTER = 'version https://git-lfs.github.com/spec/';
 
+/**
+ * Names that are settings or an MCP server list wherever they are kept: a file by one of them is
+ * never taken for data, though it lies in a skill's `data` folder.
+ */
+const NOT_DATA_NAMES: ReadonlySet<string> = new Set([
+  'settings.json',
+  'settings.local.json',
+  'hooks.json',
+  'mcp.json',
+  '.mcp.json',
+  'tasks.json',
+  'plugin.json',
+]);
+
+/**
+ * Whether a path, as spelled, is a `.json` file in a `data` or `scripts` folder below a skill
+ * (`.claude/skills/<skill>/…`, or the same under `.agents`): the folder is a folder, not the skill's
+ * own name, and the file is not one of the names above.
+ */
+function inSkillData(path: string): boolean {
+  const parts = path.split('/');
+  const base = parts[parts.length - 1] ?? '';
+  if (!base.endsWith('.json') || NOT_DATA_NAMES.has(base)) return false;
+  const at = parts.findIndex(
+    (part, i) => part === 'skills' && /^\.(?:claude|agents?)$/.test(parts[i - 1] ?? ''),
+  );
+  return at !== -1 && parts.slice(at + 2, -1).some((part) => part === 'data' || part === 'scripts');
+}
+
+/**
+ * A large data file of a skill: one that no reader but the instruction reader takes, in a skill's
+ * `data` or `scripts` folder, under the name as written and under every name a disk may open it as.
+ * An agent does not load it as instructions, so that it was too large to read is a notice and not a
+ * failure. Everything else keeps failing, an instruction file of a skill among it: padding one past
+ * the cap would switch its check for invisible characters off.
+ */
+function isSkillDataFile(path: string): boolean {
+  const readers = readersFor(path);
+  return (
+    readers.length > 0 &&
+    readers.every((reader) => reader === READERS.instruction) &&
+    inSkillData(path.toLowerCase()) &&
+    inSkillData(foldPath(path))
+  );
+}
+
 export function hitsForRead(
   path: string,
   read: SourceRead,
@@ -482,7 +528,11 @@ export function hitsForRead(
       ? `too large to read (${read.size} bytes)`
       : `past the ${read.budget} bytes one check reads`;
   // An instruction file too, though its only check is for hidden characters: padding it past
-  // the cap would otherwise switch that check off.
+  // the cap would otherwise switch that check off. A skill's data file is not one.
+  if (isSkillDataFile(path))
+    return [
+      hit('instruction-file', path, 1, 'size', `${why}; a data file of a skill, not instructions`),
+    ];
   return [hit('unreadable-config', path, 1, 'size', why)];
 }
 
