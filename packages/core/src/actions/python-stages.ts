@@ -118,9 +118,9 @@ function redirectsOutput(text: string): boolean {
 
 /**
  * Whether what a stage prints may be taken by something that runs it or keeps it: it is read out of a
- * substitution or a body (where its output goes is not kept), a redirect of output stands anywhere on the
- * line (`exec >f`, `{ …; } > f`, `done > f` apply to the commands before them), or a stage after it is
- * not a filter that only prints.
+ * substitution or a body (where its output goes is not kept), a redirect of output stands anywhere in the
+ * command or in a text read from it (`exec >f`, `{ …; } > f`, `done > f` apply to the commands before them),
+ * or a stage after it is not a filter that only prints.
  */
 function outputLeaves(
   textIndex: number,
@@ -162,12 +162,25 @@ const ASSIGNMENT_WORD = /^[A-Za-z_]\w*=/;
 /** `-o`, `-ro`, `--output=f`, and any prefix of the long option getopt reads as it (`--o`, `--outp f`). */
 const SORT_OUTPUT = /^-[A-Za-z]*o|^--o(?:u(?:t(?:p(?:u(?:t)?)?)?)?)?(?:=|$)/;
 
+/** The program of a stage: its first word that is not an assignment, or undefined. */
+function programOf(text: string): string | undefined {
+  return argv(text).find((word) => !word.redirect && !ASSIGNMENT_WORD.test(word.value))?.value;
+}
+
+/** Builtins that run text the reader may not see (`source <(…)`, `eval "$x"`): an `exec >f` may be in it. */
+const RUNS_TEXT: ReadonlySet<string> = new Set(['.', 'source', 'eval']);
+
+/** The stage redirects its output, or runs text that may (`source`, `.`, `eval`). */
+function mayRedirectOutput(text: string): boolean {
+  const program = programOf(text);
+  return redirectsOutput(text) || (program !== undefined && RUNS_TEXT.has(program));
+}
+
 /** The stage is one of `FILTERS`, by that name and with no option that names a file to write (`sort -o`). */
 function onlyFilters(text: string): boolean {
-  const words = argv(text).filter((word) => !word.redirect);
-  const first = words.find((word) => !ASSIGNMENT_WORD.test(word.value));
-  if (first === undefined || !FILTERS.has(first.value)) return false;
-  return !(first.value === 'sort' && words.some((word) => SORT_OUTPUT.test(word.value)));
+  const first = programOf(text);
+  if (first === undefined || !FILTERS.has(first)) return false;
+  return !(first === 'sort' && argv(text).some((word) => SORT_OUTPUT.test(word.value)));
 }
 
 /** Whether a stage is given input: a pipe into it, a here-document, or an input redirect. */
@@ -210,18 +223,14 @@ export function readPythonStages(context: PythonStageContext): PythonStages {
     process.stdin === 'none' ||
     (process.stdin === 'inherit' && !input) ||
     (!MORE_THAN_ONE_COMMAND.test(process.command) && consumer(process.command) === 'none');
-  // Whether any stage of a text redirects its output, read once for the text.
-  const redirectsOf = new Map<number, boolean>();
-  const redirected = (textIndex: number): boolean => {
-    let found = redirectsOf.get(textIndex);
-    if (found === undefined) {
-      found = (stages[textIndex] ?? []).some((pipeline) =>
-        pipeline.some((stage) => redirectsOutput(stage.text)),
-      );
-      redirectsOf.set(textIndex, found);
-    }
-    return found;
-  };
+  // Whether any stage of any text redirects its output, read once. A text read out of the command (an `eval`
+  // body, a `.` or `source` body) runs in the same shell as the command, and an `exec >f` or a closer with a
+  // redirect in one of them applies to the commands of the others.
+  let redirectedSomewhere: boolean | undefined;
+  const redirected = (): boolean =>
+    (redirectedSomewhere ??= stages.some((pipelines) =>
+      pipelines.some((pipeline) => pipeline.some((stage) => mayRedirectOutput(stage.text))),
+    ));
   stages.forEach((pipelines, textIndex) => {
     for (const [pipeline, at, stage] of pipelines.flatMap((p) =>
       p.map((s, i) => [p, i, s] as const),
@@ -256,7 +265,7 @@ export function readPythonStages(context: PythonStageContext): PythonStages {
         // What it decodes goes to its output; where that goes is known only when nothing takes it.
         (reading.decodes &&
           seen &&
-          outputLeaves(textIndex, redirected(textIndex), pipeline, at, consumer)) ||
+          outputLeaves(textIndex, redirected(), pipeline, at, consumer)) ||
         !reading.processes.every((process) => readsOnly(process, input));
       if (notRead) {
         if (seen) signals.push(PAYLOAD);

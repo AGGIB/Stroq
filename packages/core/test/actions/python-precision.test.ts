@@ -248,6 +248,31 @@ describe('decoded data that leaves the program by its output', () => {
   });
 });
 
+describe('a redirect in another text of the line, which runs in the same shell', () => {
+  // `eval`, `.` and `source` read text that the shell runs itself: an `exec >f` in it applies to the rest.
+  const bare = `python3 -c "import base64,sys; print(base64.b64decode(sys.argv[1]))" ZWNobyBoaQ==`;
+
+  it.each([
+    `exec >out.sh; eval '${bare}'`,
+    `eval 'exec >out.sh'; ${bare}`,
+    `eval 'exec 1>out.sh' && ${bare}`,
+    `eval '{ ${bare}; } > out.sh'`,
+    `eval 'for i in 1; do :; done > out.sh'; ${bare}`,
+    `source <(echo 'exec >out.sh'); ${bare}`,
+    `. <(echo 'exec >out.sh'); ${bare}`,
+    `eval 'exec >out.sh'; eval '${bare}'`,
+    `bash -c 'exec >out.sh'; ${bare}`,
+    `sh -c 'done > out.sh'; ${bare}`,
+  ])('keeps the deny: %s', (command) => {
+    expect(denied(command), command).toBe(true);
+  });
+
+  it('stays allowed with no redirect anywhere', () => {
+    expect(classes(bare)).toEqual([]);
+    expect(classes(`${bare} 2>&1`)).toEqual([]);
+  });
+});
+
 describe('literal commands beside an import of the project', () => {
   it('is the commands it writes out: the SWE-Hero program', () => {
     expect(classes(SWE_HERO_DVC)).toEqual([]);

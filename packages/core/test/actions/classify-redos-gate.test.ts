@@ -160,6 +160,11 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
     (r) => `${r('exec >/dev/null; ')}python3 -c 'import base64'`,
   ],
   [
+    'python decoder, evaluated text before it',
+    (r) => `${r("eval 'exec >/dev/null'; ")}python3 -c 'import base64'`,
+  ],
+  ['python decoder, sourced text before it', (r) => `${r('. ./x; ')}python3 -c 'import base64'`],
+  [
     'python decoder, closers with redirects',
     (r) => `python3 -c 'import base64'; ${r('done > /dev/null; ')}`,
   ],
