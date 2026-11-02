@@ -19,36 +19,23 @@ export interface Link {
    * so that what it printed is the request's own data though no stage before it printed it.
    */
   readonly embeds?: (stageText: string) => boolean;
+  /**
+   * For `folder`: whether every word of a stage that names the folder stands where its program takes a string
+   * (`gh pr list svc`), so that nothing of the folder goes.
+   */
+  readonly strings?: (stageText: string) => boolean;
 }
-
-/**
- * Programs that make a request with the words they are given as strings: a word that is the name of a folder
- * (`gh pr list svc`, `git push origin svc`) hands them a string, not the folder. Any other program that sends
- * and names a folder may take it as a path to send (`scp -r`, `rsync`, a hosting tool's deploy).
- */
-const STRING_SENDERS: ReadonlySet<string> = new Set([
-  'gh',
-  'glab',
-  'hub',
-  'git',
-  'curl',
-  'wget',
-  'http',
-  'https',
-  'xh',
-]);
 
 /** A place a stage gave, as a maybe unless the link is the proof of a send. */
 export function linkedByReach(
   place: Place | null,
   reach: Reach,
   link: Link | undefined,
-  program: string,
 ): Place | null {
   if (place === null || link === undefined || place.tier !== 'third_party') return place;
   const flows =
     link.proof === 'named'
-      ? reach.piped || (reach.direct && !(link.via === 'folder' && STRING_SENDERS.has(program)))
+      ? reach.piped || (reach.direct && link.strings?.(reach.stage.text) !== true)
       : link.proof === 'piped' &&
         ((reach.piped && !reach.direct) ||
           (reach.direct && link.embeds?.(reach.stage.text) === true));

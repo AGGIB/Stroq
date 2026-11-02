@@ -129,8 +129,8 @@ describe('the environment is not sent by a call that only ran beside it', () => 
     ['declare -x', `declare -x; ${HN}`, 'earlier-step'],
     ['env', `env && ${HN}`, 'earlier-step'],
     [
-      'a python one-liner that mentions environ',
-      `curl -s https://hacker-news.firebaseio.com/v0/topstories.json | python3 -c "import os,sys; print(os.environ.get('HOME'))"`,
+      'a python one-liner that prints environ',
+      `python3 -c "import os,sys; print(os.environ)"; curl -s https://hacker-news.firebaseio.com/v0/topstories.json`,
       'earlier-step',
     ],
   ])('%s, then a request', (_what, command, via) => {
@@ -142,6 +142,15 @@ describe('the environment is not sent by a call that only ran beside it', () => 
         via,
         host: 'hacker-news.firebaseio.com',
       });
+  });
+});
+
+describe('a script that reads one variable of the environment and prints it', () => {
+  it('is not linked to a script that reads a single variable and prints that', () => {
+    const got = places(CWD, [
+      `python3 -c "import os,sys; print(os.environ.get('HOME'))"; curl -s https://hacker-news.firebaseio.com/v0/topstories.json`,
+    ]);
+    expect(got.has('OPENAI_API_KEY')).toBe(false);
   });
 });
 

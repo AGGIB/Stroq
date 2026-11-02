@@ -24,6 +24,7 @@
 // never as patterns. Nothing backtracks.
 import { baseName, driveOf, isAbsolutePath, joinPath, normalPath, slashed } from './path-form.js';
 import { lex, REDIRECT, resolve, splitCommand, type Resolved, type Word } from '@stroq/core';
+import { runsQuotedText } from './quoted-cut.js';
 import { readBudgetLeft } from './shell-read.js';
 
 /** The words of a text a file could be named by: cut at blanks, quotes and the shell's operators. */
@@ -49,6 +50,8 @@ export interface Folders {
    * only if it is under one of them; otherwise the end of a path is all there is to go by.
    */
   readonly exact?: boolean;
+  /** The home folder: `~`, `$HOME` and `${HOME}` are read against it. */
+  readonly home?: string;
 }
 
 /**
@@ -67,6 +70,13 @@ const WILD_CHAR = /[*?[{]/;
  * name no file.
  */
 const pathLike = (word: string): boolean => /[^.]/.test(word.replace(/[{}[\],]/g, ''));
+
+/**
+ * A word that is under no folder in particular because every path is: `/`, `//`, `~`, `~/`, `$HOME`, `${HOME}`,
+ * a lone backslash. It names a folder only by containing it.
+ */
+export const isEverywhere = (word: string): boolean =>
+  /^(?:[\\/]+|~\/*|\$\{?HOME\}?\/*)$/.test(word);
 
 /** A slashed path without the slash that ends it, unless it is a root (`/`, `C:/`). */
 const trimSep = (path: string): string =>
@@ -191,18 +201,47 @@ function plainWords(text: string, uncertain: boolean): PathWord[] {
   );
 }
 
+/** Programs that only handle text: what is quoted in their words is a pattern or a message, not a path. */
+const TEXT_PROGRAMS: ReadonlySet<string> = new Set([
+  'echo',
+  'printf',
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'ag',
+  'sed',
+  'awk',
+  'gawk',
+  'jq',
+]);
+
+/** The program a stage runs, or ''. */
+function programOf(stage: string): string {
+  try {
+    return resolve(stage)?.name ?? '';
+  } catch {
+    return '';
+  }
+}
+
 /** A command longer than this is read only as plain words: any wildcard in it is a maybe. */
 const MAX_WORDS_CHARS = 64 * 1024;
 
-let lastWords: { readonly text: string; readonly words: PathWord[] } | null = null;
+let lastWords: {
+  readonly text: string;
+  readonly quoted: boolean;
+  readonly words: PathWord[];
+} | null = null;
 
 /**
  * Every word a command may name a file by: those of each stage of the command and of every text
  * it nests (a `bash -c` body, a substitution), as the core reads them, with how sure each wildcard
  * is; and the command cut by one class, as the paths its quoted text spells.
  */
-export function commandPathWords(text: string): PathWord[] {
-  if (lastWords !== null && lastWords.text === text) return lastWords.words;
+export function commandPathWords(text: string, quotedIsCode = false): PathWord[] {
+  if (lastWords !== null && lastWords.text === text && lastWords.quoted === quotedIsCode)
+    return lastWords.words;
   let words: PathWord[];
   // Too long, or past the run's time for reading commands: the plain cut, every wildcard a maybe.
   if (text.length > MAX_WORDS_CHARS || !readBudgetLeft()) words = plainWords(text, true);
@@ -210,17 +249,34 @@ export function commandPathWords(text: string): PathWord[] {
     try {
       const nested = splitCommand(text).texts.slice(1);
       words = [];
+      // The words only the plain cut of a stage sees, by whether its program only handles text.
+      const printed = new Set<string>();
+      const other = new Set<string>();
       for (const each of [text, ...nested])
-        for (const stage of lex(each).pipelines.flat()) words.push(...stageWords(stage.text));
+        for (const stage of lex(each).pipelines.flat()) {
+          words.push(...stageWords(stage.text));
+          const into = TEXT_PROGRAMS.has(programOf(stage.text)) ? printed : other;
+          for (const w of plainWords(stage.text, true)) into.add(w.text);
+        }
       // What only the plain cut sees (a path a quoted script spells) is read as that path, and a
-      // wildcard in it as a pattern someone may fill in: never as a plain name.
+      // wildcard in it as a pattern someone may fill in: never as a plain name. Not a word that names every
+      // folder (`/`, `~`, a stray `\`) or `.`, which are a stage's own argument or name nothing; and not a word
+      // of the quoted text of a program that only handles text (`echo`, `grep`, `sed`, `awk`: a pattern is not a path).
       const seen = new Set(words.map((w) => w.text));
-      words.push(...plainWords(text, true).filter((w) => !seen.has(w.text)));
+      words.push(
+        ...plainWords(text, true).filter(
+          (w) =>
+            !seen.has(w.text) &&
+            !isEverywhere(w.text) &&
+            !/^\.{1,2}\/?$/.test(w.text) &&
+            !(!quotedIsCode && printed.has(w.text) && !other.has(w.text)),
+        ),
+      );
     } catch {
       words = plainWords(text, true);
     }
   }
-  lastWords = { text, words };
+  lastWords = { text, quoted: quotedIsCode, words };
   return words;
 }
 
@@ -253,7 +309,7 @@ const ZIP_TEMP = /^-b/;
 
 /** Whether a command has an option that changes the folder for the program it is given to. */
 export function changesFolderByOption(command: string): boolean {
-  const words = commandPathWords(command).map((w) => w.text);
+  const words = commandPathWords(command, runsQuotedText(command)).map((w) => w.text);
   if (words.some((w) => FOLDER_OPTION.test(w))) return true;
   return words.includes('zip') && words.some((w) => ZIP_TEMP.test(w));
 }
@@ -267,16 +323,22 @@ const basesOf = (folders: Folders): string[] =>
  * folder named by `.`: for finding the commands that may name a file by another path. A wildcard
  * nobody fills in is no pattern.
  */
-export function namedEnds(command: string): { readonly ends: Set<string>; readonly wild: boolean } {
+export function namedEnds(
+  command: string,
+  home?: string,
+): { readonly ends: Set<string>; readonly wild: boolean; readonly broad: boolean } {
   const ends = new Set<string>();
   // Past the run's time for reading commands, a command may name any file.
   let wild = !readBudgetLeft();
-  for (const word of commandPathWords(command))
+  // A word that is the root or the home folder: it ends in no name, and every key file is under it.
+  let broad = false;
+  for (const word of commandPathWords(command, runsQuotedText(command)))
     for (const c of candidatesOf(word.text)) {
       if ((word.pattern && WILD.test(c) && pathLike(c)) || /^\.{1,2}\/?$/.test(c)) wild = true;
+      if (isEverywhere(c) || (isAbsolutePath(c) && isBroadPath(c, home))) broad = true;
       ends.add(baseName(trimSep(slashed(c))));
     }
-  return { ends, wild };
+  return { ends, wild, broad };
 }
 
 /** How a path names a file, and whether that is sure. */
@@ -285,6 +347,11 @@ export interface Naming {
   readonly sure: boolean;
   /** The word is a pattern: the file is named by what a wildcard may fill in, not by its own name. */
   readonly glob?: true;
+  /**
+   * The folder named is the root or the home folder: every key file is under it, so it names none by itself. It
+   * counts only where the folder is archived or uploaded (`tar czf - ~ | curl -T -`, `rsync -a ~/ host:`).
+   */
+  readonly broad?: true;
 }
 
 /**
@@ -386,6 +453,25 @@ function endNames(path: string, file: string, bases: readonly string[] | null): 
   return { kind: 'folder', sure: true };
 }
 
+/** A word as a path under the home folder when it starts with `~`, `$HOME` or `${HOME}`; null otherwise. */
+function homeSpelling(word: string, home: string): string | null {
+  const spelled = /^(?:~|\$HOME|\$\{HOME\})(?:\/(.*))?$/.exec(word);
+  if (spelled === null) return null;
+  return joinPath(home, spelled[1] ?? '');
+}
+
+/** Whether a path is the root or the home folder: every key file is under it. */
+function isBroadPath(path: string, home: string | undefined): boolean {
+  const p = trimSep(normalPath(path));
+  if (p === '/' || /^[A-Za-z]:\/?$/.test(p)) return true;
+  return home !== undefined && p === trimSep(normalPath(home));
+}
+
+/** A naming of a folder that is the root or the home folder, marked as such. */
+function broadIf(n: Naming | null, path: string, home: string | undefined): Naming | null {
+  return n !== null && n.kind === 'folder' && isBroadPath(path, home) ? { ...n, broad: true } : n;
+}
+
 /** The better of two namings: a file over a folder, a sure one over a maybe. */
 const better = (a: Naming | null, b: Naming | null): Naming | null => {
   if (a === null) return b;
@@ -419,8 +505,14 @@ export function namesFileHow(
             kind: n.kind,
             sure: n.sure && word.sure,
             ...(n.glob === true ? { glob: true as const } : {}),
+            ...(n.broad === true ? { broad: true as const } : {}),
           };
-    if (isAbsolutePath(c)) found = better(found, take(absoluteNames(c, file, pattern)));
+    // `~`, `$HOME` and `${HOME}` are the home folder when it is known.
+    const homed = where.home === undefined ? null : homeSpelling(c, where.home);
+    if (homed !== null)
+      found = better(found, take(broadIf(absoluteNames(homed, file, pattern), homed, where.home)));
+    if (isAbsolutePath(c))
+      found = better(found, take(broadIf(absoluteNames(c, file, pattern), c, where.home)));
     else {
       if (c.startsWith('~')) {
         if (normalPath(c) === file) found = better(found, take({ kind: 'file', sure: true }));

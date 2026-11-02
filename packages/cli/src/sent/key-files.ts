@@ -126,12 +126,12 @@ export function keyFileUses(
   lost = false,
 ): KeyFileUse[] {
   if (index.keysOf.size === 0 && index.environment.length === 0) return [];
-  const named = namedEnds(command);
+  const named = namedEnds(command, where.home);
   const paths = new Set<string>();
   for (const end of named.ends)
     for (const path of index.byName.get(end.toLowerCase()) ?? []) paths.add(path);
   const cut: KeyFileUse[] = [];
-  if (named.wild) {
+  if (named.wild || named.broad) {
     // Past the run's time for reading commands, every key file is checked: none is read.
     const checked = readBudgetLeft() ? index.all.slice(0, MAX_WILD_KEY_FILES) : index.all;
     for (const path of checked) paths.add(path);

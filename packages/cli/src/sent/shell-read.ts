@@ -25,6 +25,7 @@ import {
   type Word,
 } from '@stroq/core';
 import { pathWords } from './file-paths.js';
+import { maskQuotedSeparators, unmaskSeparators } from './quoted-cut.js';
 
 export interface Stage {
   readonly text: string;
@@ -324,9 +325,22 @@ function cutOf(command: string): {
     const whole = [[{ text: command, body: '', piped: false }]];
     return { run: [whole], plain: whole };
   }
-  const plain = split.pipelines.map((stages) =>
+  const blind = split.pipelines.map((stages) =>
     stages.map((text, i) => ({ text, body: '', piped: i > 0 })),
   );
+  // The plain cut that knows what is quoted: a regex in a grep has no program in it. Where the quotes do not
+  // close it is the blind cut, as the lexer's own doubts are (below).
+  const masked = maskQuotedSeparators(command);
+  let plain = blind;
+  if (masked !== null && masked !== command) {
+    try {
+      plain = splitCommand(masked).pipelines.map((stages) =>
+        stages.map((text, i) => ({ text: unmaskSeparators(text), body: '', piped: i > 0 })),
+      );
+    } catch {
+      plain = blind;
+    }
+  }
   const run: Stage[][][] = [];
   let unsure = false;
   // The command as it was written first: the core reads its heredoc bodies apart when they are text.
@@ -344,7 +358,11 @@ function cutOf(command: string): {
         ),
       );
   }
-  if (unsure || split.texts.length > MAX_TEXTS) run.push(plain);
+  // The lexer was not sure, or there are more texts than are read: the blind cut is read in full.
+  if (unsure || split.texts.length > MAX_TEXTS) {
+    run.push(blind);
+    return { run, plain: blind };
+  }
   return { run, plain };
 }
 

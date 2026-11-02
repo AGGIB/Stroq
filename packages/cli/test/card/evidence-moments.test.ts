@@ -209,3 +209,23 @@ describe('the evidence of a kept result is taken apart once more when it is read
     expect(evidence?.text).toBe('curl -H "x: [key]"');
   });
 });
+
+describe('a development session that sends nothing', () => {
+  it('has no moment about keys: a lone / in quoted text and `http` in a grep regex are neither a folder nor a request', async () => {
+    const command = [
+      `echo '=== matrix / tests mention vet --online'`,
+      `grep -rn "online" packages/core/test/actions/stroq-state-matrix.ts packages/cli/test/vet.test.ts | cut -c1-170 | head -12`,
+      `echo`,
+      `echo '=== other network-capable imports already in cli/src (main)'`,
+      `git grep -n -E "from ['\\"](node:)?(net|tls|dns|http2|http|https|dgram)['\\"]|import\\(['\\"](node:)?(net|http|https)" origin/main -- packages/cli/src | head`,
+    ].join('; ');
+    claudeSession(m, {
+      id: 'dev',
+      at: ago(DAY),
+      calls: [bash('ls -a', '.env'), bash(command)],
+    });
+    const data = await buildCard(30, env());
+    expect(data.counts.keysSent).toBe(0);
+    expect(data.moments.filter((x) => x.kind.startsWith('key-'))).toEqual([]);
+  });
+});

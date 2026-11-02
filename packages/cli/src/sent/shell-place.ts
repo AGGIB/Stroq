@@ -25,6 +25,8 @@ import {
 import { embedsPrinter, printsEnvironment } from './env-printers.js';
 import { plainText, valueHolds } from './key-text.js';
 import { linkedByReach, type Link } from './link-by-reach.js';
+import { runsQuotedText } from './quoted-cut.js';
+import { inStringPosition } from './string-positions.js';
 import { baseName, isAbsolutePath, joinPath, normalPath } from './path-form.js';
 import { farther, isThisMachine, type KeyOf, type Place, type Route } from './place.js';
 import {
@@ -80,7 +82,7 @@ function foldersOf(command: string, ctx: ShellContext): Folders {
     more.push(...changes.folders);
     if (changes.unread || changes.cut) read = false;
   }
-  return { cwd: ctx.cwd, more, exact: read };
+  return { cwd: ctx.cwd, more, exact: read, ...(ctx.home === undefined ? {} : { home: ctx.home }) };
 }
 
 const pick = (a: Place | null, b: Place | null): Place | null =>
@@ -178,7 +180,7 @@ function placeIn(
       any = true;
       const facts = reading.facts(reach.stage);
       if (word === '' && reach.direct) word = shownName(facts, holds);
-      add(linkedByReach(stagePlace(reach, reading, key, holds, sendOnly), reach, link, facts.name));
+      add(linkedByReach(stagePlace(reach, reading, key, holds, sendOnly), reach, link));
       // It names more files it may write than are read: one not read may be sent unseen.
       if (facts.writesCut === true) writtenCut = true;
       if (facts.writes.length === 0) continue;
@@ -200,14 +202,7 @@ function placeIn(
   // The plain cut, read for sends: a heredoc the lexer read wrongly can hide no request.
   for (const reach of reached(reading.plain, has, reading.facts)) {
     any = true;
-    add(
-      linkedByReach(
-        stagePlace(reach, reading, key, holds, true),
-        reach,
-        link,
-        reading.facts(reach.stage).name,
-      ),
-    );
+    add(linkedByReach(stagePlace(reach, reading, key, holds, true), reach, link));
   }
   const files = [...written].map(([path, text]) => ({ path, text }));
   return { place, written: files, word, reached: any, sent, writtenCut };
@@ -441,6 +436,8 @@ export function shellPlace(command: string, key: KeyOf, ctx: ShellContext): Plac
   return judgedWhole(base, reading, key, found.word);
 }
 
+const stageOf = (text: string): Stage => ({ text, body: '', piped: false });
+
 /** The files a command wrote a text into, and whether there were more files or text than are kept. */
 export interface Writes {
   readonly files: readonly WrittenFile[];
@@ -505,13 +502,55 @@ export interface FileUse {
 export function fileKinds(command: string, file: string, ctx: ShellContext): Set<string> {
   const target = normalPath(file);
   const folders = foldersOf(command, ctx);
+  // The root and the home folder have every key file under them: they name one only where a program that
+  // archives or uploads a folder is given them.
+  let archives: boolean | null = null;
+  const mayArchive = (): boolean =>
+    (archives ??= archivesFolders(commandReading(command, ctx.cwd)));
   return new Set(
-    commandPathWords(command).map((w) => {
+    commandPathWords(command, runsQuotedText(command)).map((w) => {
       const named = namesFileHow(w, target, folders);
-      return named === null ? '' : named.sure ? named.kind : `${named.kind}?`;
+      if (named === null || (named.broad === true && !mayArchive())) return '';
+      return named.sure ? named.kind : `${named.kind}?`;
     }),
   );
 }
+
+/**
+ * Programs that take a folder in their words and archive, copy or upload it whole. The root or the home folder is
+ * named by a command only through one of these; for any other program it is text, or a string.
+ */
+const FOLDER_TAKERS: ReadonlySet<string> = new Set([
+  'tar',
+  'bsdtar',
+  'gtar',
+  'zip',
+  '7z',
+  '7za',
+  '7zr',
+  'cpio',
+  'pax',
+  'rsync',
+  'scp',
+  'sftp',
+  'rclone',
+  'aws',
+  'gsutil',
+  'gcloud',
+  'az',
+  's3cmd',
+  'mc',
+  'kubectl',
+  'docker',
+  'find',
+  'unison',
+  'ftp',
+  'lftp',
+]);
+
+/** Whether any stage of a command is a program that takes a folder whole. */
+const archivesFolders = (reading: CommandReading): boolean =>
+  allStages(reading).some((stage) => FOLDER_TAKERS.has(reading.facts(stage).name));
 
 /** A place a pattern only may have reached: never surer than maybe. */
 const atMostMaybe = (place: Place): Place =>
@@ -555,25 +594,40 @@ export function fileUse(
       (out) => namesFile(out, target, folders) === 'file',
     );
   };
+  // What is quoted in a command that hands text to a shell is code: its words may name a file.
+  const quotedIsCode = runsQuotedText(command);
   // The word that named the file in the pass that placed it, for the evidence.
   let namedBy = '';
   // `glob`: null any naming, false only a naming by the file's own name, true only a pattern.
   const namesAs =
     (kind: 'file' | 'folder', sure: boolean, glob: boolean | null) =>
     (text: string): boolean => {
-      const hit = commandPathWords(text).find((w) => {
+      const hit = commandPathWords(text, quotedIsCode).find((w) => {
         const named = namesFileHow(w, target, folders);
         return (
           named !== null &&
           named.kind === kind &&
           named.sure === sure &&
-          (glob === null || (named.glob === true) === glob)
+          (glob === null || (named.glob === true) === glob) &&
+          (named.broad !== true || FOLDER_TAKERS.has(reading.facts(stageOf(text)).name))
         );
       });
       if (hit === undefined || skips(text)) return false;
       if (namedBy === '') namedBy = hit.text;
       return true;
     };
+  // Whether every word of a stage that names the folder stands where its program takes a string.
+  const strings = (text: string): boolean => {
+    const facts = reading.facts(stageOf(text));
+    const naming = commandPathWords(text, quotedIsCode).filter((w) => {
+      const named = namesFileHow(w, target, folders);
+      return named !== null && named.kind === 'folder';
+    });
+    return (
+      naming.length > 0 &&
+      naming.every((w) => inStringPosition(facts.name, facts.resolved?.args ?? [], w.text))
+    );
+  };
   // Sure namings first, and of those the file by its own name. Whatever was named, a request that names
   // it in its own words, or is piped what a stage that names it printed (an archive of the folder, a
   // `cat` of the pattern), sent it. One that only ran after such a step is a maybe, linked to the key by
@@ -604,7 +658,7 @@ export function fileUse(
       sure: true,
       glob: null,
       how: 'folder',
-      link: { via: 'folder', proof: 'named' },
+      link: { via: 'folder', proof: 'named', strings },
     },
     {
       kind: 'file',
@@ -618,7 +672,7 @@ export function fileUse(
       sure: false,
       glob: null,
       how: 'folder',
-      link: { via: 'folder', proof: 'named' },
+      link: { via: 'folder', proof: 'named', strings },
     },
   ];
   for (const { kind, sure, glob, how, link } of passes) {
