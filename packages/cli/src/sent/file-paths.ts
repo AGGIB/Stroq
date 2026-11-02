@@ -308,15 +308,17 @@ export function commandPathWords(text: string, quotedIsCode = false): PathWord[]
       // The words only the plain cut of a stage sees, by whether its program only handles text.
       const printed = new Set<string>();
       const other = new Set<string>();
+      let told = true;
       for (const each of [text, ...nested]) {
         const lexed = lex(each).pipelines.flat();
         for (const stage of lexed) words.push(...stageWords(stage.text));
         // The stages whose quoted text is told apart by program are the quote-aware ones: a `$(…)` or a loop
         // body is cut out of the stage that holds it, so its `grep 'users'` is a grep and not part of a `for`.
-        const stages =
-          quotedStageTexts(each, (t) => splitCommand(t).pipelines) ??
-          lexed.map((stage) => stage.text);
-        for (const stage of stages) {
+        const aware = quotedStageTexts(each, (t) => splitCommand(t).pipelines);
+        // Where the quotes do not close, the lexed stage swallows the rest of the command and what is in it is not
+        // told apart: nothing is taken for text.
+        if (aware === null) told = false;
+        for (const stage of aware ?? lexed.map((one) => one.text)) {
           const into = TEXT_PROGRAMS.has(programOf(stage)) ? printed : other;
           for (const w of plainWords(stage, true)) into.add(w.text);
         }
@@ -327,13 +329,15 @@ export function commandPathWords(text: string, quotedIsCode = false): PathWord[]
       // of the quoted text of a program that only handles text (`echo`, `grep`, `sed`, `awk`: a pattern is not a path).
       const seen = new Set(words.map((w) => w.text));
       words.push(
-        ...plainWords(text, true).filter(
-          (w) =>
-            !seen.has(w.text) &&
-            !isEverywhere(w.text) &&
-            !/^\.{1,2}\/?$/.test(w.text) &&
-            !(!quotedIsCode && printed.has(w.text) && !other.has(w.text)),
-        ),
+        ...(quotedStageTexts(text, (t) => splitCommand(t).pipelines) ?? [text])
+          .flatMap((part) => plainWords(part, true))
+          .filter(
+            (w) =>
+              !seen.has(w.text) &&
+              !isEverywhere(w.text) &&
+              !/^\.{1,2}\/?$/.test(w.text) &&
+              !(told && !quotedIsCode && printed.has(w.text) && !other.has(w.text)),
+          ),
       );
     } catch {
       words = plainWords(text, true);

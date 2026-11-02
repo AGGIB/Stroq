@@ -5,7 +5,11 @@
 // to a shell, an interpreter or a sender (`sh <<EOF`, `curl -d @- <<EOF`) is code or data on its way out, and one that
 // is piped on (`cat <<EOF | sh`) or written to a network address goes where it is sent.
 
-/** Programs that read their input as text and write it to a file or the terminal. */
+/**
+ * Programs that read their input as text and write it to a file or the terminal, and cannot run it. Not `sed` (its
+ * `e` runs a line), `awk` and `gawk` (`system()`, `print | cmd`, `| getline`), `dd`, `patch`, nor a pager: a heredoc
+ * given to one of those is code unless proven otherwise.
+ */
 export const DATA_PROGRAMS: ReadonlySet<string> = new Set([
   'cat',
   'tee',
@@ -23,23 +27,15 @@ export const DATA_PROGRAMS: ReadonlySet<string> = new Set([
   'fmt',
   'nl',
   'column',
-  'less',
-  'more',
-  'bat',
   'grep',
   'egrep',
   'fgrep',
   'rg',
   'ag',
-  'sed',
-  'awk',
-  'gawk',
   'jq',
   'base64',
   'xxd',
   'od',
-  'dd',
-  'patch',
   'diff',
   'cmp',
   'comm',
@@ -74,14 +70,21 @@ export function firstProgram(stageText: string): string {
 const GOES_ON = /\/dev\/(?:tcp|udp)\/|>\(|\|/;
 
 /**
- * Whether the heredoc a stage opens is text: its program only reads text (`cat`, `tee`, `grep`, …), it is not given a
- * script to run (`sed -f -`, `awk -f -`), and what it prints is not piped on or written to a network address. The text
- * of the stage up to the heredoc, and the rest of its line.
+ * Whether the heredoc a stage opens is text: its program only reads text (`cat`, `tee`, `grep`, …) and cannot run it,
+ * what it prints is not piped on or written to a network address, and the shell does not expand the body. A body is
+ * expanded unless its delimiter is quoted (`<<'EOF'`, `<<"EOF"`, `<<\EOF`): `$(…)`, a backtick and `$` then run in
+ * the shell before the program sees the text, so such a body is text only when it holds none of them. The text of the
+ * stage up to the heredoc, and the rest of its line.
  */
-export function isDataHeredoc(before: string, rest: string): boolean {
+export function isDataHeredoc(
+  before: string,
+  rest: string,
+  quoted: boolean,
+  body: string,
+): boolean {
   const program = firstProgram(before);
   if (!DATA_PROGRAMS.has(program)) return false;
-  if (/^(?:sed|awk|gawk)$/.test(program) && /\s-f\b/.test(before)) return false;
+  if (!quoted && /[$`]/.test(body)) return false;
   // The quotes of the rest of the line are text: a `|` in them goes nowhere.
   const bare = rest.replace(/'[^'\n]*'|"[^"\n]*"/g, '');
   return !GOES_ON.test(before) && !GOES_ON.test(bare);

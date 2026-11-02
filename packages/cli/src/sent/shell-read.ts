@@ -25,7 +25,7 @@ import {
   type Word,
 } from '@stroq/core';
 import { pathWords } from './file-paths.js';
-import { maskQuotedSeparators, unmaskSeparators } from './quoted-cut.js';
+import { maskQuotedSeparators, scanQuotes, stageRunsText, unmaskSeparators } from './quoted-cut.js';
 
 export interface Stage {
   readonly text: string;
@@ -33,6 +33,8 @@ export interface Stage {
   readonly body: string;
   /** A `|` joins it to the stage before it. */
   readonly piped: boolean;
+  /** The delimiter of the heredoc it opens is quoted, so nothing in the body is expanded. */
+  readonly quoted?: boolean;
 }
 
 /** A command longer than this is not read: a key in it may have gone anywhere. */
@@ -290,10 +292,12 @@ export interface CommandReading {
   /** The plain cut of the command and what it nests, read for sends only. */
   readonly plain: readonly (readonly Stage[])[];
   /**
-   * The cut is sure of the command: the lexer was, its quotes close, and it hands no text to a program that runs
-   * it. Where it is not, a word that is only a folder's name links the folder as a maybe at most.
+   * Whether the cut is sure of a stage (given by its text): the lexer was sure of the command, the stage is not at or
+   * after a quote that is never closed, and it is not in a pipeline that runs text (`echo "…" | sh`, `eval`). An
+   * uncertain part of the command that is not the stage does not make it uncertain. Where it is not sure, a word that
+   * is only a folder's name links the folder as a maybe at most.
    */
-  readonly certain: boolean;
+  readonly certainOf: (stageText: string) => boolean;
   /** The stages that hand the whole shell's output to a descriptor (`exec >file`, `exec 3<>…`). */
   readonly execSink: boolean;
   /** Whether the command makes a request somewhere, or may. */
@@ -322,14 +326,14 @@ const safeResolve = (text: string): Resolved | null => {
 function cutOf(command: string): {
   readonly run: Stage[][][];
   readonly plain: Stage[][];
-  readonly certain: boolean;
+  readonly certainOf: (stageText: string) => boolean;
 } {
   let split: ReturnType<typeof splitCommand>;
   try {
     split = splitCommand(command);
   } catch {
     const whole = [[{ text: command, body: '', piped: false }]];
-    return { run: [whole], plain: whole, certain: false };
+    return { run: [whole], plain: whole, certainOf: () => false };
   }
   const blind = split.pipelines.map((stages) =>
     stages.map((text, i) => ({ text, body: '', piped: i > 0 })),
@@ -360,23 +364,55 @@ function cutOf(command: string): {
             text: stage.text,
             body: stage.heredoc?.body ?? '',
             piped: stage.piped,
+            ...(stage.heredoc === null ? {} : { quoted: stage.heredoc.quoted }),
           })),
         ),
       );
   }
+  const certainOf = stageCertainty(command, blind, run, unsure || split.texts.length > MAX_TEXTS);
   // The lexer was not sure, or there are more texts than are read: the blind cut is read in full.
   if (unsure || split.texts.length > MAX_TEXTS) {
     run.push(blind);
-    return { run, plain: blind, certain: false };
+    return { run, plain: blind, certainOf };
   }
-  return { run, plain, certain: masked !== null };
+  return { run, plain, certainOf };
+}
+
+/**
+ * Whether the cut is sure of a stage, by its text. Not when the lexer was not sure of the command for a reason that
+ * cannot be placed (and no quote left open explains it); not when the stage is at or after a quote that is never
+ * closed (it is inside that quote); not when it is in a pipeline that runs text (a shell, an interpreter, `eval`,
+ * `source`, `xargs`, a here-string). A stage elsewhere in the command is sure whatever the rest is.
+ */
+function stageCertainty(
+  command: string,
+  blind: readonly (readonly Stage[])[],
+  run: readonly (readonly (readonly Stage[])[])[],
+  unsure: boolean,
+): (stageText: string) => boolean {
+  const unclosedAt = scanQuotes(command).unclosedAt;
+  const whole = unsure && unclosedAt === null;
+  const before = unclosedAt === null ? null : command.slice(0, unclosedAt);
+  const runs = new Set<string>();
+  const note = (stages: readonly Stage[]): void => {
+    if (stages.some((stage) => stageRunsText(stage.text)))
+      for (const stage of stages) runs.add(stage.text.trim());
+  };
+  for (const stages of blind) note(stages);
+  for (const pipelines of run) for (const stages of pipelines) note(stages);
+  return (stageText) => {
+    if (whole) return false;
+    const text = stageText.trim();
+    if (runs.has(text)) return false;
+    return before === null || before.includes(text);
+  };
 }
 
 /** Reads a command once: its classes, its cut, and the facts of each stage asked about. */
 export function readCommand(command: string, cwd: string | null): CommandReading {
   const at = cwd ?? '/';
   const classes = classesOf(command, at);
-  const { run, plain, certain } = cutOf(command);
+  const { run, plain, certainOf } = cutOf(command);
   let reads: (stage: string) => boolean;
   try {
     reads = stageReader(command);
@@ -458,7 +494,7 @@ export function readCommand(command: string, cwd: string | null): CommandReading
     known.set(key, result);
     return result;
   };
-  return { command, classes, run, plain, certain, execSink, sends: commandSends, facts };
+  return { command, classes, run, plain, certainOf, execSink, sends: commandSends, facts };
 }
 
 function safeReads(reads: (stage: string) => boolean, text: string): boolean {

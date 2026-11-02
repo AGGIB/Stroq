@@ -146,7 +146,7 @@ function dataBodies(reading: CommandReading): Set<Stage> {
     for (const stages of pipelines)
       stages.forEach((stage, at) => {
         if (stage.body === '' || at !== stages.length - 1) return;
-        if (isDataHeredoc(stage.text, '')) text.add(stage);
+        if (isDataHeredoc(stage.text, '', stage.quoted === true, stage.body)) text.add(stage);
       });
   return text;
 }
@@ -618,6 +618,7 @@ export function fileUse(
   // The word that named the file in the pass that placed it, for the evidence.
   let namedBy = '';
   let namedByEnd = false;
+  let namedStage = '';
   // `glob`: null any naming, false only a naming by the file's own name, true only a pattern.
   const namesAs =
     (kind: 'file' | 'folder', sure: boolean, glob: boolean | null) =>
@@ -634,6 +635,7 @@ export function fileUse(
       });
       if (hit === undefined || skips(text)) return false;
       if (namedBy === '') {
+        namedStage = text;
         namedBy = hit.text;
         namedByEnd = namesFileHow(hit, target, folders)?.byEnd === true;
       }
@@ -713,7 +715,7 @@ export function fileUse(
     if (place !== null && place.tier !== 'seen')
       return {
         // A folder named by a word that is only its name, where the cut is not sure of the command: a maybe.
-        place: sure && (reading.certain || !namedByEnd) ? place : atMostMaybe(place),
+        place: sure && (!namedByEnd || reading.certainOf(namedStage)) ? place : atMostMaybe(place),
         folder: kind === 'folder',
         how,
         word: namedBy,
