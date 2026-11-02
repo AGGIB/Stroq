@@ -61,10 +61,19 @@ export const OPAQUE_MODULES = set(
 );
 /**
  * Modules that turn text into bytes and back and do nothing else (no file, no process, no name by a
- * string). A program that decodes with one is opaque only where the decoded value has somewhere to go:
- * a process it starts, or a file it writes (`python-processes.ts`). Decoding to print is not running.
+ * string). A program that decodes with one is opaque unless the decoded value has nowhere to go: no
+ * process it starts, no file it writes, no frame or tracer it reaches (`python-processes.ts`). Even then
+ * the program is only read as one that prints when the line is that program alone (`print-only.ts`).
  */
 export const DECODER_MODULES = set('base64 binascii');
+/**
+ * Names through which a program reaches the frames of the interpreter and the globals of its callers, or traces
+ * them: a name or a list a reader trusted can be changed from there without naming it (`sys._getframe().f_globals`).
+ */
+export const FRAME_NAMES = set(
+  `_getframe currentframe f_globals f_locals f_builtins f_back f_code tb_frame settrace setprofile
+   gettrace getprofile _current_frames _current_exceptions getouterframes getinnerframes inspect`,
+);
 /** Names through which a program reaches another name by a string, or runs code it makes. */
 export const OPAQUE_NAMES = set(
   'eval exec compile __import__ getattr setattr delattr globals locals vars breakpoint',

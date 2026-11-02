@@ -126,25 +126,6 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
   ['rm -rf, a deep path after many commands', (r) => `${r('echo x; ')}rm -rf /tmp/a/b`],
   ['rm -rf, a deep path after many sets of TMPDIR', (r) => `${r('TMPDIR=x; ')}rm -rf $TMPDIR/a/b`],
   ['rm -rf, a deep path after many substitutions', (r) => `${r('echo $(true); ')}rm -rf /tmp/a/b`],
-  [
-    'python command lines bound to a name',
-    (r) => `python3 -c 'import subprocess; ${r('cmd = ["ls"]; ')}subprocess.run(cmd)'`,
-  ],
-  [
-    'python copies of the environment',
-    (r) =>
-      `python3 -c 'import subprocess, os; ${r('env = os.environ.copy(); ')}subprocess.run(["ls"], env=env)'`,
-  ],
-  [
-    'python variables set in a copy of the environment',
-    (r) =>
-      `python3 -c 'import subprocess, os; env = os.environ.copy(); ${r('env["A"] = "1"; ')}subprocess.run(["ls"], env=env)'`,
-  ],
-  [
-    'python processes given a copy of the environment',
-    (r) =>
-      `python3 -c 'import subprocess, os; env = os.environ.copy(); ${r('subprocess.run(["ls"], env=env); ')}'`,
-  ],
   ['python decoders', (r) => `python3 -c 'import base64; ${r('print(base64.b64decode(x)); ')}'`],
   // Where a decoding program's output goes is read from the stages after it and their redirects.
   ['python decoder, stages after it', (r) => `python3 -c 'import base64' ${r('| head -1 ')}`],

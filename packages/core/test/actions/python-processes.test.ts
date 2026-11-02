@@ -398,7 +398,7 @@ describe('a string that may be code', () => {
   });
 });
 
-describe('a program that reaches names through strings, runs code it makes, or decodes to somewhere', () => {
+describe('a program that reaches names through strings, runs code it makes, or decodes', () => {
   it.each([
     ['getattr', "import os\ngetattr(os, 'sys' + 'tem')('ls')"],
     ['__import__', "__import__('os')"],
@@ -421,16 +421,24 @@ describe('a program that reaches names through strings, runs code it makes, or d
     ['environ by name', 'from os import environ'],
     ['a dunder', '().__class__.__base__.__subclasses__()'],
     [
+      'base64, decoded into a process',
+      "import base64, os\nos.system('ls')\nprint(base64.b64decode('aGk='))",
+    ],
+    [
       'base64, decoded into a file',
       "import base64\nopen('x.sh', 'wb').write(base64.b64decode('bHM='))",
     ],
     [
-      'base64, decoded beside a process',
-      "import base64, os\nos.system('ls')\nprint(base64.b64decode('aGk='))",
-    ],
-    [
       'binascii, decoded into a file',
       "import binascii\nopen('x', 'wb').write(binascii.unhexlify('6869'))",
+    ],
+    [
+      'base64, beside a frame',
+      "import base64, sys\nprint(base64.b64decode('aGk='), sys._getframe().f_globals)",
+    ],
+    [
+      'base64, beside a tracer',
+      "import base64, sys\nsys.settrace(f)\nprint(base64.b64decode('aGk='))",
     ],
     ['codecs', "import codecs\ncodecs.decode('x', 'rot13')"],
     ['fromhex', "bytes.fromhex('6869')"],
@@ -491,6 +499,7 @@ describe('a program that decodes data and has nowhere to send it', () => {
     const reading = readPythonProcesses(program);
     expect(reading?.opaque).toBe(false);
     expect(reading?.unread).toBe(false);
+    expect(reading?.decodes).toBe(true);
   });
 
   it.each([

@@ -8,10 +8,10 @@ import {
   type Bindings,
   type Names,
 } from './python-bindings.js';
-import { readNamedValues, type NamedValues } from './python-values.js';
 import {
   DISTINCT_RUNS,
   ENVIRONMENTS,
+  FRAME_NAMES,
   INERT,
   OPAQUE_ATTRIBUTES,
   OPAQUE_NAMES,
@@ -75,8 +75,8 @@ export interface PythonProcesses {
   readonly unread: boolean;
   /**
    * The program reaches names through strings, runs or loads code it makes, changes the environment
-   * its processes get, or decodes data that can go somewhere (to a process it starts, or to a file it
-   * writes). A program that decodes and has nowhere to send the result but its own output is not opaque.
+   * its processes get, or decodes data that can go somewhere (to a process it starts, a file it writes,
+   * or a frame or tracer it reaches).
    */
   readonly opaque: boolean;
   /**
@@ -169,8 +169,6 @@ class ProgramReader {
   movesUnread = false;
   /** The strings that are commands the program starts, or words of one: what they hold is read as one. */
   readonly commandStrings = new Set<number>();
-  /** The places of each name (`python-values.ts`) that a process start took. */
-  private readonly taken = new Map<string, Set<number>>();
   unread = false;
   opaque = false;
 
@@ -179,7 +177,6 @@ class ProgramReader {
     private readonly match: ReadonlyMap<number, number>,
     private readonly names: Names,
     private readonly bindings: Bindings,
-    private readonly values: NamedValues,
   ) {}
 
   private add(process: Started): void {
@@ -219,13 +216,9 @@ class ProgramReader {
     );
   }
 
-  /**
-   * The words of a list or tuple written out as the command, or of a name that is bound to one and
-   * touched nowhere else (`python-values.ts`), or null when any is not known before it runs.
-   */
-  private wordsOf(range: readonly [number, number], trusted: boolean): string[] | null {
+  /** The words of a list or tuple written out as the command, or null when any is not known before it runs. */
+  private wordsOf([from, to]: readonly [number, number]): string[] | null {
     const { tokens, match } = this;
-    const [from, to] = trusted ? this.listOf(range) : range;
     const open = tokens[from] as PythonToken;
     if (!(isOp(open, '[') || isOp(open, '(')) || match.get(from) !== to - 1) return null;
     const words: string[] = [];
@@ -257,61 +250,6 @@ class ProgramReader {
     return words;
   }
 
-  /** A process start took the name at `at` (and `also`, the keyword before it): told to `settle`. */
-  private take(name: string, at: number, also?: number): void {
-    const places = this.taken.get(name) ?? new Set<number>();
-    places.add(at);
-    if (also !== undefined) places.add(also);
-    this.taken.set(name, places);
-  }
-
-  /** The range of the list a name stands for, or the range given when it is not such a name. */
-  private listOf(range: readonly [number, number]): readonly [number, number] {
-    const [from, to] = range;
-    const tok = this.tokens[from] as PythonToken;
-    if (to !== from + 1 || tok.kind !== 'name' || this.names.imported.has(tok.text)) return range;
-    const list = this.values.lists.get(tok.text);
-    if (list === undefined) return range;
-    this.take(tok.text, from);
-    return list;
-  }
-
-  /**
-   * The variables a copy of the environment gets, as the words that put them before a command
-   * (`A=1 B='x y'`), for the name given as `env=`; null when it is anything else.
-   */
-  private environmentOf([from, to]: readonly [number, number]): string[] | null {
-    const tok = this.tokens[from] as PythonToken;
-    if (to !== from + 1 || tok.kind !== 'name') return null;
-    const copy = this.values.environments.get(tok.text);
-    if (copy === undefined) return null;
-    // The keyword before the name is a place of the name when it is spelled the same (`env=env`).
-    const keyword = isName(this.tokens[from - 2], tok.text) ? from - 2 : undefined;
-    this.take(tok.text, from, keyword);
-    return copy.variables.map(([key, value]) => `${key}=${quote(value)}`);
-  }
-
-  /**
-   * Called when every call is read. A name a process start took is trusted only if every place the
-   * program writes it is its binding, a statement that sets it, or a place a process start took it:
-   * an alias, a call that is not a process start (`f(env=env)`, which can reach the dict as `kw['env']`),
-   * a dict that holds it, a forwarded `**kw` may change it, and then the processes are not read. A copy
-   * of the environment no process took is as opaque as `os.environ.copy()` was. Returns the `environ`
-   * tokens of the copies that were understood.
-   */
-  settle(): ReadonlySet<number> {
-    const understood = new Set<number>();
-    for (const [name, places] of this.taken)
-      if (!this.values.accountedFor(name, places)) this.unread = true;
-    for (const [name, copy] of this.values.environments) {
-      const places = this.taken.get(name);
-      if (places !== undefined && this.values.accountedFor(name, places))
-        understood.add(copy.environ);
-      else this.opaque = true;
-    }
-    return understood;
-  }
-
   /** What `stdin=` gives the process: nothing (`DEVNULL`), what the program reads (`None`), or what it writes. */
   private stdinOf([from, to]: readonly [number, number]): PythonProcess['stdin'] {
     const { tokens } = this;
@@ -325,13 +263,8 @@ class ProgramReader {
     return devnull ? 'none' : 'fed';
   }
 
-  /**
-   * A call of `subprocess.run` or one of its kin (`fn`), whose name is at `at`. `trusted` says the callee
-   * is the function of the module (`subprocess.run`, or a name imported from it): only then does a name
-   * the program binds to a list or to a copy of the environment stand for its value, since any other
-   * callee of that name (`obj.Popen`, a function the program defines) may change what it is given.
-   */
-  readRun(at: number, fn: string, trusted = false): void {
+  /** A call of `subprocess.run` or one of its kin (`fn`), whose name is at `at`. */
+  readRun(at: number, fn: string): void {
     const { tokens } = this;
     if (!isOp(tokens[at + 1], '(')) {
       this.unread = true;
@@ -354,16 +287,8 @@ class ProgramReader {
     }
     let stdin: PythonProcess['stdin'] = 'inherit';
     let cwd: string | undefined;
-    let environment: string[] = [];
     for (const [key, range] of call.keywords) {
-      if (key === 'env') {
-        const variables = trusted ? this.environmentOf(range) : null;
-        if (variables === null) {
-          this.unread = true;
-          return;
-        }
-        environment = variables;
-      } else if (key === 'input') stdin = 'fed';
+      if (key === 'input') stdin = 'fed';
       else if (key === 'stdin') stdin = stdin === 'fed' ? 'fed' : this.stdinOf(range);
       else if (key === 'cwd') {
         // A directory written out is where its scripts are read; a new temporary one has none.
@@ -387,18 +312,17 @@ class ProgramReader {
     const text = this.literal(first);
     const where = cwd === undefined ? {} : { cwd };
     if (shellValue === 'True') {
-      // The variables of `env=` belong to the whole line, and a prefix is only the first command's.
-      if (text === undefined || environment.length > 0) this.unread = true;
+      if (text === undefined) this.unread = true;
       else this.add({ command: text, stdin, ...where });
       return;
     }
     // A string without a shell is the name of the program, and nothing else.
-    const words = text !== undefined ? [quote(text)] : this.wordsOf(first, trusted);
+    const words = text !== undefined ? [quote(text)] : this.wordsOf(first);
     if (words === null || words.length === 0) {
       this.unread = true;
       return;
     }
-    this.add({ command: [...environment, ...words].join(' '), stdin, ...where });
+    this.add({ command: words.join(' '), stdin, ...where });
   }
 
   /**
@@ -534,12 +458,6 @@ class ProgramReader {
     else this.opaque = true;
   }
 
-  /** The `environ` at `at` is that of `os.environ.copy()` bound to a name that may turn out to be understood. */
-  private isCopy(at: number): boolean {
-    for (const copy of this.values.environments.values()) if (copy.environ === at) return true;
-    return false;
-  }
-
   /** A name after a dot, at `at`. */
   attribute(at: number): void {
     const { tokens, names } = this;
@@ -551,17 +469,8 @@ class ProgramReader {
       if (!isOp(tokens[at + 1], '.')) this.passedOn(word);
       return;
     }
-    // `subprocess.run = f`, `os.system = f`: a function of the module is replaced, and what is called
-    // through it, or handed to it, is not what it was.
-    if (
-      (names.subprocess.has(ownerName) || names.os.has(ownerName)) &&
-      ASSIGNMENT.has((tokens[at + 1] as PythonToken | undefined)?.text ?? '')
-    ) {
-      this.opaque = true;
-      return;
-    }
     if (names.subprocess.has(ownerName)) {
-      if (RUNS.has(word) || SHELL_RUNS.has(word)) this.readRun(at, word, true);
+      if (RUNS.has(word) || SHELL_RUNS.has(word)) this.readRun(at, word);
       else if (!INERT.has(word)) this.unread = true;
       return;
     }
@@ -571,7 +480,7 @@ class ProgramReader {
     else if (DISTINCT_RUNS.has(word)) this.readRun(at, word);
     else if (OS_SHELLS.has(word)) this.readShell(at, word, false);
     else if (UNREAD_STARTS.has(word)) this.unread = true;
-    else if (ENVIRONMENTS.has(word)) this.opaque ||= !this.readsEnvironment(at) && !this.isCopy(at);
+    else if (ENVIRONMENTS.has(word)) this.opaque ||= !this.readsEnvironment(at);
     else if (OPAQUE_ATTRIBUTES.has(word) || isOpaqueDunder(word)) this.opaque = true;
   }
 
@@ -587,7 +496,7 @@ class ProgramReader {
     const shell = names.shells.get(word);
     const chdir = names.chdirs.get(word);
     if (chdir !== undefined) this.readChdir(at, chdir);
-    else if (run !== undefined) this.readRun(at, run, true);
+    else if (run !== undefined) this.readRun(at, run);
     else if (shell !== undefined) this.readShell(at, shell, true);
     else if (DISTINCT_RUNS.has(word)) this.readRun(at, word);
     else if (word === 'exec') this.readExec(at);
@@ -596,19 +505,11 @@ class ProgramReader {
   }
 }
 
-/**
- * Whether a program may write a file: a writer's name (`write`, `copy`, …), or `open` in a mode that writes or
- * is not written out. The `copy` of a copy of the environment (`copied`, the index of its `environ`) writes
- * nothing.
- */
-function writesFiles(
-  tokens: readonly PythonToken[],
-  match: ReadonlyMap<number, number>,
-  copied: ReadonlySet<number>,
-): boolean {
+/** Whether a program may write a file: a writer's name (`write`, `copy`, …), or `open` in a mode that writes or is not written out. */
+function writesFiles(tokens: readonly PythonToken[], match: ReadonlyMap<number, number>): boolean {
   return tokens.some((tok, i) => {
     if (tok.kind !== 'name') return false;
-    if (WRITES.has(tok.text)) return !copied.has(i - 2);
+    if (WRITES.has(tok.text)) return true;
     if (tok.text !== 'open' || !isOp(tokens[i + 1], '(')) return false;
     const call = argumentsOf(tokens, match, i + 1);
     if (call === null || call.starred) return true;
@@ -648,8 +549,7 @@ export function readPythonProcesses(program: string): PythonProcesses | null {
   for (const modules of [names.subprocess, names.os, names.sys])
     for (const name of [...modules])
       if (!names.imported.has(name) && (bindings.counts.get(name) ?? 0) > 0) modules.delete(name);
-  const values = readNamedValues(tokens, match, names, inImport);
-  const reader = new ProgramReader(tokens, match, names, bindings, values);
+  const reader = new ProgramReader(tokens, match, names, bindings);
   for (let i = 0; i < tokens.length; i += 1) {
     const tok = tokens[i] as PythonToken;
     if (tok.kind !== 'name' || inImport(i)) continue;
@@ -671,8 +571,7 @@ export function readPythonProcesses(program: string): PythonProcesses | null {
   );
   // A program that may write a file and starts a process may run what it wrote (`sh x.sh` after writing
   // `x.sh`): what runs is not on disk before it starts, so it is not read.
-  const understood = reader.settle();
-  const writes = writesFiles(tokens, match, understood);
+  const writes = writesFiles(tokens, match);
   const writesAndRuns = reader.processes.length > 0 && writes;
   // And one that may fetch: what it starts may be what it fetched.
   const fetchesAndRuns =
@@ -704,13 +603,17 @@ export function readPythonProcesses(program: string): PythonProcesses | null {
       writesAndRuns ||
       fetchesAndRuns ||
       (reader.movesUnread && processes.length > 0),
-    // Decoded data is run by what it is given to: a process (it may be the decoded text) or a file (it may
-    // be run later). A program with neither has nowhere to send it but its own output.
+    // Decoded data is run by what it is given to: a process (it may be the decoded text), a file (it may be
+    // run later), a frame or a tracer (it may change what a process is given). A program with none of them has
+    // nowhere to send it but its own output.
     opaque:
       names.opaque ||
       reader.opaque ||
       rebound ||
-      (names.decodes && (reader.processes.length > 0 || writes)),
+      (names.decodes &&
+        (reader.processes.length > 0 ||
+          writes ||
+          tokens.some((tok) => tok.kind === 'name' && FRAME_NAMES.has(tok.text)))),
     decodes: names.decodes,
     hiddenPayload,
   };

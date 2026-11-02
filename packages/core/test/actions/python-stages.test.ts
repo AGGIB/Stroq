@@ -53,6 +53,10 @@ describe('the programs agents write to test their work', () => {
 describe('a program that imports a module that is not read keeps the old answer', () => {
   it.each([
     [
+      'git init in a temporary directory',
+      `cd /workspace/iterative__dvc__0.89 && python -c "\nimport tempfile\nimport os\nfrom dvc.config import Config\n\ntest_dir = tempfile.mkdtemp()\noriginal_cwd = os.getcwd()\ntry:\n    os.chdir(test_dir)\n    os.system('git init > /dev/null 2>&1')\n    os.system('dvc init --no-scm > /dev/null 2>&1')\n    config = Config(dvc_dir='.dvc')\nfinally:\n    os.chdir(original_cwd)\n    import shutil\n    shutil.rmtree(test_dir, ignore_errors=True)\n"`,
+    ],
+    [
       'mypy on a file it names',
       `cd /workspace/python__mypy__0.940 && python -c "\nimport subprocess\nimport sys\nwith open('/tmp/test_dup.py', 'w') as f:\n    f.write('x = 1')\nresult = subprocess.run([sys.executable, '-m', 'mypy', '/tmp/test_dup.py'], capture_output=True, text=True, cwd='.')\nprint(result.stdout)\n"`,
     ],
@@ -62,9 +66,7 @@ describe('a program that imports a module that is not read keeps the old answer'
     ],
   ])('%s', (_name, command) => {
     // The old pattern sees these (\`os.system\`, \`subprocess\`), and the program imports a module
-    // whose code is not read (\`distutils\`) or writes a file it runs: its answer stands. A program that
-    // imports a module of the project and starts only the commands it writes out is read as those
-    // commands (\`python-precision.test.ts\`).
+    // whose code is not read (the project's own \`dvc.config\`, \`distutils\`): its answer stands.
     expect(classes(command)).toContain('shell.exec_encoded');
   });
 });
