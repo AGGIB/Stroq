@@ -20,7 +20,8 @@ import { startKeys, type KeyOutcome } from './keys-run.js';
 import { scrubSummary, type Scrub } from './scrub.js';
 import type { CacheEntry, SessionSummary } from './schema.js';
 import { cacheKey, cachedSummary, readSessionCache, writeSessionCache } from './store.js';
-import { isTooLarge, listWindow, type WindowSession } from './window.js';
+import { isTooLarge, listWindow, windowStart, type WindowSession } from './window.js';
+import { withinWindow } from './within.js';
 import { openChannel } from './worker.js';
 
 /** After this long no job is started (the card should answer in about this time on a cold machine). */
@@ -104,6 +105,7 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
   const started = Date.now();
   const budget = run.budgetMs ?? BUDGET_MS;
   const listing = await listWindow(run.home, run.env, days, run.now);
+  const since = windowStart(days, run.now);
   const sessions = listing.sessions;
   const policy = loadPolicyWithSource().source.sha256;
   const cache = readSessionCache(run.stroqHome);
@@ -112,7 +114,14 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
   // The keys this machine holds, in this thread and the workers only: the check looks for them, and
   // anything the card keeps is cleaned of them.
   const keys = startKeys(
-    { home: run.home, env: run.env, stroqHome: run.stroqHome, cwd: run.cwd, version: run.version },
+    {
+      home: run.home,
+      env: run.env,
+      stroqHome: run.stroqHome,
+      cwd: run.cwd,
+      version: run.version,
+      since,
+    },
     sessions,
   );
   const keysReadyAt = Date.now();
@@ -267,11 +276,14 @@ interface Context {
 function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): CardData {
   const sessions = ctx.listing.sessions;
   const counted = got.summaries.filter((s): s is SessionSummary => s !== undefined);
+  // Only what happened inside the window, by the time of each event and not by the date of its file.
+  const since = windowStart(days, run.now);
+  const inside = counted.map((s) => withinWindow(s, since));
   const told: ToldInput[] = [];
   got.summaries.forEach((summary, i) => {
     const session = sessions[i];
     if (summary === undefined || session === undefined) return;
-    for (const moment of summary.moments)
+    for (const moment of withinWindow(summary, since).moments)
       told.push({
         moment,
         // A folder or a file named with a key would print it: the same cut as for the text itself.
@@ -286,8 +298,8 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
   const findings = got.keys.findings;
   const moments = buildMoments({ told, findings, repos: got.folders.repos, home: run.home });
   const counts: CardCounts = {
-    commands: counted.reduce((sum, s) => sum + s.commands, 0),
-    toldByText: counted.reduce((sum, s) => sum + s.told, 0),
+    commands: inside.reduce((sum, s) => sum + s.commands, 0),
+    toldByText: inside.reduce((sum, s) => sum + s.told, 0),
     keysSent: findings.filter((f) => f.tier === 'third_party').length,
     keysStopped: got.keys.stopped,
     keysSeen: findings.filter((f) => f.tier === 'seen').length,

@@ -70,7 +70,7 @@ const placeTimes = (place: Place): Place =>
     : { ...place, then: { ...place.then, at: isoTime(place.then.at) } };
 
 /** Earlier first; a stamp that will not parse goes last. */
-function earlier(a: string, b: string): boolean {
+export function earlier(a: string, b: string): boolean {
   const x = Date.parse(a);
   const y = Date.parse(b);
   if (Number.isNaN(y)) return !Number.isNaN(x);

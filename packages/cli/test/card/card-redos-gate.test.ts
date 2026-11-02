@@ -87,6 +87,7 @@ describe('the card reads session text in linear time', () => {
                   then: { route: 'command', host: text, at: text, detail: text },
                 },
                 at: text,
+                last: text,
                 subagent: text,
                 times: 1,
                 seen: 1,

@@ -46,6 +46,7 @@ const summary = (id: string, over: Partial<SessionSummary> = {}): SessionSummary
   commands: 3,
   told: 0,
   moments: [],
+  hours: [],
   ...over,
 });
 const entry = (id: string, mtimeMs = 1_000): CacheEntry => ({

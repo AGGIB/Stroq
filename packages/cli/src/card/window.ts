@@ -13,6 +13,9 @@ import type { CardAgent } from './schema.js';
 
 const DAY_MS = 86_400_000;
 
+/** The start of a window of `days` days that ends at `now`, in milliseconds since 1970. */
+export const windowStart = (days: number, now: Date): number => now.getTime() - days * DAY_MS;
+
 export interface WindowSession {
   readonly agent: CardAgent;
   readonly path: string;
@@ -111,7 +114,7 @@ export async function listWindow(
   days: number,
   now: Date,
 ): Promise<WindowListing> {
-  const cutoff = now.getTime() - days * DAY_MS;
+  const cutoff = windowStart(days, now);
   const claude = await claudeMains(home, env);
   const codex = await everyRollout(codexRoot(home));
   const inside = (m: { mtimeMs: number }): boolean => m.mtimeMs >= cutoff;

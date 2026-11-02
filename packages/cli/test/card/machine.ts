@@ -45,6 +45,8 @@ export interface Call {
   readonly tool: string;
   readonly input: Block;
   readonly result: string;
+  /** When the call happened, as ISO 8601; the session's `at` when not given. */
+  readonly at?: string;
 }
 
 /** A Claude Code session: its file, filed where Claude Code files it. Returns the path. */
@@ -56,23 +58,33 @@ export function claudeSession(
     readonly calls: readonly Call[];
     readonly at?: string;
     readonly mtime?: Date;
+    /** Write the records with no time at all, as some transcripts have them. */
+    readonly untimed?: boolean;
   },
 ): string {
   const cwd = options.cwd ?? m.work;
   const at = options.at ?? ago(DAY);
   const dir = join(m.home, '.claude', 'projects', projectSlug(cwd));
   mkdirSync(dir, { recursive: true });
-  const record = (role: 'user' | 'assistant', content: readonly Block[]): string =>
+  const record = (role: 'user' | 'assistant', content: readonly Block[], when: string): string =>
     JSON.stringify({
       type: role,
       sessionId: options.id,
       cwd,
-      timestamp: at,
+      ...(options.untimed === true ? {} : { timestamp: when }),
       message: { role, content },
     });
   const lines = options.calls.flatMap((call, i) => [
-    record('assistant', [{ type: 'tool_use', id: `t${i}`, name: call.tool, input: call.input }]),
-    record('user', [{ type: 'tool_result', tool_use_id: `t${i}`, content: call.result }]),
+    record(
+      'assistant',
+      [{ type: 'tool_use', id: `t${i}`, name: call.tool, input: call.input }],
+      call.at ?? at,
+    ),
+    record(
+      'user',
+      [{ type: 'tool_result', tool_use_id: `t${i}`, content: call.result }],
+      call.at ?? at,
+    ),
   ]);
   const file = join(dir, `${options.id}.jsonl`);
   writeFileSync(file, `${lines.join('\n')}\n`);
@@ -87,7 +99,12 @@ export function codexRollout(
   options: {
     readonly name: string;
     readonly cwd?: string;
-    readonly commands: readonly { readonly command: string; readonly output?: string }[];
+    readonly commands: readonly {
+      readonly command: string;
+      readonly output?: string;
+      /** When it happened, as ISO 8601; the rollout's `at` when not given. */
+      readonly at?: string;
+    }[];
     readonly at?: string;
   },
 ): string {
@@ -95,22 +112,30 @@ export function codexRollout(
   const at = options.at ?? ago(DAY);
   const dir = join(m.home, '.codex', 'sessions', '2026', '10', '20');
   mkdirSync(dir, { recursive: true });
-  const envelope = (type: string, payload: unknown): string =>
-    JSON.stringify({ timestamp: at, type, payload });
+  const envelope = (type: string, payload: unknown, when: string = at): string =>
+    JSON.stringify({ timestamp: when, type, payload });
   const lines = [
     envelope('session_meta', { session_id: options.name, cwd, timestamp: at }),
     ...options.commands.flatMap((c, i) => [
-      envelope('response_item', {
-        type: 'function_call',
-        name: 'shell',
-        call_id: `c${i}`,
-        arguments: JSON.stringify({ command: ['bash', '-lc', c.command] }),
-      }),
-      envelope('response_item', {
-        type: 'function_call_output',
-        call_id: `c${i}`,
-        output: c.output ?? 'ok',
-      }),
+      envelope(
+        'response_item',
+        {
+          type: 'function_call',
+          name: 'shell',
+          call_id: `c${i}`,
+          arguments: JSON.stringify({ command: ['bash', '-lc', c.command] }),
+        },
+        c.at,
+      ),
+      envelope(
+        'response_item',
+        {
+          type: 'function_call_output',
+          call_id: `c${i}`,
+          output: c.output ?? 'ok',
+        },
+        c.at,
+      ),
     ]),
   ];
   const file = join(dir, `rollout-${options.name}.jsonl`);

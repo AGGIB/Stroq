@@ -301,7 +301,14 @@ describe('the key check against the whole-run check of `stroq sent`', () => {
       { scope: 'machine', cursorUnavailable: null },
     );
     const keys = startKeys(
-      { home: m.home, env: process.env, stroqHome: m.stroqHome, cwd: m.work, version: 'test' },
+      {
+        home: m.home,
+        env: process.env,
+        stroqHome: m.stroqHome,
+        cwd: m.work,
+        version: 'test',
+        since: 0,
+      },
       listing.sessions,
     );
     for (const [index] of listing.sessions.entries()) {
@@ -360,7 +367,14 @@ describe('a canary found in the sessions, its file gone', () => {
     );
     expect(whole.findings.filter((f) => f.canary === true)).toHaveLength(1);
     const keys = startKeys(
-      { home: m.home, env: process.env, stroqHome: m.stroqHome, cwd: m.work, version: 'test' },
+      {
+        home: m.home,
+        env: process.env,
+        stroqHome: m.stroqHome,
+        cwd: m.work,
+        version: 'test',
+        since: 0,
+      },
       listing.sessions,
     );
     for (const [index] of listing.sessions.entries()) {

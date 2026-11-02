@@ -50,6 +50,7 @@ const entry = (over: Partial<KeyCacheEntry> = {}): KeyCacheEntry => ({
           host: 'x.invalid',
         },
         at: '2026-10-20T10:00:00.000Z',
+        last: '2026-10-20T10:00:00.000Z',
         times: 2,
         seen: 4,
         later: 0,
@@ -135,7 +136,8 @@ describe('what the key check does not trust', () => {
 
   it.each([
     ['not JSON', 'not json {'],
-    ['another schema', { ...valid(), schema: 'stroq-card-keys/2' }],
+    ['another schema', { ...valid(), schema: 'stroq-card-keys/3' }],
+    ['the schema before the window by event time', { ...valid(), schema: 'stroq-card-keys/1' }],
     ['a property it does not know', { ...valid(), extra: 1 }],
     ['a salt that is not hexadecimal', { ...valid(), salt: 'zz'.repeat(16) }],
     ['a digest of the wrong length', { ...valid(), digest: 'ab' }],

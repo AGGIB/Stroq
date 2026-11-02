@@ -12,6 +12,7 @@ import { readTranscript, type Transcript } from '../replay/transcript.js';
 import { declaredPackages } from './declared-packages.js';
 import { leanTranscript } from './lean.js';
 import type { DeclaredPackages } from './package-claims.js';
+import { hourOf, hoursOf } from './hours.js';
 import {
   MAX_TOLD_PER_SESSION,
   type CardAgent,
@@ -81,7 +82,9 @@ export async function summarizeTranscript(
   agent: CardAgent,
   deps: SummaryDeps = {},
 ): Promise<SessionSummary> {
-  const commands = transcript.events.filter((e) => e.kind === 'pre' && isShellTool(e.tool)).length;
+  const shellCalls = transcript.events.filter((e) => e.kind === 'pre' && isShellTool(e.tool));
+  const commands = shellCalls.length;
+  const commandHours = shellCalls.map((e) => hourOf(e.at));
   const base = {
     agent,
     sessionId: transcript.sessionId,
@@ -90,22 +93,29 @@ export async function summarizeTranscript(
     last: isoOrNull(transcript.events.at(-1)?.at),
     commands,
   };
-  if (commands === 0) return { ...base, told: 0, moments: [] };
+  if (commands === 0) return { ...base, told: 0, moments: [], hours: [] };
   const replay = deps.replay ?? replayTranscript;
   const entries = await replay(deps.full === true ? transcript : leanTranscript(transcript));
   const declared = lazily(() =>
     deps.declared === undefined ? declaredPackages(transcript.cwd) : deps.declared(transcript.cwd),
   );
   const moments: ToldMoment[] = [];
-  let told = 0;
+  const toldHours: (number | null)[] = [];
   for (const entry of entries) {
     if (entry.phase !== 'pre' || entry.sessionId !== transcript.sessionId) continue;
     const link = strictLink(asLinkEntry(entry), declared);
     if (link === null) continue;
-    told += 1;
-    if (moments.length < MAX_TOLD_PER_SESSION) moments.push(momentOf(entry, link));
+    toldHours.push(hourOf(entry.ts));
+    // The newest are kept: a window cuts the old end of a session off.
+    moments.push(momentOf(entry, link));
+    if (moments.length > MAX_TOLD_PER_SESSION) moments.shift();
   }
-  return { ...base, told, moments };
+  return {
+    ...base,
+    told: toldHours.length,
+    moments,
+    hours: hoursOf(commandHours, toldHours),
+  };
 }
 
 /** Reads the session at `path` the way its agent wrote it, and sums it up. */

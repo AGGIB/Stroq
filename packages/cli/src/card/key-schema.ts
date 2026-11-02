@@ -79,7 +79,10 @@ const placeSchema = z
   })
   .strict();
 
-/** The most keys one transcript's result holds; a result with more is used once and not kept. */
+/**
+ * The most hits one transcript's result holds (a key has one for each distance it reached that no later,
+ * nearer sighting hides); a result with more is used once and not kept.
+ */
 export const MAX_HITS = 2_000;
 /** The most keys an index numbers (`MAX_KEYS` in `sent/keys.ts`, with the canaries found in sessions). */
 const MAX_KEY_NUMBER = 20_000;
@@ -89,8 +92,13 @@ const hitSchema = z
     /** The key's number in the index the result was made under. */
     k: z.number().int().nonnegative().max(MAX_KEY_NUMBER),
     place: placeSchema,
-    /** ISO 8601, or empty when the record gave no time that reads as one. */
+    /** The earliest time the key was seen in this place: ISO 8601, or empty when no record gave one. */
     at: text,
+    /**
+     * The latest time it was seen there, the same way: empty if any sighting in this place had no
+     * time, so that the window cannot cut it. The card's window is applied to this, by event time.
+     */
+    last: text,
     subagent: text.optional(),
     times: count,
     seen: count,
@@ -122,7 +130,7 @@ const canaryMemorySchema = z
   .strict();
 export type CanaryMemoryFile = z.infer<typeof canaryMemorySchema>;
 
-export const KEY_CACHE_SCHEMA = 'stroq-card-keys/1';
+export const KEY_CACHE_SCHEMA = 'stroq-card-keys/2';
 export const keyCacheSchema = z
   .object({
     schema: z.literal(KEY_CACHE_SCHEMA),

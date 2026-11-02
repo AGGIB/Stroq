@@ -38,6 +38,21 @@ export type ToldMoment = z.infer<typeof toldMomentSchema>;
 /** The most commands a text told one session to run that a summary keeps in full. */
 export const MAX_TOLD_PER_SESSION = 5;
 
+/**
+ * The hours a summary keeps its counts by: the newest this many. Ten thousand hours is more than a
+ * year, the longest window, so what is dropped is older than any window can reach.
+ */
+export const MAX_HOURS = 10_000;
+
+/**
+ * What happened in one hour of a session: the hour as whole hours since 1970 (or null for events whose
+ * record gave no time that reads as one), the shell commands the agent ran in it, and how many of them a
+ * text told it to run. The card's window is applied to these when the card is made, by when each event
+ * happened and not by when the file was last written to.
+ */
+export const hourSchema = z.tuple([z.number().int().nonnegative().nullable(), count, count]);
+export type SessionHour = z.infer<typeof hourSchema>;
+
 export const sessionSummarySchema = z
   .object({
     agent,
@@ -49,16 +64,30 @@ export const sessionSummarySchema = z
     commands: count,
     /** How many of them a text told it to run (all of them, though only some are kept below). */
     told: count,
+    /** The commands a text told it to run, the newest `MAX_TOLD_PER_SESSION`, oldest first. */
     moments: z.array(toldMomentSchema).max(MAX_TOLD_PER_SESSION),
+    /** `commands` and `told` by the hour they happened in, oldest first. */
+    hours: z.array(hourSchema).max(MAX_HOURS),
   })
   .strict();
 export type SessionSummary = z.infer<typeof sessionSummarySchema>;
 
-const cacheEntrySchema = z
+/** A replay that was cut off by the time limit, kept for this exact file so that it is not waited for again. */
+const unfinishedSchema = z
+  .object({
+    key: text,
+    mtimeMs: z.number().nonnegative(),
+    /** The time the replay had when it was cut off: a run with more is let try again. */
+    budgetMs: z.number().int().nonnegative().max(86_400_000),
+    unfinished: z.literal(true),
+  })
+  .strict();
+const doneEntrySchema = z
   .object({ key: text, mtimeMs: z.number().nonnegative(), summary: sessionSummarySchema })
   .strict();
+const cacheEntrySchema = z.union([doneEntrySchema, unfinishedSchema]);
 
-export const SESSION_CACHE_SCHEMA = 'stroq-card-sessions/1';
+export const SESSION_CACHE_SCHEMA = 'stroq-card-sessions/2';
 export const sessionCacheSchema = z
   .object({
     schema: z.literal(SESSION_CACHE_SCHEMA),

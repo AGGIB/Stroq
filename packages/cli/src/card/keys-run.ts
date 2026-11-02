@@ -30,6 +30,11 @@ export interface KeysEnv {
   readonly stroqHome: string;
   readonly cwd: string;
   readonly version: string;
+  /**
+   * The start of the window, in milliseconds since 1970: a sighting counts only if it happened at or
+   * after it (a hit with no time counts, as its file, whose date is in the window, does).
+   */
+  readonly since: number;
 }
 
 /** What the key check of a run came to. */
@@ -178,7 +183,12 @@ class Run implements KeysRun {
       const result = this.results.get(i);
       if (result === undefined) return;
       summaries.push(
-        summaryOf(result, index.indexOf, { agent: s.agent, id: '', path: s.path, cwd: s.cwd }),
+        summaryOf(
+          result,
+          index.indexOf,
+          { agent: s.agent, id: '', path: s.path, cwd: s.cwd },
+          this.p.env.since,
+        ),
       );
     });
     const findings = findingsOf(index.data.keys, finder, summaries);

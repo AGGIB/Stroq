@@ -89,7 +89,23 @@ export function cachedSummary(
   key: string,
 ): SessionSummary | null {
   const entry = cache.get(path);
-  return entry !== undefined && entry.key === key ? entry.summary : null;
+  return entry !== undefined && entry.key === key && 'summary' in entry ? entry.summary : null;
+}
+
+/**
+ * Whether an earlier run gave up on replaying this exact file (its key) for want of time, with no
+ * more time than `budgetMs`: a run with more tries it again, and so does any change to the file.
+ */
+export function cachedUnfinished(
+  cache: ReadonlyMap<string, CacheEntry>,
+  path: string,
+  key: string,
+  budgetMs: number,
+): boolean {
+  const entry = cache.get(path);
+  return (
+    entry !== undefined && entry.key === key && 'unfinished' in entry && entry.budgetMs >= budgetMs
+  );
 }
 
 export type LastRead =
