@@ -36,7 +36,14 @@ describe('runsOnOpen: what the card counts as running when an agent opens a fold
     expect(runsOnOpen({ kind: 'git-config-exec', what: 'core.hookspath' })).toBe(true);
     expect(runsOnOpen({ kind: 'git-config-exec', what: 'core.fsmonitor' })).toBe(true);
     expect(runsOnOpen({ kind: 'git-config-exec', what: 'lfs.customtransfer.x.path' })).toBe(true);
-    // A bare repository on its own runs nothing; its config and hooks are judged as findings of their own.
-    expect(runsOnOpen({ kind: 'nested-bare-repo', what: 'x.git' })).toBe(false);
+    // A bare repository found by its shape alone runs nothing; its config is judged as findings of its own.
+    expect(runsOnOpen({ kind: 'nested-bare-repo', what: 'HEAD, objects, refs' })).toBe(false);
+    // What could not be seen still counts: a pointer elsewhere, an unlistable folder, anything else.
+    for (const what of [
+      'a .git file, which points git at the folder of another repository',
+      'a folder the check could enter but not list, so a repository may be in it',
+      'x.git',
+    ])
+      expect(runsOnOpen({ kind: 'nested-bare-repo', what }), what).toBe(true);
   });
 });

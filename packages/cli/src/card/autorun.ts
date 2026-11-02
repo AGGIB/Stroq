@@ -36,6 +36,9 @@ const MAX_ITEMS = 5;
  * reports them (in a downloaded archive they run on the next such command), but the card's line is
  * "runs code as soon as an agent opens it", which they do not.
  */
+/** What `inspect` says of a bare repository it found by its shape alone (repo-surface.ts). */
+const BARE_BY_SHAPE = 'HEAD, objects, refs';
+
 const LATER_HOOKS: ReadonlySet<string> = new Set([
   'applypatch-msg',
   'pre-applypatch',
@@ -122,9 +125,11 @@ const notOwnHook =
 
 /** Whether a finding runs when an agent opens the folder, rather than when it later commits or pushes. */
 export function runsOnOpen(hit: Pick<RepoExecHit, 'kind' | 'what' | 'hooksJudged'>): boolean {
-  // A bare repository on its own runs nothing: what its config or hooks would make git run is judged and
-  // counted as findings of their own. `inspect` still reports it for being there.
-  if (hit.kind === 'nested-bare-repo') return false;
+  // A bare repository found by its shape alone runs nothing: its config is judged and counted as findings of
+  // its own. Only that plain finding is left out; a `.git` file that points elsewhere, a `commondir` outside
+  // or a folder that could not be listed still counts, since what git would run there was not seen.
+  // `inspect` reports all of them.
+  if (hit.kind === 'nested-bare-repo' && hit.what === BARE_BY_SHAPE) return false;
   if (hit.kind === 'git-hook-routine') {
     const name = hit.what.split(',')[0]?.trim() ?? '';
     return !LATER_HOOKS.has(name);
