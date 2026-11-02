@@ -6,8 +6,8 @@
 // guard off (hooks, auto-approved MCP servers, autorun tasks). The ordinary things many honest
 // repositories have (a husky hook, a `prepare` script) are not counted: `inspect` lists them as "not
 // findings" and a count of them would be a count of every repository there is.
-import { realpathSync } from 'node:fs';
-import { sep } from 'node:path';
+import { realpathSync, statSync } from 'node:fs';
+import { basename, isAbsolute, sep } from 'node:path';
 import { isFailing, tagChanges } from '../exposure/agent-change.js';
 import type { AgentHit } from '../exposure/agent-kinds.js';
 import { agentSurface } from '../exposure/agent-tree.js';
@@ -58,6 +58,8 @@ const LATER_HOOKS: ReadonlySet<string> = new Set([
  */
 const STROQ_HOOK_LINE =
   /^"([^"\n]+)" "([^"\n]+)" hook (?:claude-code|cursor|codex|windsurf|copilot|openclaw|antigravity)(?: (?:pre|post|preinvocation))?$/;
+/** The characters a path of a hook line may hold: none that a shell expands (`$`, a backquote, `~`, `%`, `!`). */
+const SAFE_PATH = /^[A-Za-z0-9_./\\:@+ -]+$/;
 /** Where an installed Stroq keeps its entry file, below a `node_modules` folder. */
 const PACKAGE_ENTRY = `${sep}node_modules${sep}@stroq${sep}cli${sep}dist${sep}index.js`;
 
@@ -66,6 +68,14 @@ const realOrNull = (path: string): string | null => {
     return realpathSync(path);
   } catch {
     return null;
+  }
+};
+
+const isRegularFile = (path: string): boolean => {
+  try {
+    return statSync(path).isFile();
+  } catch {
+    return false;
   }
 };
 
@@ -82,13 +92,17 @@ export function isStroqOwnHook(value: string, dir: string, home: string = stroqH
   const line = STROQ_HOOK_LINE.exec(value);
   if (line === null) return false;
   const [, node = '', entry = ''] = line;
-  // The last part of the node path, whichever separator wrote it (a Windows line keeps its `\`).
-  if (!/^node(?:\.exe)?$/i.test(node.split(/[\\/]/).at(-1) ?? '')) return false;
-  const real = realOrNull(entry);
+  // No character a shell would expand or quote differently, and both paths written out in full.
+  if (![node, entry].every((path) => SAFE_PATH.test(path) && isAbsolute(path))) return false;
   const folder = realOrNull(dir);
-  if (real === null || folder === null || isWithin(real, folder)) return false;
+  const realNode = realOrNull(node);
+  const realEntry = realOrNull(entry);
+  if (folder === null || realNode === null || realEntry === null) return false;
+  // The node binary that runs it is a real file called node, and neither file is the folder's own.
+  if (!/^node(?:\.exe)?$/i.test(basename(realNode)) || !isRegularFile(realNode)) return false;
+  if (isWithin(realNode, folder) || isWithin(realEntry, folder)) return false;
   const stroq = realOrNull(home);
-  return (stroq !== null && isWithin(real, stroq)) || real.endsWith(PACKAGE_ENTRY);
+  return (stroq !== null && isWithin(realEntry, stroq)) || realEntry.endsWith(PACKAGE_ENTRY);
 }
 
 const notOwnHook =
