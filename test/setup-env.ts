@@ -1,6 +1,29 @@
-import { mkdtempSync } from 'node:fs';
+import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { afterAll } from 'vitest';
+
+/** The system's temporary folder, read once before this file points the variables at a folder of its own. */
+const systemTmp = tmpdir();
+
+/**
+ * One temporary folder for each test file, removed when the file is done. Every `tmpdir()` in the
+ * file and in the processes it starts lands in it (TMPDIR on POSIX, TEMP and TMP on Windows), so the
+ * hundreds of folders a test file makes go with it instead of piling up in the shared temporary
+ * folder: before this, a few runs of the suite left tens of thousands of `stroq-*` folders behind
+ * and filled the disk of the machine running them.
+ */
+const fileTmp = mkdtempSync(join(systemTmp, 'stroq-test-'));
+process.env['TMPDIR'] = fileTmp;
+process.env['TEMP'] = fileTmp;
+process.env['TMP'] = fileTmp;
+afterAll(() => {
+  try {
+    rmSync(fileTmp, { recursive: true, force: true, maxRetries: 3 });
+  } catch {
+    // A file a process still holds open (Windows) stays behind; the test result does not depend on it.
+  }
+});
 
 /**
  * Isolates every test file from the developer's real home directory before its
@@ -44,4 +67,4 @@ process.env['STROQ_SCAN_BUDGET_MS'] = String(10 * 60 * 1000);
  * set Node turns the cache on in this folder before the CLI starts, and the CLI keeps it, as it
  * would for a user who set it. `compile-cache.test.ts` starts the CLI without it, to check its own.
  */
-process.env['NODE_COMPILE_CACHE'] ??= join(tmpdir(), 'stroq-tests-compile-cache');
+process.env['NODE_COMPILE_CACHE'] ??= join(systemTmp, 'stroq-tests-compile-cache');
