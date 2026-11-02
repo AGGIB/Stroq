@@ -40,8 +40,28 @@ const EXPANDED = /[$`{(]/;
 /** A pattern; it matches one name and never a slash, but a dot-leading one may match `..`. */
 const PATTERN = /[*?[]/;
 
+/**
+ * A name read as more than one name, or as none that is known: a word the shell replaces, a pattern that
+ * may match `..` (dot-leading), and `**`, which zsh and bash with globstar match against zero or many
+ * directories.
+ */
 const expands = (component: string): boolean =>
-  EXPANDED.test(component) || (component.startsWith('.') && PATTERN.test(component));
+  EXPANDED.test(component) ||
+  component.includes('**') ||
+  (component.startsWith('.') && PATTERN.test(component));
+
+/**
+ * How a name of a path that holds `..` is counted. A pattern with a `..` after it is not known to be one
+ * name: a `..` climbs over whatever it matched, and what it matched is the shell's to say. A pattern after
+ * the last `..` cannot change how far the path climbs, and counts as the one name it matches.
+ */
+type Step = 'skip' | 'up' | 'name' | 'unknown';
+function stepOf(component: string, climbsLater: boolean): Step {
+  if (component === '' || component === '.') return 'skip';
+  if (component === '..') return 'up';
+  if (expands(component)) return 'unknown';
+  return climbsLater && PATTERN.test(component) ? 'unknown' : 'name';
+}
 
 /** Whether a path has a `..` of its own among its names. */
 const climbs = (path: string): boolean =>
@@ -49,32 +69,42 @@ const climbs = (path: string): boolean =>
 
 /**
  * Whether a relative path that holds `..` climbs out of the directory it starts in, or comes back to it
- * (`a/..` is the directory itself, as `.` is). A name that is expanded beside a `..` is not known to stay.
+ * (`a/..` is the directory itself, as `.` is). A name that is not known to be one name beside a `..`
+ * is not known to stay.
  */
 function leavesStart(path: string): boolean {
+  const components = path.split(SEPARATORS);
+  const last = components.lastIndexOf('..');
   let depth = 0;
-  for (const component of path.split(SEPARATORS)) {
-    if (component === '' || component === '.') continue;
-    if (expands(component)) return true;
-    if (component === '..') {
+  for (const [at, component] of components.entries()) {
+    const step = stepOf(component, at < last);
+    if (step === 'unknown') return true;
+    if (step === 'skip') continue;
+    if (step === 'up') {
       depth -= 1;
       if (depth < 0) return true;
-    } else depth += 1;
+    } else {
+      // `a/../*` is every file of the directory, as `*` is.
+      if (depth === 0 && (component === '*' || component === '.*')) return true;
+      depth += 1;
+    }
   }
   return depth <= 0;
 }
 
 /**
- * The names of an absolute path with its `..` taken out, or null when a name beside one is expanded. The
- * first `keep` names stay (the drive of a Windows path), as `/..` is `/`.
+ * The names of an absolute path with its `..` taken out, or null when a name beside one is not known to be
+ * one name. The first `keep` names stay (the drive of a Windows path), as `/..` is `/`.
  */
 function resolvedNames(path: string, keep: number): string[] | null {
+  const components = path.split(SEPARATORS);
+  const last = components.lastIndexOf('..');
   const names: string[] = [];
-  for (const component of path.split(SEPARATORS)) {
-    if (component === '' || component === '.') continue;
-    if (expands(component)) return null;
-    if (component !== '..') names.push(component);
-    else if (names.length > keep) names.pop();
+  for (const [at, component] of components.entries()) {
+    const step = stepOf(component, at < last);
+    if (step === 'unknown') return null;
+    if (step === 'name') names.push(component);
+    else if (step === 'up' && names.length > keep) names.pop();
   }
   return names;
 }

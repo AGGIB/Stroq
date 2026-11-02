@@ -51,7 +51,6 @@ describe('a relative path that stays inside the project', () => {
     'dist/../build/',
     './a/../b',
     'a/../a',
-    'a/*/../b',
     'node_modules/.cache/../x',
     'a\\b\\..\\c',
     'a/~/../b',
@@ -87,12 +86,56 @@ describe('a name the shell expands, beside a ..', () => {
     (target) => expect(dangerous(target)).toBe(false),
   );
 
-  it('reads a glob as one name: it matches nothing with a slash in it', () => {
-    expect(dangerous('a/*/../b')).toBe(false);
-    expect(dangerous('a/b?/../c')).toBe(false);
-    expect(dangerous('*/../../b')).toBe(true);
-    expect(dangerous('a/*/../../..')).toBe(true);
+  it('reads a pattern as one name only after the last .., where it cannot change how far the path climbs', () => {
+    // After the last `..`: it is the one name it matches, below where the path has come to.
+    for (const target of [
+      'build/../dist/*',
+      'build/../dist/f?',
+      'build/../dist/[ab]*',
+      'a/b/../../c/*',
+    ])
+      expect(dangerous(target), target).toBe(false);
+    // Before a `..`: the `..` climbs over whatever the shell made of it. Asked, fail closed.
+    for (const target of [
+      'a/*/../b',
+      'a/b?/../c',
+      'a/[xy]/../c',
+      'a/*/../../..',
+      '*/../../x',
+      '*/../x',
+    ])
+      expect(dangerous(target), target).toBe(true);
+    // And at the start, it is every file of the directory, as `*` is.
+    for (const target of ['a/../*', 'a/b/../../*', './a/../.*'])
+      expect(dangerous(target), target).toBe(true);
   });
+});
+
+describe('** beside a ..', () => {
+  // zsh, and bash with globstar, match `**` against zero or many directories: the walk cannot count it.
+  it.each([
+    '**/../x',
+    'src/**/../..',
+    'src/**/../../x',
+    `${CWD}/a/b/**/../../../x`,
+    'a/**/b/../../..',
+    'a/**/../x',
+    'build/../dist/**',
+    'build/../**',
+    'a/../**/x',
+    '**/..',
+    'a/***/../x',
+    'a/**x/../y',
+    'a/x**/../y',
+    'a\\**\\..\\..\\x',
+    `${CWD}/a/**/../x`,
+    `${CWD}/build/../dist/**`,
+  ])('%s is asked about', (target) => expect(dangerous(target), target).toBe(true));
+
+  it.each(['src/**/*.pyc', 'a/**', '**/x', 'dist/**/*.map', `${CWD}/a/**/b`])(
+    'with no .., %s is what it was',
+    (target) => expect(dangerous(target), target).toBe(false),
+  );
 });
 
 describe('~-relative forms', () => {
@@ -154,6 +197,13 @@ describe('the shell command', () => {
     'rm -rf a/`pwd`/../x',
     'rm -rf */../../x',
     'rm -rf a/{b,../..}/x',
+    'rm -rf **/../x',
+    'rm -rf src/**/../..',
+    'rm -rf src/**/../../x',
+    'rm -rf a/**/b/../../..',
+    'rm -rf /workspace/project/a/b/**/../../../x',
+    'rm -rf "src/**/../../x"',
+    'rm -rf a/*/../b',
     'rm -rf /workspace/project/../x',
     'rm -rf /workspace/project/build/../../x',
     'rm -r a/../../x',
@@ -175,6 +225,7 @@ describe('the shell command', () => {
   it.each([
     'rm -rf build/../dist',
     'rm -rf build/../dist/*',
+    'rm -rf build/../dist/f?',
     'rm -rf a/b/../c',
     'rm -rf "a b/../c"',
     'rm -rf a\\ b/../c',
@@ -199,7 +250,13 @@ describe('the other readers of the same judgement', () => {
     'find build/../.. -exec rm -rf {} +',
     'find /workspace/project/../x -delete',
     'echo a/../../x | xargs rm -rf',
+    'find src/**/../../x -delete',
+    'find **/../x -delete',
+    'echo src/**/../../x | xargs rm -rf',
     'echo ../x | xargs rm -rf',
+    'ssh host rm -rf src/**/../../x',
+    'Remove-Item -Recurse -Force src\\**\\..\\..\\x',
+    'rd /s /q src\\**\\..\\..\\x',
     'echo /workspace/project/../x | xargs rm -rf',
     'ssh host rm -rf a/../../x',
     'Remove-Item -Recurse -Force a\\..\\..\\x',
