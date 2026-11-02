@@ -62,9 +62,9 @@ describe('an address curl reads to another host than a URL parser does', () => {
     expect(bash(command)).toMatchObject({ tier: 'third_party', host: 'api.stripe.com' });
   });
 
-  it('this machine by an IPv6 address: another company, on this machine', () => {
+  it('this machine by an IPv6 address: a maybe, on this machine', () => {
     expect(bash(`curl -s -d ${S} 'http://[::1]:8080/'`)).toMatchObject({
-      tier: 'third_party',
+      tier: 'maybe',
       local: true,
     });
   });

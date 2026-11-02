@@ -50,6 +50,8 @@ export interface KeyOutcome {
   readonly bySession: readonly PlacedFinding[];
   /** Distinct values in key files that look like examples or placeholders, so were not looked for. */
   readonly placeholders: number;
+  /** Their names, each once; never a value. */
+  readonly placeholderNames: readonly string[];
   /** Keys sent to another company that were stopped before they left. */
   readonly stopped: number;
   /** Sessions whose keys were checked: now or in an earlier run. Too large ones are not among them. */
@@ -102,7 +104,8 @@ export function startKeys(env: KeysEnv, sessions: readonly WindowSession[]): Key
   const scrub = scrubber(finder);
   const shown = shownWith(finder, scrub);
   const checkable = sessions.map((s) => !isTooLarge(s));
-  if (loaded.keys.length === 0) return nothingToLookFor(shown, checkable, loaded.placeholders);
+  if (loaded.keys.length === 0)
+    return nothingToLookFor(shown, checkable, loaded.placeholders, loaded.placeholderNames ?? []);
 
   const mcp = loadMcpServers({ home: env.home, projectDirs: dirs });
   const index = prepareIndex({ home: env.home, keys: loaded.keys, mcp: [...mcp.known] });
@@ -115,6 +118,7 @@ export function startKeys(env: KeysEnv, sessions: readonly WindowSession[]): Key
   const rewrite = cache.salt === null || cache.digest !== digest;
   return new Run({
     placeholders: loaded.placeholders,
+    placeholderNames: loaded.placeholderNames ?? [],
     env,
     sessions,
     finder,
@@ -150,6 +154,7 @@ function nothingToLookFor(
   shown: Shown,
   checkable: readonly boolean[],
   placeholders: number,
+  placeholderNames: readonly string[],
 ): KeysRun {
   const checked = checkable.filter(Boolean).length;
   return {
@@ -161,6 +166,7 @@ function nothingToLookFor(
       findings: [],
       bySession: [],
       placeholders,
+      placeholderNames,
       stopped: 0,
       checked,
       fromCache: 0,
@@ -174,6 +180,7 @@ function nothingToLookFor(
 
 interface RunParts {
   readonly placeholders: number;
+  readonly placeholderNames: readonly string[];
   readonly env: KeysEnv;
   readonly sessions: readonly WindowSession[];
   readonly finder: KeyFinder;
@@ -271,6 +278,7 @@ class Run implements KeysRun {
       findings,
       bySession,
       placeholders: this.p.placeholders,
+      placeholderNames: this.p.placeholderNames,
       stopped: stoppedFindings(findings),
       checked: this.results.size,
       fromCache: this.fromCache.size,

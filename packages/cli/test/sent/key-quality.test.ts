@@ -148,6 +148,39 @@ describe('an example or a placeholder is not traced', () => {
   });
 });
 
+describe('only the documentation examples are examples', () => {
+  // The vendors' documented values are anchored exactly. A real key that happens to hold the word is a key.
+  it.each([
+    ['Zk3pQ9vL2mXr8TnB-example-7HdWs41cJf'],
+    ['Xk39sdLm2PqRTEXAMPLEz8Hn5VbQw7'],
+    ['sk-proj-example-Zk3pQ9vL2mXr8TnB7HdWs41cJf'],
+    ['q8Hn_example_V5bQw7Zk3pQ9vL2mXr8Tn'],
+    ['AKIAIOSFODNN7EXAMPLE9'],
+    ['xAKIAIOSFODNN7EXAMPLE'],
+    ['wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY+'],
+    ['sk_test_' + '4eC39HqLyjWDarjtT1zdp7dcX'],
+  ])('%s is traced', (value) => {
+    expect(judgeValue(value), value).toEqual({ traced: true });
+  });
+
+  it.each([
+    ['AKIAIOSFODNN7EXAMPLE'],
+    ['akiaiosfodnn7example'],
+    ['wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY'],
+    ['AKIAI44QH8DHBEXAMPLE'],
+    ['je7MtGbClwBF/2Zp9Utk/h3yCo8nvbEXAMPLEKEY'],
+    ['sk_test_' + '4eC39HqLyjWDarjtT1zdp7dc'],
+    ['pk_test_TYooMQauvdEDq54NiTphI7jx'],
+  ])('%s is an example', (value) => {
+    expect(judgeValue(value), value).toEqual({ traced: false, why: 'example' });
+  });
+
+  it('and a value made of the word is still words', () => {
+    expect(judgeValue('example-secret-key').traced).toBe(false);
+    expect(judgeValue('sample_api_token_dummy').traced).toBe(false);
+  });
+});
+
 describe('the cost of the rule is read once', () => {
   it('a long value is judged in about its length', () => {
     const rand = random(3);

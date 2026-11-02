@@ -43,15 +43,30 @@ export interface PathWord {
 export interface Folders {
   readonly cwd: string | null;
   readonly more?: readonly string[];
+  /**
+   * These are every folder the command may run in: the folder it starts in is known and none of its
+   * changes of folder was left unread. A word that spells only the end of a folder's path then names it
+   * only if it is under one of them; otherwise the end of a path is all there is to go by.
+   */
+  readonly exact?: boolean;
 }
 
-/** Characters that make a word a pattern the shell or curl fills in. */
-const WILD = /[*?[{]/;
-/** Characters the shell fills in on its own: a brace with no comma is plain text to it. */
-const SHELL_WILD = /[*?[]/;
+/**
+ * What makes a word a pattern the shell or curl fills in: `*`, `?`, a brace, a bracket that opens a class
+ * (`[ab]`, `[]a]`). A `[]` with nothing in it is text to the shell and to curl: the filter `.[]` of `jq`
+ * and `gh --jq` is no pattern that takes every file whose name starts with a dot.
+ */
+const WILD = /[*?{]|\[(?:[^\]]|\][^\]]*\])/;
+/** What the shell fills in on its own: a brace with no comma is plain text to it. */
+const SHELL_WILD = /[*?]|\[(?:[^\]]|\][^\]]*\])/;
+/** One character of either, for finding where the last wildcard of a pattern is. */
+const WILD_CHAR = /[*?[{]/;
 
-/** A pattern that is more than braces and brackets: `{`, `}` and `[]` alone name no file. */
-const pathLike = (word: string): boolean => word.replace(/[{}[\],]/g, '') !== '';
+/**
+ * A pattern that is more than braces, brackets and dots: `{`, `}`, `[]` and `.[]` (a `jq` filter) alone
+ * name no file.
+ */
+const pathLike = (word: string): boolean => /[^.]/.test(word.replace(/[{}[\],]/g, ''));
 
 /** A slashed path without the slash that ends it, unless it is a root (`/`, `C:/`). */
 const trimSep = (path: string): string =>
@@ -104,15 +119,16 @@ function valueOf(word: Word): string {
 const globOutsideQuotes = (raw: string | undefined): boolean => {
   if (raw === undefined) return false;
   let quote = '';
+  let outside = '';
   for (let i = 0; i < raw.length; i += 1) {
     const c = raw[i] as string;
     if (quote !== '') {
       if (c === quote) quote = '';
     } else if (c === '\\') i += 1;
     else if (c === "'" || c === '"') quote = c;
-    else if (SHELL_WILD.test(c)) return true;
+    else outside += c;
   }
-  return false;
+  return SHELL_WILD.test(outside);
 };
 
 /** Whether a stage's own quotes do not balance, as the core's lexer reads the stage alone. */
@@ -254,7 +270,7 @@ function partMatches(pattern: string, part: string): 'yes' | 'dot' | 'no' {
   const first = pattern.search(WILD);
   if (first < 0) return pattern === part ? 'yes' : 'no';
   let last = first;
-  for (let i = first; i < pattern.length; i += 1) if (WILD.test(pattern[i] ?? '')) last = i;
+  for (let i = first; i < pattern.length; i += 1) if (WILD_CHAR.test(pattern[i] ?? '')) last = i;
   const head = pattern.slice(0, first);
   // What follows the last wildcard; a closing `]` or `}` belongs to it.
   const tail = pattern.slice(last + 1).replace(/^[^/]*?[\]}]/, '');
@@ -328,15 +344,20 @@ const endOf = (path: string): string =>
 
 /**
  * How a relative path names a file as the end of its path: `leak.txt` and `work/leak.txt` name
- * `/tmp/work/leak.txt`, `work` a folder it is in.
+ * `/tmp/work/leak.txt`, `work` a folder it is in. `bases`, the folders the command runs in when all
+ * of them are known: a word that names only a folder the file is in (`svc`, a search term, a branch, a
+ * repository) names it only if it is under one of them. Without them the end is all there is to go by.
  */
-function endNames(path: string, file: string): Naming | null {
+function endNames(path: string, file: string, bases: readonly string[] | null): Naming | null {
   const fold = foldFor(file);
   const rest = fold(endOf(path));
   if (rest === '') return null;
   const target = fold(file);
   if (target === `/${rest}` || target.endsWith(`/${rest}`)) return { kind: 'file', sure: true };
-  return target.includes(`/${rest}/`) ? { kind: 'folder', sure: true } : null;
+  if (!target.includes(`/${rest}/`)) return null;
+  if (bases !== null && !bases.some((b) => absoluteNames(joinPath(b, path), file, false) !== null))
+    return null;
+  return { kind: 'folder', sure: true };
 }
 
 /** The better of two namings: a file over a folder, a sure one over a maybe. */
@@ -382,7 +403,11 @@ export function namesFileHow(
         for (const base of basesOf(where))
           found = better(found, take(absoluteNames(joinPath(base, c), file, pattern)));
       // Any other relative path is read as the end of a path below, whatever folder it is under.
-      if (!pattern) found = better(found, take(endNames(c, file)));
+      if (!pattern)
+        found = better(
+          found,
+          take(endNames(c, file, where.exact === true ? basesOf(where) : null)),
+        );
     }
     if (found?.kind === 'file' && found.sure && found.glob !== true) return found;
   }
@@ -406,6 +431,12 @@ export function namesFile(
   return named !== null && named.sure ? named.kind : null;
 }
 
+/** `~` or `~/dir` as a path under the home folder; null for anything else (`~user` is not read). */
+function homeTarget(target: string | undefined, home: string): string | null {
+  if (target === '~') return home;
+  return target?.startsWith('~/') === true ? joinPath(home, target.slice(2)) : null;
+}
+
 /** Folders changed to, at most, in one command. */
 const MAX_CHANGED = 16;
 
@@ -423,7 +454,7 @@ export interface FolderChanges {
  * `from` and each other in turn: a relative one is joined to the folder before it. A folder named
  * by a variable or from the home folder is not read, and says so.
  */
-export function folderChanges(command: string, from: string | null): FolderChanges {
+export function folderChanges(command: string, from: string | null, home?: string): FolderChanges {
   const folders: string[] = [];
   let now = from;
   let unread = false;
@@ -432,21 +463,23 @@ export function folderChanges(command: string, from: string | null): FolderChang
     if (words[0] === 'popd') unread = true;
     if (words[0] !== 'cd' && words[0] !== 'pushd') continue;
     const target = words.slice(1).find((w) => !w.startsWith('-'));
-    if (target === undefined || target.startsWith('~') || /[$`]/.test(target)) {
+    const homed = home === undefined ? null : homeTarget(target, home);
+    if (target === undefined || (target.startsWith('~') && homed === null) || /[$`]/.test(target)) {
       unread = true;
       continue;
     }
-    if (!isAbsolutePath(target) && now === null) {
+    if (homed === null && !isAbsolutePath(target) && now === null) {
       unread = true;
       continue;
     }
     if (folders.length >= MAX_CHANGED) return { folders, unread, cut: true };
-    now = trimSep(normalPath(isAbsolutePath(target) ? target : joinPath(now as string, target)));
+    const to = homed ?? (isAbsolutePath(target) ? target : joinPath(now as string, target));
+    now = trimSep(normalPath(to));
     folders.push(now);
   }
   return { folders, unread, cut: false };
 }
 
 /** The folders a command changes to; see `folderChanges`. */
-export const changedFolders = (command: string, from: string | null): string[] =>
-  folderChanges(command, from).folders;
+export const changedFolders = (command: string, from: string | null, home?: string): string[] =>
+  folderChanges(command, from, home).folders;

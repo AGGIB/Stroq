@@ -348,7 +348,7 @@ export function analyzeSession(ctx: SessionContext): SessionAnalyzer {
     if (shell) {
       for (const push of pushesIn(command, ctx)) pushes.push({ ...push, at: e.at, seq });
       // The folder a session's commands run in stays where the last `cd` left it.
-      const changes = folderChanges(command, folderNow);
+      const changes = folderChanges(command, folderNow, ctx.home);
       if (changes.unread) folderUnread = true;
       if (changes.cut) foldersCut = true;
       for (const folder of changes.folders) {
@@ -561,7 +561,8 @@ export function analyzeSession(ctx: SessionContext): SessionAnalyzer {
     // stopped following folders and changed folder in a way not read, it may be any.
     const cwds = folderNow === null ? [...folders] : [...folders, folderNow];
     const lost = foldersCut && folderUnread;
-    for (const use of keyFileUses(command, keyFiles, { ...ctx, cwds }, lost))
+    const foldersKnown = !(foldersCut || folderUnread);
+    for (const use of keyFileUses(command, keyFiles, { ...ctx, cwds, foldersKnown }, lost))
       for (const i of use.keys)
         if (!holding.has(i)) {
           holding.add(i);

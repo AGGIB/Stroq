@@ -3,9 +3,10 @@
 //
 // Plain words only. The card names no rule, shows no score and uses none of the guard's internal terms;
 // every word from a transcript was made safe when the moments were built (`text.ts`).
+import { notTracedNote } from '../sent/key-quality.js';
 import type { CardData } from './data.js';
 import { SHOWN } from './data.js';
-import { num, plural, shortPath, wrap } from './text.js';
+import { clean, num, plural, shortPath, wrap } from './text.js';
 
 /**
  * The widest a line of the card is. Beside the owl (2 blanks, 20 columns, 3 blanks) that makes
@@ -87,11 +88,7 @@ function notes(data: CardData): string[] {
   if (k.tooSlow > 0)
     out.push(`${plural(k.tooSlow, 'session', 'sessions')} could not be checked in time.`);
   if (k.placeholders > 0)
-    out.push(
-      k.placeholders === 1
-        ? '1 value in your key files looks like an example or a placeholder, so it is not traced.'
-        : `${num(k.placeholders)} values in your key files look like examples or placeholders, so they are not traced.`,
-    );
+    out.push(`${notTracedNote(k.placeholders, k.placeholderNames, (name) => clean(name, 40))}.`);
   if (k.tooLarge > 0)
     out.push(`${plural(k.tooLarge, 'session was', 'sessions were')} too large to check.`);
   if (k.unreadable > 0)

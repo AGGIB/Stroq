@@ -9,6 +9,7 @@
 import { displayPath, neutralizeControls } from '@stroq/core';
 import { SPILL_BUDGET_BYTES } from '../replay/spilled.js';
 import type { Finding } from './findings.js';
+import { notTracedNote } from './key-quality.js';
 import { slashed } from './path-form.js';
 import { TIERS, type Tier } from './place.js';
 import type { SentReport } from './report.js';
@@ -361,11 +362,7 @@ function notChecked(report: SentReport): string {
         ]),
     ...(report.keys.placeholders === undefined
       ? []
-      : [
-          report.keys.placeholders === 1
-            ? '1 value in your key files looks like an example or a placeholder, so it is not traced'
-            : `${report.keys.placeholders} values in your key files look like examples or placeholders, so they are not traced`,
-        ]),
+      : [notTracedNote(report.keys.placeholders, report.keys.placeholderNames ?? [], safe)]),
     ...(report.keys.subfolderEnvFiles === undefined
       ? []
       : [

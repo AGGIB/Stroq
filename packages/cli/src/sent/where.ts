@@ -10,7 +10,7 @@ import type { Key } from './keys.js';
 import type { McpServers } from './mcp-config.js';
 import { keyForms } from './needles.js';
 import { stringsOf } from './js-strings.js';
-import { farther, hostPlace, isLoopback, type Place } from './place.js';
+import { farther, hostPlace, isThisMachine, type Place } from './place.js';
 import { scriptPlace, shellPlace, writtenPlace, type ShellContext } from './shell-place.js';
 import { toolRequestPlace } from './tool-request.js';
 
@@ -125,7 +125,7 @@ function serverPlace(
     ...base,
     tier: 'maybe',
     host: server.host,
-    ...(isLoopback(server.host) ? { local: true as const } : {}),
+    ...(isThisMachine(server.host) ? { local: true as const } : {}),
   };
 }
 

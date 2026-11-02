@@ -57,6 +57,8 @@ export interface KeysCompared {
   readonly rejectedLines?: number;
   /** Distinct values that look like examples or placeholders: not traced (`key-quality.ts`). */
   readonly placeholders?: number;
+  /** Their names, each once, as they are printed (never a value). */
+  readonly placeholderNames?: readonly string[];
   /** Env files one folder below a project folder read, not read. */
   readonly subfolderEnvFiles?: number;
 }
@@ -201,6 +203,9 @@ export function keysCompared(set: KeySet): KeysCompared {
     ...(set.truncated ? { truncated: true as const } : {}),
     ...(set.rejectedLines > 0 ? { rejectedLines: set.rejectedLines } : {}),
     ...(set.placeholders > 0 ? { placeholders: set.placeholders } : {}),
+    ...((set.placeholderNames?.length ?? 0) > 0 && set.placeholders > 0
+      ? { placeholderNames: set.placeholderNames }
+      : {}),
     ...(set.subfolderEnvFiles > 0 ? { subfolderEnvFiles: set.subfolderEnvFiles } : {}),
   };
 }

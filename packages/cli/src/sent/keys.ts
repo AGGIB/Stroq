@@ -80,6 +80,8 @@ export interface KeySet {
    * (`key-quality.ts`): not looked for, and counted so that the report says so.
    */
   readonly placeholders: number;
+  /** The names those values were read under, as they are printed: each once, in the order read. */
+  readonly placeholderNames?: readonly string[];
   /** Env files one folder below a project folder read, which are not read. */
   readonly subfolderEnvFiles: number;
   /** Canaries `stroq canary` planted whose value is in no file read: not looked for. */
@@ -193,15 +195,18 @@ interface Reading {
   unreadable: number;
   skippedFiles: number;
   rejected: number;
-  /** The values not traced because they look like examples; held here only to count them once. */
-  readonly examples: Set<string>;
+  /**
+   * The values not traced because they look like examples, each with the name it was first read under;
+   * held here only to count them once and to name them. A value is never kept past the run.
+   */
+  readonly examples: Map<string, string>;
 }
 
 /** Whether a value is traced; one that looks like an example is counted, once, and is not. */
-function traced(value: string, reading: Reading): boolean {
+function traced(value: string, name: string, reading: Reading): boolean {
   // A canary is planted to be found, whatever it looks like, and in whichever file it was pasted.
   if (isCanaryValue(value) || judgeValue(value).traced) return true;
-  reading.examples.add(value);
+  if (!reading.examples.has(value)) reading.examples.set(value, keyName(name));
   return false;
 }
 
@@ -234,7 +239,7 @@ function readFile(
   for (const secret of found.secrets) {
     // A canary is a decoy planted to be found, whatever it looks like; any other value must look like
     // a secret to be traced.
-    if (origin !== 'decoy' && !traced(secret.value, reading)) continue;
+    if (origin !== 'decoy' && !traced(secret.value, secret.name, reading)) continue;
     whole = pool.add({ name: secret.name, source, value: secret.value }, origin, room) && whole;
   }
   if (!whole) reading.partial.add(source);
@@ -316,14 +321,14 @@ export function loadKeys(sources: KeySources): KeySet {
     unreadable: 0,
     skippedFiles: 0,
     rejected: 0,
-    examples: new Set(),
+    examples: new Map(),
   };
   const homeFiles = HOME_SECRET_SOURCES.map((rel) => join(sources.home, rel));
   for (const path of homeFiles) readFile(path, 'home', pool, reading, sources.home);
   const decoys = sources.stroqHome === undefined ? [] : decoyFiles(sources.stroqHome);
   for (const path of decoys) readFile(path, 'decoy', pool, reading, sources.home);
   for (const found of extractEnv(sources.env))
-    if (traced(found.value, reading))
+    if (traced(found.value, found.name, reading))
       pool.add({ name: found.name, source: 'env', value: found.value }, 'env', () => true);
   const folders = new Set(sources.projectDirs);
   for (const dir of folders) readFolder(dir, pool, reading, sources.home);
@@ -346,6 +351,7 @@ export function loadKeys(sources: KeySources): KeySet {
     skippedFiles: reading.skippedFiles,
     rejectedLines: reading.rejected,
     placeholders: reading.examples.size,
+    placeholderNames: [...new Set(reading.examples.values())],
     subfolderEnvFiles: subfolderFiles,
     canariesNotFound:
       sources.stroqHome === undefined ? 0 : canariesNotFound(sources.stroqHome, canaries),

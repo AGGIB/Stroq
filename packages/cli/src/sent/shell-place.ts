@@ -15,8 +15,8 @@
 // session's later calls are matched to the file by its name (`analyze.ts`).
 import { commandUrls, REDIRECT, type Word } from '@stroq/core';
 import {
-  changedFolders,
   commandPathWords,
+  folderChanges,
   namesFile,
   namesFileHow,
   type Folders,
@@ -24,7 +24,15 @@ import {
 import { plainText, valueHolds } from './key-text.js';
 import { shellJoined } from './needles.js';
 import { baseName, isAbsolutePath, joinPath, normalPath } from './path-form.js';
-import { farther, linkedPlace, type KeyOf, type Place, type Route, type Via } from './place.js';
+import {
+  farther,
+  isThisMachine,
+  linkedPlace,
+  type KeyOf,
+  type Place,
+  type Route,
+  type Via,
+} from './place.js';
 import {
   commandReading,
   countCut,
@@ -40,9 +48,10 @@ import {
 import {
   allStages,
   commandSends,
-  runStages,
   halfSenderPlace,
   publishes,
+  routesElsewhere,
+  runStages,
   shownName,
   stagePlace,
   stageSends,
@@ -56,6 +65,14 @@ export interface ShellContext {
   readonly cwd: string | null;
   /** Other folders the session's commands changed to: a relative path may be read against them. */
   readonly cwds?: readonly string[];
+  /** The home folder, for `cd ~/dir`. */
+  readonly home?: string;
+  /**
+   * False when the session changed folder in a way not read (`cd "$DIR"`), or past the folders it
+   * follows: the folders above are then not all there are, and a word that spells only the end of a
+   * folder's path is taken to name it wherever it is.
+   */
+  readonly foldersKnown?: boolean;
   /** The URL a git remote of a folder points at, or null when it cannot be read. */
   readonly gitRemote: (cwd: string | null, name: string) => string | null;
 }
@@ -63,8 +80,13 @@ export interface ShellContext {
 /** The folders a command may run in: the session's, those it changed to, and its own `cd`s. */
 function foldersOf(command: string, ctx: ShellContext): Folders {
   const more = [...(ctx.cwds ?? [])];
-  for (const base of [ctx.cwd, ...more].slice(0, 8)) more.push(...changedFolders(command, base));
-  return { cwd: ctx.cwd, more };
+  let read = ctx.cwd !== null && ctx.foldersKnown !== false;
+  for (const base of [ctx.cwd, ...more].slice(0, 8)) {
+    const changes = folderChanges(command, base, ctx.home);
+    more.push(...changes.folders);
+    if (changes.unread || changes.cut) read = false;
+  }
+  return { cwd: ctx.cwd, more, exact: read };
 }
 
 const pick = (a: Place | null, b: Place | null): Place | null =>
@@ -268,6 +290,7 @@ function wholeCommand(reading: CommandReading, word: string, sent: boolean): Pla
     tool: 'Bash',
     ...detailOf(word),
     ...(host === undefined || host === '' ? {} : { host: host.toLowerCase() }),
+    ...(host !== undefined && host !== '' && staysHome(reading) ? { local: true as const } : {}),
   };
 }
 
@@ -306,19 +329,55 @@ function firstStage(reading: CommandReading, which: 'sends' | 'runs'): string | 
   return null;
 }
 
-/** A command that can send, and holds the key, sent it to another company: where, as far as read. */
+/** Most addresses read in one stage. */
+const MAX_STAGE_URLS = 64;
+
+/**
+ * Whether every stage of the command that sends does so to this machine, by an address that was read:
+ * a command that also reaches another host, or one whose destination was not read, does not stay home.
+ */
+function staysHome(reading: CommandReading): boolean {
+  for (const stage of allStages(reading)) {
+    if (!stageSends(reading.facts(stage))) continue;
+    const read = commandUrls(stage.text, MAX_STAGE_URLS);
+    if (read.capped || read.urls.length === 0 || routesElsewhere(stage.text)) return false;
+    if (!read.urls.every((u) => isThisMachine(u.host))) return false;
+  }
+  return true;
+}
+
+/** The first host of the command that is not this machine, or null. */
+function elsewhereHost(reading: CommandReading): string | null {
+  const hosts = commandUrls(reading.command, MAX_STAGE_URLS).urls.map((u) => u.host.toLowerCase());
+  return hosts.find((h) => h !== '' && !isThisMachine(h)) ?? null;
+}
+
+/**
+ * A command that can send, and holds the key, sent it to another company: where, as far as read. Not
+ * when everything it sends goes to this machine: a local program may send the key on, which is a maybe
+ * and no more.
+ */
 function anotherCompany(place: Place, reading: CommandReading): Place {
   if (place.tier === 'third_party') return place;
-  if (REQUEST_ROUTES.has(place.route)) return { ...place, tier: 'third_party' };
+  const home = staysHome(reading);
+  if (place.local === true && home) return place;
+  if (REQUEST_ROUTES.has(place.route)) {
+    if (place.local !== true) return { ...place, tier: 'third_party' };
+    // It also reached a host that is not this machine: that is the host, and the key may have gone there.
+    const { local: _local, host: _host, ...rest } = place;
+    const elsewhere = elsewhereHost(reading);
+    return { ...rest, tier: 'third_party', ...(elsewhere === null ? {} : { host: elsewhere }) };
+  }
   // The key was not where the request is: a command that also made a request.
-  const host = commandUrls(reading.command, 1).urls[0]?.host ?? '';
-  return {
+  const host = (commandUrls(reading.command, 1).urls[0]?.host ?? '').toLowerCase();
+  const near: Place = {
     tier: 'third_party',
     route: 'command-near',
     tool: 'Bash',
     ...detailOf(firstStage(reading, 'sends') ?? ''),
-    ...(host === '' ? {} : { host: host.toLowerCase() }),
+    ...(host === '' ? {} : { host }),
   };
+  return home && host !== '' ? { ...near, tier: 'maybe', local: true } : near;
 }
 
 /**
@@ -589,34 +648,51 @@ const ENV_PRINTERS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Whether a stage prints the environment, or reads a process's (`/proc/self/environ`, `os.environ`).
- * `environ` as a word: not `environment`, which is a part of many addresses and sentences.
+ * `environ` and `environb` in the spellings a script has them (`os.environ`, `os.environb`, `__environ`,
+ * `/proc/self/environ`): not `environment`, which is a part of many addresses and sentences.
  */
+const ENVIRON = /environb?(?![a-z])/i;
+
+/** Whether a stage prints the environment, or reads a process's (`/proc/self/environ`, `os.environ`). */
 function printsEnvironment(text: string): boolean {
-  if (/\benviron\b/.test(text)) return true;
+  if (ENVIRON.test(text)) return true;
   const words = joinedWords(text);
   const program = (words[0] ?? '').replace(/^.*\//, '');
   return ENV_PRINTERS.has(program) && words.slice(1).every((w) => /^-[pxi0u]*$/.test(w));
 }
 
-/** The inner texts of the substitutions in a stage: `$(…)`, `<(…)`, `>(…)` and backticks; none in single quotes. */
+/**
+ * The inner texts of the substitutions in a stage: `$(…)`, `<(…)`, `>(…)` and backticks. None in single
+ * quotes. In double quotes a single quote is a plain character, `$(` and backticks still run, and `<(` and
+ * `>(` do not.
+ */
 function substitutions(text: string): string[] {
   const out: string[] = [];
-  let quote = '';
+  let quote: '' | "'" | '"' = '';
   for (let i = 0; i < text.length; i += 1) {
     const c = text[i] as string;
     if (quote === "'") {
       if (c === "'") quote = '';
       continue;
     }
-    if (c === "'") quote = "'";
-    else if (c === '\\') i += 1;
-    else if (c === '`') {
+    if (c === '\\') {
+      i += 1;
+      continue;
+    }
+    if (c === '"') {
+      quote = quote === '"' ? '' : '"';
+      continue;
+    }
+    if (c === "'") {
+      if (quote === '') quote = "'";
+      continue;
+    }
+    if (c === '`') {
       const end = text.indexOf('`', i + 1);
       if (end < 0) break;
       out.push(text.slice(i + 1, end));
       i = end;
-    } else if ((c === '$' || c === '<' || c === '>') && text[i + 1] === '(') {
+    } else if ((c === '$' || (quote === '' && (c === '<' || c === '>'))) && text[i + 1] === '(') {
       let depth = 1;
       let j = i + 2;
       for (; j < text.length && depth > 0; j += 1) {

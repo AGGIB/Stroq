@@ -9,7 +9,8 @@
 //
 //   placeholder  an example's words (`your-…`, `…-here`, `changeme`, `replace-with-…`), a run of `x` (`xxxxxxxx`,
 //                the middle of `sk-xxxx…`)
-//   example      a value the vendors print in their documentation (AWS's `…EXAMPLE…`, Stripe's `sk_test_4eC39…`)
+//   example      a value the vendors print in their documentation, exactly (AWS's `AKIAIOSFODNN7EXAMPLE` and its
+//                secret, Stripe's `sk_test_4eC39…`); a real key that merely holds the word is not one
 //   not-random   a character repeated eight times, too little entropy (a repeated pair, `123123123123`), or
 //                one class of character and short
 //                (`abcdefghijklmnop`, `123456789012`)
@@ -65,18 +66,20 @@ const LONGEST_WORD = Math.max(...[...WORDS].map((w) => w.length));
 /** Words and signs an example is made of. */
 const PLACEHOLDER = [
   /^(?:your|insert|enter|paste|replace|change|fill|put)[-_. ]/,
-  /(?:^|[-_.])(?:here|placeholder|example|sample|dummy|changeme|replaceme|todo)(?:$|[-_.])/,
+  /(?:^|[-_.])(?:here|placeholder|changeme|replaceme|todo)(?:$|[-_.])/,
   /changeme|change-me|change_me|replace-?me|placeholder|your[-_]?(?:api|secret|token|key|password)/,
   /x{6,}/,
 ];
 
-/** What the vendors print in their documentation. */
-const EXAMPLE = [
-  /example/,
-  /^sk_test_[4]ec39hqlyjwdarjtt1zdp7dc$/,
-  /^pk_test_tyoomqauvdedq54ni?tphi7jx$/,
-  /^pk_test_tyoomqauvdedq54nitphi7jx$/,
-];
+/** What the vendors print in their documentation, whole and in lower case: no other value is an example. */
+const EXAMPLES: ReadonlySet<string> = new Set([
+  'akiaiosfodnn7example',
+  'wjalrxutnfemi/k7mdeng/bpxrficyexamplekey',
+  'akiai44qh8dhbexample',
+  'je7mtgbclwbf/2zp9utk/h3yco8nvbexamplekey',
+  'sk_test_' + '4ec39hqlyjwdarjtt1zdp7dc',
+  'pk_test_tyoomqauvdedq54nitphi7jx',
+]);
 
 /** The shapes of vendor tokens: a credential whatever else it resembles. */
 const VENDOR = [
@@ -153,7 +156,7 @@ export function judgeValue(raw: string): Judgement {
   const value = raw.slice(0, MAX_READ);
   const lower = value.toLowerCase();
   if (PLACEHOLDER.some((re) => re.test(lower))) return no('placeholder');
-  if (EXAMPLE.some((re) => re.test(lower))) return no('example');
+  if (EXAMPLES.has(lower)) return no('example');
   if (/(.)\1{7,}/.test(value) || (value.length >= 12 && entropy(value) < MIN_ENTROPY))
     return no('not-random');
   if (VENDOR.some((re) => re.test(value))) return { traced: true };
@@ -161,4 +164,27 @@ export function judgeValue(raw: string): Judgement {
   const alnum = value.replace(/[^A-Za-z0-9]/g, '').length;
   if (alnum >= MIN_FOR_WORDS && wordShare(value) >= WORDS_SHARE) return no('words');
   return { traced: true };
+}
+
+/** The names a note about values not traced lists, at most; the rest are counted. */
+const NAMES_SHOWN = 8;
+
+/**
+ * The note about values in key files that are not traced: how many, and their NAMES (never a value), so
+ * the person can check them: `2 values … so they are not traced: JWT_SECRET, API_TOKEN`. `print` makes a
+ * name safe for where it is printed.
+ */
+export function notTracedNote(
+  count: number,
+  names: readonly string[],
+  print: (name: string) => string = (name) => name,
+): string {
+  const head =
+    count === 1
+      ? '1 value in your key files looks like an example or a placeholder, so it is not traced'
+      : `${count} values in your key files look like examples or placeholders, so they are not traced`;
+  if (names.length === 0) return head;
+  const shown = names.slice(0, NAMES_SHOWN).map(print).join(', ');
+  const more = names.length - NAMES_SHOWN;
+  return `${head}: ${shown}${more > 0 ? ` and ${more} more ${more === 1 ? 'name' : 'names'}` : ''}`;
 }

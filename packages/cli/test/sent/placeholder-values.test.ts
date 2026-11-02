@@ -60,6 +60,18 @@ describe('a key file with real and placeholder values', () => {
     expect(load().placeholders).toBe(3);
   });
 
+  it('names the values that were not traced, by their names and nothing else', () => {
+    const set = load();
+    expect(set.placeholderNames).toEqual(['JWT_SECRET', 'WA_WORKER_TOKEN', 'API_TOKEN']);
+    expect(JSON.stringify(set.placeholderNames)).not.toContain('super-secret');
+    expect(JSON.stringify(set.placeholderNames)).not.toContain('worker-token');
+  });
+
+  it('names a name once though several values or files hold it', () => {
+    writeFileSync(join(root, 'proj', '.env.local'), 'JWT_SECRET=changeme-changeme-changeme\n');
+    expect(load().placeholderNames).toEqual(['JWT_SECRET', 'WA_WORKER_TOKEN', 'API_TOKEN']);
+  });
+
   it('counts a value once though many files hold it', () => {
     writeFileSync(join(root, 'proj', '.env.local'), `JWT_SECRET=${EXAMPLE_JWT_SECRET}\n`);
     writeFileSync(join(root, 'proj', '.env.test'), `OTHER_SECRET=${EXAMPLE_JWT_SECRET}\n`);
@@ -106,6 +118,51 @@ describe('what the report says', () => {
     const text = formatSent(r, '/home/u');
     expect(text).toContain(
       '3 values in your key files look like examples or placeholders, so they are not traced',
+    );
+  });
+
+  it('names the values in the note, names only, and says how many more there are', () => {
+    const names = [
+      'A_KEY',
+      'B_KEY',
+      'C_KEY',
+      'D_KEY',
+      'E_KEY',
+      'F_KEY',
+      'G_KEY',
+      'H_KEY',
+      'I_KEY',
+      'J_KEY',
+    ];
+    const r = buildReport({
+      scope: 'machine',
+      now: new Date('2026-10-19T00:00:00Z'),
+      sessions: { total: 1, agents: {}, first: null, last: null },
+      keys: { ...keys(12), placeholders: 12, placeholderNames: names },
+      findings: [],
+      notChecked: [],
+      unreadable: 0,
+      savedOutputsSkipped: 0,
+    });
+    const text = formatSent(r, '/home/u').replace(/\s+/g, ' ');
+    expect(text).toContain(
+      '12 values in your key files look like examples or placeholders, so they are not traced: A_KEY, B_KEY, C_KEY, D_KEY, E_KEY, F_KEY, G_KEY, H_KEY and 2 more names',
+    );
+  });
+
+  it('names one value in the singular', () => {
+    const r = buildReport({
+      scope: 'machine',
+      now: new Date('2026-10-19T00:00:00Z'),
+      sessions: { total: 1, agents: {}, first: null, last: null },
+      keys: { ...keys(1), placeholders: 1, placeholderNames: ['JWT_SECRET'] },
+      findings: [],
+      notChecked: [],
+      unreadable: 0,
+      savedOutputsSkipped: 0,
+    });
+    expect(formatSent(r, '/home/u')).toContain(
+      '1 value in your key files looks like an example or a placeholder, so it is not traced: JWT_SECRET',
     );
   });
 

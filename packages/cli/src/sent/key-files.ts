@@ -52,15 +52,6 @@ const LOOKS_ONLY: ReadonlySet<string> = new Set([
   'dirname',
 ]);
 
-/**
- * A key file sent to this machine's own address is no strict proof of the key's own use: another
- * company's, as a key in such a request is, though the report says it was this machine.
- */
-const asSent = (place: Place): Place =>
-  place.tier === 'maybe' && place.local === true && place.route !== 'linked'
-    ? { ...place, tier: 'third_party' }
-    : place;
-
 /** The index of a finder, by home: a finder's keys do not change, so many sessions share one. */
 const INDEXES = new WeakMap<KeyFinder, Map<string | undefined, KeyFileIndex>>();
 
@@ -154,12 +145,12 @@ export function keyFileUses(
   for (const path of paths) {
     const use = fileUse(command, path, NO_KEY, where, LOOKS_ONLY);
     if (use !== null && use.place.tier !== 'seen')
-      uses.push({ place: asSent(use.place), keys: index.keysOf.get(path) ?? [] });
+      uses.push({ place: use.place, keys: index.keysOf.get(path) ?? [] });
   }
   // Placed after what was read, so a key file a command did send is reported as sent.
   uses.push(...cut);
   if (index.environment.length === 0) return uses;
   const sent = environmentUse(command, where);
-  if (sent !== null) uses.push({ place: asSent(sent), keys: index.environment });
+  if (sent !== null) uses.push({ place: sent, keys: index.environment });
   return uses;
 }

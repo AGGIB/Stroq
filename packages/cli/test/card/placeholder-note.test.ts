@@ -57,7 +57,7 @@ describe('example values in a key file', () => {
     expect(data.coverage.placeholders).toBe(2);
     const text = renderCard(data, m.home).join(' ').replace(/\s+/g, ' ');
     expect(text).toContain(
-      '2 values in your key files look like examples or placeholders, so they are not traced.',
+      '2 values in your key files look like examples or placeholders, so they are not traced: JWT_SECRET, WA_WORKER_TOKEN.',
     );
   });
 
@@ -75,7 +75,7 @@ describe('example values in a key file', () => {
     expect(data.counts.keysSent).toBe(1);
     const lines = renderCard(data, m.home);
     expect(lines.join(' ').replace(/\s+/g, ' ')).toContain(
-      '1 value in your key files looks like an example or a placeholder, so it is not traced.',
+      '1 value in your key files looks like an example or a placeholder, so it is not traced: JWT_SECRET.',
     );
     for (const line of lines) expect([...line].length, line).toBeLessThanOrEqual(WIDTH);
   });

@@ -10,6 +10,7 @@
 //   blocked      BLOCKED BEFORE IT RAN      Claude Code records the call as refused by you or blocked by Stroq
 //
 // A key that turns up in several places is reported under the most external one it reached.
+import { hostname, networkInterfaces } from 'node:os';
 import { isOwnHost, storesContent, type KeyLabel } from './own-service.js';
 
 export type Tier = 'third_party' | 'maybe' | 'seen' | 'own_service' | 'blocked';
@@ -135,15 +136,60 @@ function ipv4(host: string): number[] | null {
   return nums.every((n) => n <= 255) ? nums : null;
 }
 
+/** A host as it is compared: lower case, no brackets, no trailing dot, no zone (`fe80::1%en0`). */
+const normalHost = (host: string): string =>
+  host
+    .toLowerCase()
+    .replace(/^\[/, '')
+    .replace(/\]$/, '')
+    .replace(/\.$/, '')
+    .replace(/%[^%]*$/, '');
+
 /**
- * Whether a host is this machine itself: `localhost`, a loopback address. Not the local network:
- * a private address or a `.local` name is another machine, which ssh logs in to.
+ * Whether a host is this machine's loopback: `localhost`, a loopback address. Not the local network:
+ * a private address or a `.local` name is another machine, which ssh logs in to (`isThisMachine` adds
+ * the addresses this machine's own network cards have).
  */
 export function isLoopback(host: string): boolean {
-  const h = host.toLowerCase().replace(/^\[/, '').replace(/\]$/, '').replace(/\.$/, '');
+  const h = normalHost(host);
   if (h === 'localhost' || h.endsWith('.localhost') || h === '::1' || h === '0.0.0.0') return true;
   const ip = ipv4(h);
   return ip !== null && ip[0] === 127;
+}
+
+/** The addresses and names this machine has beside loopback, read once. */
+let ownAddresses: ReadonlySet<string> | null = null;
+
+function readOwnAddresses(): ReadonlySet<string> {
+  const found = new Set<string>();
+  try {
+    for (const list of Object.values(networkInterfaces()))
+      for (const one of list ?? []) found.add(normalHost(one.address));
+    // A full name (`macbook.local`, `host.corp.example`) and the `.local` name of its first label.
+    const name = normalHost(hostname());
+    if (name.includes('.')) found.add(name);
+    const first = name.split('.')[0] ?? '';
+    if (first !== '' && name.endsWith('.local')) found.add(`${first}.local`);
+  } catch {
+    // A machine that will not say what it is called has only its loopback.
+  }
+  found.delete('');
+  return found;
+}
+
+/**
+ * The addresses and names to take as this machine's own, in place of those read from its network
+ * cards (a test's own); null reads them again.
+ */
+export function setOwnAddresses(addresses: readonly string[] | null): void {
+  ownAddresses = addresses === null ? null : new Set(addresses.map(normalHost));
+}
+
+/** Whether a host is this machine: loopback, or an address or name one of its network cards has. */
+export function isThisMachine(host: string): boolean {
+  if (isLoopback(host)) return true;
+  ownAddresses ??= readOwnAddresses();
+  return ownAddresses.has(normalHost(host));
 }
 
 /** A key's name and source, and its value, for the pieces of it no host may hold. */
@@ -183,12 +229,12 @@ export function hostPlace(
   facts: RequestFacts = {},
 ): Place {
   const usable = hosts.map((h) => h.toLowerCase()).filter((h) => h !== '');
-  const foreign = usable.find((h) => !isLoopback(h) && !isOwnHost(key, h));
+  const foreign = usable.find((h) => !isThisMachine(h) && !isOwnHost(key, h));
   if (foreign !== undefined) return { ...base, tier: 'third_party', host: foreign };
   if (usable.length === 0 || facts.unread === true || facts.routed === true)
     return { ...base, tier: 'third_party' };
   const first = usable[0] as string;
-  if (usable.every(isLoopback)) return { ...base, tier: 'maybe', host: first, local: true };
+  if (usable.every(isThisMachine)) return { ...base, tier: 'maybe', host: first, local: true };
   // Own hosts beside this machine's: not all of it was the key's own use.
   if (!usable.every((h) => isOwnHost(key, h))) return { ...base, tier: 'third_party' };
   if (usable.some((h) => holdsPiece(h, key))) return { ...base, tier: 'third_party', host: first };
