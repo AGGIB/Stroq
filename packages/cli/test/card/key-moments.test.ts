@@ -336,8 +336,50 @@ describe('keys a request may have sent', () => {
     expect(moments).toHaveLength(3);
   });
 
-  it('are not made for a maybe that is no link', () => {
+  it('are not made for a maybe that names no host', () => {
     const ran: Place = { tier: 'maybe', route: 'command-ran', tool: 'Bash', detail: 'node' };
     expect(build([finding(1, 'A_KEY', ran)])).toEqual([]);
+  });
+
+  it('are not made for a maybe on this machine', () => {
+    const local: Place = {
+      tier: 'maybe',
+      route: 'command',
+      tool: 'Bash',
+      host: '127.0.0.1',
+      local: true,
+    };
+    expect(build([finding(1, 'A_KEY', local)])).toEqual([]);
+  });
+
+  it('are made for a file the AI wrote that a request named by its folder', () => {
+    const written: Place = {
+      tier: 'maybe',
+      route: 'write-sent',
+      tool: 'Write',
+      detail: '/Users/dev/hn/.env.local',
+      host: 'hacker-news.firebaseio.com',
+      then: { route: 'linked', host: 'hacker-news.firebaseio.com', at: null, detail: 'curl' },
+    };
+    const [m] = build([finding(1, 'A_KEY', written)]);
+    expect(m?.kind).toBe('key-maybe');
+    expect(m?.line).toBe(
+      'Your agent may have sent A_KEY to hacker-news.firebaseio.com. The command that made the request did not hold it, so Stroq cannot tell.',
+    );
+  });
+
+  it('are made for any other maybe that names a host, in words that do not blame a command', () => {
+    const stored: Place = {
+      tier: 'maybe',
+      route: 'secret-store',
+      tool: 'Bash',
+      detail: 'vercel',
+      host: 'api.vercel.com',
+      service: 'Vercel',
+    };
+    const [m] = build([finding(1, 'A_KEY', stored)]);
+    expect(m?.line).toBe(
+      'Your agent may have sent A_KEY to api.vercel.com. Stroq could not tell whether it went there.',
+    );
   });
 });

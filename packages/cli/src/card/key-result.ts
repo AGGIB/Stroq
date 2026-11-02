@@ -19,7 +19,7 @@ import {
 import type { Key, KeyFinder } from '../sent/keys.js';
 import { placeRank, type Place } from '../sent/place.js';
 import { printableFinding, printableId } from '../sent/run.js';
-import type { PlacedFinding } from './key-moments.js';
+import { mayHaveSent, type PlacedFinding } from './key-moments.js';
 import type { Scrub } from './scrub.js';
 import { MAX_HITS, type SessionKeys, type StoredHit } from './key-schema.js';
 import { isInside } from './within.js';
@@ -231,8 +231,9 @@ export function findingsBySession(
   /** Whether a place is told in a moment, given the farthest place its key reached anywhere. */
   const told = (place: Place, reached: Place | undefined): boolean => {
     if (place.tier === 'third_party') return true;
-    // A request that did not hold the key, but ran where it was: only while nothing sent it.
-    if (place.tier === 'maybe' && place.route === 'linked') return reached?.tier === 'maybe';
+    // A maybe that names where it may have gone (a request that did not hold the key but ran where it
+    // was, a file the AI wrote that a request named by its folder, ...): only while nothing sent it.
+    if (mayHaveSent(place)) return reached?.tier === 'maybe';
     return place.tier === 'seen' && reached?.tier === 'seen';
   };
   const found: PlacedFinding[] = [];

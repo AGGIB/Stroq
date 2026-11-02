@@ -1,4 +1,4 @@
-import { rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildCard, type BuildEnv } from '../../src/card/build.js';
@@ -260,5 +260,35 @@ describe('a request that held none of the keys', () => {
     // The other keys stay a maybe; the one that was sent is told as sent, once.
     const maybe = data.moments.find((x) => x.kind === 'key-maybe');
     expect(maybe?.line).toContain('4 keys');
+  });
+});
+
+describe('a file the AI wrote a key into', () => {
+  it('is a maybe on the card when a request only shares its folder name', async () => {
+    const [, value] = KEYS[0] as readonly [string, string];
+    // A project called like the host of the request: the folder's name is a part of the address.
+    const folder = join(m.work, 'hacker-news');
+    mkdirSync(folder, { recursive: true });
+    claudeSession(m, {
+      id: 'wrote',
+      cwd: folder,
+      at: ago(DAY),
+      calls: [
+        {
+          tool: 'Write',
+          input: { file_path: join(folder, 'settings.json'), content: `{"token":"${value}"}\n` },
+          result: 'ok',
+        },
+        bash('curl -s https://hacker-news.firebaseio.com/v0/topstories.json'),
+      ],
+    });
+    writeFileSync(join(folder, '.env'), `SERVICE_TOKEN_1=${value}\n`);
+    const data = await buildCard(30, env({ cwd: folder }));
+    expect(data.counts.keysSent).toBe(0);
+    const maybe = data.moments.filter((x) => x.kind === 'key-maybe');
+    expect(maybe).toHaveLength(1);
+    expect(maybe[0]?.line).toBe(
+      'Your agent may have sent SERVICE_TOKEN_1 to hacker-news.firebaseio.com. The command that made the request did not hold it, so Stroq cannot tell.',
+    );
   });
 });

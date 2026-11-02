@@ -110,6 +110,26 @@ const cutPlace = (write: Place, at: string): Place => ({
   then: { route: 'command-unread', host: null, at },
 });
 
+/**
+ * Whether a call's text names a folder as a path: a word that is the folder (`/w/data`, `data/`), or a
+ * pattern in it (`/w/data/*.txt`). A word with an address in it (`https://news.example/…`) does not; nor
+ * does a word that is another file in the folder.
+ */
+function namesFolderAsPath(text: string, folder: string): boolean {
+  for (const word of text.split(/[\s;&|()<>'"`,]+/)) {
+    if (word === '' || word.includes('://')) continue;
+    const parts = word.split('/').filter((part) => part !== '');
+    const last = parts.at(-1) ?? '';
+    if (last === folder) return true;
+    if (parts.at(-2) === folder && /[*?[{]/.test(last)) return true;
+  }
+  return false;
+}
+
+/** Whether a call that can send uploads files or archives and names the folder of a file as a path. */
+const sendsFolder = (c: CallFacts, folder: string): boolean =>
+  (c.uploads || c.archives) && namesFolderAsPath(c.text, folder);
+
 export function createFollower(ctx: FollowContext): Follower {
   const later = new Map<number, Place>();
   const firstWrite = new Map<number, Place>();
@@ -327,8 +347,9 @@ export function createFollower(ctx: FollowContext): Follower {
         // strict proof of the key's own use holds for it, which leaves no way to send a file.
         if (c.sends) {
           if (ownFor(f.key)) continue;
-          if (found.folderOnly.has(id)) {
-            // The request names the file's folder and not the file: it may have sent it.
+          if (found.folderOnly.has(id) && !sendsFolder(c, f.folder)) {
+            // The request holds the file's folder's name as a part of a text (a host, a word) and not
+            // as the folder or files in it that it uploads: it may have sent the file.
             raise(f.held, {
               ...f.write,
               tier: 'maybe',

@@ -1,4 +1,4 @@
-// The moments about keys: keys that left this machine, and keys the AI saw. One moment for what happened
+// The moments about keys: keys that left this machine, keys that may have, and keys the AI saw. One moment for what happened
 // once: ten keys sent to one host in one session, or ten keys the AI saw in one session, are one moment
 // that lists the keys, not ten that push everything else off the card.
 //
@@ -10,6 +10,7 @@
 // a file or a session, so each goes through `clean` as everywhere on the card.
 import { compareFindings, type Finding } from '../sent/findings.js';
 import { describePlace, doLine, when } from '../sent/phrases.js';
+import type { Place } from '../sent/place.js';
 import { isAgent, sessionRows, withTranscript, type SessionPlace } from './moment-parts.js';
 import type { Moment } from './schema.js';
 import { clean, plural, shortPath } from './text.js';
@@ -28,6 +29,18 @@ const SSH_PROGRAMS: ReadonlySet<string> = new Set(['ssh', 'scp', 'sftp', 'rsync'
 
 /** Whether the program that sent a key (as the finding records it) is one that logs in to a server. */
 const viaSsh = (f: Finding): boolean => SSH_PROGRAMS.has(f.place.detail ?? '');
+
+/**
+ * Whether a place is one a moment tells as "may have sent": a maybe with a host that is not this machine.
+ * The routes differ in why Stroq cannot tell (a request that did not hold the key, a file the AI wrote that a
+ * request named by its folder, a hosting tool, an MCP server), and the words say which; but every one
+ * names where it may have gone.
+ */
+export const mayHaveSent = (place: Place): boolean =>
+  place.tier === 'maybe' && place.host !== undefined && place.local !== true;
+
+/** The routes whose maybe is a request that was linked to a key it did not hold. */
+const LINKED: ReadonlySet<string> = new Set(['linked', 'command-near', 'write-sent']);
 
 /** The most keys a moment lists by name; `stroq show` rows are 16 at most, the last says how many more. */
 const LISTED = 15;
@@ -143,7 +156,10 @@ function maybeMoment(group: readonly Finding[], home: string): Draft {
   const host = first.place.host === undefined ? 'another company' : clean(first.place.host, 60);
   const one = group.length === 1;
   const subject = one ? clean(first.name, 60) : `${group.length} keys`;
-  const line = `Your agent may have sent ${subject} to ${host}. The command that made the request did not hold ${one ? 'it' : 'them'}, so Stroq cannot tell.`;
+  const why = LINKED.has(first.place.route)
+    ? `The command that made the request did not hold ${one ? 'it' : 'them'}, so Stroq cannot tell.`
+    : `Stroq could not tell whether ${one ? 'it' : 'they'} went there.`;
+  const line = `Your agent may have sent ${subject} to ${host}. ${why}`;
   const went = describePlace(first.place);
   return moment(
     'key-maybe',
@@ -197,7 +213,7 @@ export function keyMoments(
       sentTo,
     ).map((g) => sentMoment(g, home)),
     maybe: groupBy(
-      ordered.filter((f) => f.tier === 'maybe' && f.place.route === 'linked'),
+      ordered.filter((f) => mayHaveSent(f.place)),
       sentTo,
     ).map((g) => maybeMoment(g, home)),
     seen: groupBy(

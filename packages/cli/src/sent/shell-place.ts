@@ -128,6 +128,11 @@ function wordsWritten(args: readonly Word[], body: string): string {
 export interface Link {
   readonly via: Via;
   readonly proof: 'named' | 'piped' | 'none';
+  /**
+   * For `piped`: whether a stage's own words embed the printer (`curl -d "$(env)"`, `--data @<(printenv)`),
+   * so that what it printed is the request's own data though no stage before it printed it.
+   */
+  readonly embeds?: (stageText: string) => boolean;
 }
 
 /** A place a stage gave, as a maybe unless the link is the proof of a send. */
@@ -136,7 +141,9 @@ function linkedByReach(place: Place | null, reach: Reach, link: Link | undefined
   const flows =
     link.proof === 'named'
       ? reach.direct || reach.piped
-      : link.proof === 'piped' && reach.piped && !reach.direct;
+      : link.proof === 'piped' &&
+        ((reach.piped && !reach.direct) ||
+          (reach.direct && link.embeds?.(reach.stage.text) === true));
   if (flows) return place;
   // Reached only because an earlier step held the text: it is no more than that.
   return linkedPlace(place, reach.direct || reach.piped ? link.via : 'earlier-step');
@@ -529,9 +536,10 @@ export function fileUse(
           (glob === null || (named.glob === true) === glob)
         );
       }) && !skips(text);
-  // Sure namings first, and of those the file by its own name: that is the only one a request sends.
-  // A pattern, a folder, or a naming only a pattern someone may fill in reaches is at most a maybe,
-  // linked to the key by what it named.
+  // Sure namings first, and of those the file by its own name. Whatever was named, a request that names
+  // it in its own words, or is piped what a stage that names it printed (an archive of the folder, a
+  // `cat` of the pattern), sent it. One that only ran after such a step is a maybe, linked to the key by
+  // what the step named; so is a naming only a pattern someone may fill in reaches.
   const passes: readonly {
     readonly kind: 'file' | 'folder';
     readonly sure: boolean;
@@ -539,10 +547,10 @@ export function fileUse(
     readonly link: Link;
   }[] = [
     { kind: 'file', sure: true, glob: false, link: { via: 'pattern', proof: 'named' } },
-    { kind: 'file', sure: true, glob: true, link: { via: 'pattern', proof: 'none' } },
-    { kind: 'folder', sure: true, glob: null, link: { via: 'folder', proof: 'none' } },
-    { kind: 'file', sure: false, glob: null, link: { via: 'pattern', proof: 'none' } },
-    { kind: 'folder', sure: false, glob: null, link: { via: 'folder', proof: 'none' } },
+    { kind: 'file', sure: true, glob: true, link: { via: 'pattern', proof: 'named' } },
+    { kind: 'folder', sure: true, glob: null, link: { via: 'folder', proof: 'named' } },
+    { kind: 'file', sure: false, glob: null, link: { via: 'pattern', proof: 'named' } },
+    { kind: 'folder', sure: false, glob: null, link: { via: 'folder', proof: 'named' } },
   ];
   for (const { kind, sure, glob, link } of passes) {
     if (!kinds.has(sure ? kind : `${kind}?`)) continue;
@@ -580,13 +588,54 @@ const ENV_PRINTERS: ReadonlySet<string> = new Set([
   'typeset',
 ]);
 
-/** Whether a stage prints the environment, or reads a process's (`/proc/self/environ`). */
+/**
+ * Whether a stage prints the environment, or reads a process's (`/proc/self/environ`, `os.environ`).
+ * `environ` as a word: not `environment`, which is a part of many addresses and sentences.
+ */
 function printsEnvironment(text: string): boolean {
-  if (text.includes('environ')) return true;
+  if (/\benviron\b/.test(text)) return true;
   const words = joinedWords(text);
   const program = (words[0] ?? '').replace(/^.*\//, '');
   return ENV_PRINTERS.has(program) && words.slice(1).every((w) => /^-[pxi0u]*$/.test(w));
 }
+
+/** The inner texts of the substitutions in a stage: `$(…)`, `<(…)`, `>(…)` and backticks; none in single quotes. */
+function substitutions(text: string): string[] {
+  const out: string[] = [];
+  let quote = '';
+  for (let i = 0; i < text.length; i += 1) {
+    const c = text[i] as string;
+    if (quote === "'") {
+      if (c === "'") quote = '';
+      continue;
+    }
+    if (c === "'") quote = "'";
+    else if (c === '\\') i += 1;
+    else if (c === '`') {
+      const end = text.indexOf('`', i + 1);
+      if (end < 0) break;
+      out.push(text.slice(i + 1, end));
+      i = end;
+    } else if ((c === '$' || c === '<' || c === '>') && text[i + 1] === '(') {
+      let depth = 1;
+      let j = i + 2;
+      for (; j < text.length && depth > 0; j += 1) {
+        if (text[j] === '(') depth += 1;
+        else if (text[j] === ')') depth -= 1;
+      }
+      out.push(text.slice(i + 2, depth === 0 ? j - 1 : j));
+      i += 1;
+    }
+  }
+  return out;
+}
+
+/**
+ * Whether a stage's own words embed a printer of the environment (`curl -d "$(env)"`, `--data
+ * @<(printenv)`, `wget --post-data="$(set)"`, a here-string of `$(env)`): what it printed is the
+ * request's own data, though no stage before it printed it.
+ */
+const embedsPrinter = (text: string): boolean => substitutions(text).some(printsEnvironment);
 
 const joinedWords = (text: string): string[] =>
   shellJoined(text)
@@ -607,16 +656,16 @@ export function environmentUse(command: string, ctx: ShellContext): Place | null
     countCut(command);
     return unreadCommand();
   }
-  // A request is a send of the environment only when it is piped what the printer printed: `env |
-  // curl -d @-`. One that merely ran beside `set -x`, `export -p` or a script that reads `environ`
-  // may have, and is a maybe.
+  // A request is a send of the environment when it is piped what the printer printed (`env | curl -d
+  // @-`) or has the printer in its own words (`curl -d "$(env)"`). One that merely ran beside `set -x`,
+  // `export -p` or a script that reads `environ` may have, and is a maybe.
   const { place } = placeIn(
     commandReading(command, ctx.cwd),
-    printsEnvironment,
+    (text) => printsEnvironment(text) || embedsPrinter(text),
     NO_KEY,
     ctx.cwd,
     true,
-    { via: 'environment', proof: 'piped' },
+    { via: 'environment', proof: 'piped', embeds: embedsPrinter },
   );
   return place === null || place.tier === 'seen' ? null : place;
 }
