@@ -127,7 +127,7 @@ describe('the built CLI: stroq vet', () => {
 
   it('has a help that names every flag, and is listed among the commands', () => {
     const help = stroq('vet', '--help');
-    const list = stroq('--help');
+    const list = stroq('help', '--all');
 
     expect(help.status).toBe(0);
     expect(help.stdout).toMatch(/^stroq vet --from <dir or \.tgz>/);
@@ -144,7 +144,7 @@ describe('the built CLI: stroq install', () => {
     expect(run.status).toBe(1);
     expect(run.stdout).toBe('');
     expect(run.stderr).toBe(
-      'stroq has no install: `stroq init` guards an agent, `stroq add` adds a local skill after a check.\n',
+      'stroq has no install: `stroq init` guards an agent, `stroq vet` checks a skill or MCP server before you add it.\n',
     );
     expect(run.stderr).not.toContain('uninstall');
   });
