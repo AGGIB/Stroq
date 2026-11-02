@@ -32,6 +32,7 @@ import { lineHits } from '../../src/exposure/agent-lines.js';
 import { foldName, windowsAlias } from '../../src/exposure/git-dir-names.js';
 import { parseGitConfig } from '../../src/exposure/repo-surface.js';
 import { onePath, pointerPath, walkPlan } from '../../src/exposure/linked-git.js';
+import { isStockLfsHook } from '../../src/exposure/lfs-hooks.js';
 import { annotations, githubSummary } from '../../src/exposure/github-format.js';
 import { linkTarget } from '../../src/exposure/git-tree.js';
 import { lineOf, stripJsonc } from '../../src/exposure/jsonc.js';
@@ -471,6 +472,14 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
   ],
   ['a git config', (text) => parseGitConfig(text)],
   ['the path in a .git file', GIT_FILE_PATH],
+  [
+    'the text of a hook compared with the scripts Git LFS writes',
+    (text) => [
+      isStockLfsHook('pre-push', text),
+      isStockLfsHook('post-checkout', `${text}\n`),
+      isStockLfsHook('pre-push', text.replace(/\n/g, '\r\n')),
+    ],
+  ],
   [
     'a name a disk may fold',
     (text) => [foldName(text), windowsAlias(text), foldPath(text), agentOnlyWhenFolded(text)],

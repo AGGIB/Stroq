@@ -9,6 +9,7 @@ import { plainHookHits } from './plain-hook-folders.js';
 import { FILE_NAMES, foldName, gitDirName, looksLikeGitDir } from './git-dir-names.js';
 import { MAX_CONFIG_BYTES, gitConfigEntries, parseGitConfig } from './git-config.js';
 import { linkedGit, ordinaryGitFolder, type LinkedGit } from './linked-git.js';
+import { isStockLfsHook } from './lfs-hooks.js';
 
 export { gitConfigEntries, parseGitConfig };
 
@@ -195,17 +196,38 @@ const UNREAD_HOOK = '\u0000';
 /**
  * A hook is ordinary only when it is one of the commit hooks, by its name as a forgiving disk
  * opens it, and its text was read and does not download and run code.
+ *
+ * `strict` is for a `.git` folder in a folder that is not a repository, which an extracted zip or
+ * tarball makes exactly as git does, with hooks of its own that run on the next git command. There
+ * every executable hook is a finding, a commit hook too, unless it is a file Git LFS wrote: the
+ * whole text of one of its scripts, in a regular file, under the name that script is for.
  */
-function gitHookHit(root: string, dir: string, name: string, io: SurfaceReadContext): RepoExecHit {
-  const file = labelOf(root, join(dir, name), io);
-  const text = readTextOr(join(dir, name), UNREAD_HOOK, io);
-  const outcome = hookOutcome(name, text === UNREAD_HOOK ? undefined : text);
+function gitHookHit(
+  root: string,
+  dir: string,
+  name: string,
+  io: SurfaceReadContext,
+  strict: boolean,
+): RepoExecHit | undefined {
+  const path = join(dir, name);
+  const file = labelOf(root, path, io);
+  const text = readTextOr(path, UNREAD_HOOK, io);
+  const known = text === UNREAD_HOOK ? undefined : text;
+  if (strict && known !== undefined && isStockLfsHook(name, known) && isRegularFile(path, io))
+    return undefined;
+  const outcome = hookOutcome(name, known);
   if (outcome === 'routine') return { kind: 'git-hook-routine', file, what: name };
   if (outcome === 'unsafe')
     return {
       kind: 'git-hook-routine',
       file,
       what: `${name}, whose text downloads and runs code, sends a secret out, or could not be read`,
+    };
+  if (strict)
+    return {
+      kind: 'git-hook-routine',
+      file,
+      what: `${name}, a commit hook that nothing here shows git made`,
     };
   return { kind: 'git-hook', file, what: name };
 }
@@ -215,6 +237,7 @@ function gitHookHits(
   dir: string,
   plat: NodeJS.Platform,
   io: SurfaceReadContext,
+  strict = false,
 ): RepoExecHit[] {
   if (!io.exists(dir)) return [];
   try {
@@ -223,9 +246,18 @@ function gitHookHits(
       .map((entry) => entry.name)
       .filter((name) => !name.endsWith('.sample'))
       .filter((name) => runsAsGitHook(join(dir, name), plat, io))
-      .map((name) => gitHookHit(root, dir, name, io));
+      .flatMap((name) => gitHookHit(root, dir, name, io, strict) ?? []);
   } catch {
-    return [];
+    // A folder of hooks that can be entered but not listed may hold any of them.
+    return strict && mayHideRepository(dir, io)
+      ? [
+          {
+            kind: 'git-hook-routine',
+            file: labelOf(root, dir, io),
+            what: 'a folder of hooks the check could enter but not list',
+          },
+        ]
+      : [];
   }
 }
 
@@ -420,6 +452,14 @@ function addOnce(hits: RepoExecHit[], seen: Set<string>, more: readonly RepoExec
   }
 }
 
+const isRegularFile = (path: string, io: SurfaceReadContext): boolean => {
+  try {
+    return io.lstat(path).isFile();
+  } catch {
+    return false;
+  }
+};
+
 const isFolderAt = (path: string, io: SurfaceReadContext): boolean => {
   try {
     return io.lstat(path).isDirectory();
@@ -438,7 +478,8 @@ const tryRealpath = (path: string, io: SurfaceReadContext): string => {
 
 /**
  * What git would run from the git folder of one checkout: the commands its configs name, the
- * drivers its attributes route through them, and the hooks git runs on its own. `judged` holds the
+ * drivers its attributes route through them, and its executable hooks, all of them (`strict`, in
+ * `gitHookHit`: an archive makes a `.git` folder as git does). `judged` holds the
  * real paths of the git folders whose `config` and hooks were read already, in this walk; those are
  * not read again, and the checkout's own `config.worktree` and attributes are. Coverage is only
  * what was read, never where a folder lies: a repository in a folder the walk does not enter, or
@@ -459,7 +500,7 @@ function homeHits(
     ...(first ? configHits(home.config) : []),
     ...configHits(home.worktreeConfig),
     ...gitAttributesHits(root, [home.config, home.worktreeConfig], home.attributes, io),
-    ...(first ? gitHookHits(root, home.hooks, plat, io) : []),
+    ...(first ? gitHookHits(root, home.hooks, plat, io, true) : []),
   ];
 }
 
@@ -704,7 +745,7 @@ export const WHY: Readonly<Record<string, string>> = {
   'devcontainer-host-command':
     'initializeCommand runs on this machine before the container exists, so the container gives it no isolation',
   'git-hook-routine':
-    'git runs this hook during routine use (a `git status` or `git add`, a checkout, a fetch, a merge, any ref update), which an agent does by itself, before any approval; a commit hook is here when its text downloads and runs code, and any other file here may be one a hook sources',
+    'git runs this hook during routine use (a `git status` or `git add`, a checkout, a fetch, a merge, any ref update), which an agent does by itself, before any approval; a commit hook is here when its text downloads and runs code, and any other file here may be one a hook sources; in a folder that came as an archive or a download, any executable hook is here, a commit hook too, since it runs on the next git command',
 };
 
 export function repoFindings(surface: RepoSurface): readonly Finding[] {
