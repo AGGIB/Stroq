@@ -6,11 +6,12 @@
 // again. A transcript past the replay's size limit is not checked and is counted as too large, as the
 // replay counts it. What the budget does not reach is counted and said, and the next run goes on from
 // what was kept. Every number here is of the sessions checked, never an estimate for the rest.
+import { HIDDEN } from '../sent/analyze.js';
 import { stoppedFindings } from '../sent/report.js';
 import type { Finding, SessionKeySummary } from '../sent/findings.js';
 import { keyFinder, loadKeys, type KeyFinder } from '../sent/keys.js';
 import { loadMcpServers } from '../sent/mcp-config.js';
-import { projectDirs } from '../sent/run.js';
+import { printableId, projectDirs } from '../sent/run.js';
 import { withSessionCanaries } from '../sent/session-canaries.js';
 import { canaryNotes, type CanaryNotes } from './canary-memory.js';
 import type { CardJob } from './jobs.js';
@@ -58,6 +59,12 @@ export interface KeyOutcome {
 export interface KeysRun {
   /** Removes any key from a text that is about to be kept. */
   readonly scrub: Scrub;
+  /** A name from a session (a folder, a path) as it may be shown: the rule of the key findings'. */
+  readonly name: (text: string) => string;
+  /** A session's id as it may be shown. */
+  readonly id: (text: string) => string;
+  /** The digest of the keys this run looked for; empty when there were none. */
+  readonly digest: string;
   /** The job that checks session `index`, or null: nothing to look for, too large, or kept. */
   jobFor(index: number): CardJob | null;
   /** An answer for session `index`; null is a check that failed. */
@@ -84,8 +91,9 @@ export function startKeys(env: KeysEnv, sessions: readonly WindowSession[]): Key
   );
   const finder = keyFinder(loaded.keys, namesGuard);
   const scrub = scrubber(finder);
+  const shown = shownWith(finder, scrub);
   const checkable = sessions.map((s) => !isTooLarge(s));
-  if (loaded.keys.length === 0) return nothingToLookFor(scrub, checkable);
+  if (loaded.keys.length === 0) return nothingToLookFor(shown, checkable);
 
   const mcp = loadMcpServers({ home: env.home, projectDirs: dirs });
   const index = prepareIndex({ home: env.home, keys: loaded.keys, mcp: [...mcp.known] });
@@ -93,14 +101,44 @@ export function startKeys(env: KeysEnv, sessions: readonly WindowSession[]): Key
   const digest = indexDigest(index, salt);
   const kept = entriesUnder(cache, digest);
   registerKeyIndex({ digest, data: index.data });
-  return new Run({ env, sessions, finder, scrub, index, salt, digest, kept, checkable, notes });
+  const stale = cache.digest !== null && cache.digest !== digest;
+  return new Run({
+    env,
+    sessions,
+    finder,
+    scrub,
+    shown,
+    index,
+    salt,
+    digest,
+    kept,
+    stale,
+    checkable,
+    notes,
+  });
+}
+
+/** How a run shows what came from a session: the name rule, then the scrub for what is left. */
+interface Shown {
+  readonly scrub: Scrub;
+  readonly name: (text: string) => string;
+  readonly id: (text: string) => string;
+}
+
+function shownWith(finder: KeyFinder, scrub: Scrub): Shown {
+  return {
+    scrub,
+    name: (text) => scrub(finder.shown(text) ?? HIDDEN),
+    id: (text) => scrub(printableId(text, finder)),
+  };
 }
 
 /** A machine that holds no key to look for: every session that can be checked is, at once. */
-function nothingToLookFor(scrub: Scrub, checkable: readonly boolean[]): KeysRun {
+function nothingToLookFor(shown: Shown, checkable: readonly boolean[]): KeysRun {
   const checked = checkable.filter(Boolean).length;
   return {
-    scrub,
+    ...shown,
+    digest: '',
     jobFor: () => null,
     accept: () => undefined,
     finish: () => ({
@@ -121,16 +159,22 @@ interface RunParts {
   readonly sessions: readonly WindowSession[];
   readonly finder: KeyFinder;
   readonly scrub: Scrub;
+  readonly shown: Shown;
   readonly index: PreparedIndex;
   readonly salt: string;
   readonly digest: string;
   readonly kept: ReadonlyMap<string, KeyCacheEntry>;
+  /** What was kept was made under other keys: it is dropped, and the file is rewritten without it. */
+  readonly stale: boolean;
   readonly checkable: readonly boolean[];
   readonly notes: CanaryNotes;
 }
 
 class Run implements KeysRun {
   readonly scrub: Scrub;
+  readonly name: (text: string) => string;
+  readonly id: (text: string) => string;
+  readonly digest: string;
   /** What each session came to: kept or answered, by place in the window. */
   private readonly results = new Map<number, SessionKeys>();
   private readonly fromCache = new Set<number>();
@@ -140,6 +184,9 @@ class Run implements KeysRun {
 
   constructor(private readonly p: RunParts) {
     this.scrub = p.scrub;
+    this.name = p.shown.name;
+    this.id = p.shown.id;
+    this.digest = p.digest;
     p.sessions.forEach((s, i) => {
       if (!p.checkable[i]) return;
       const kept = keptKeys(p.kept, this.pathOf(s), this.keyOf(s));
@@ -209,7 +256,7 @@ class Run implements KeysRun {
 
   /** Keeps what was kept and what was just made complete; false when it could not be written. */
   private save(): boolean {
-    if (this.fresh.size === 0 && !this.p.notes.changed()) return true;
+    if (this.fresh.size === 0 && !this.p.notes.changed() && !this.p.stale) return true;
     const entries = new Map(this.p.kept);
     for (const [i, result] of this.fresh) {
       const s = this.p.sessions[i] as WindowSession;

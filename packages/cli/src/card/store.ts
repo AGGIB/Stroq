@@ -33,8 +33,10 @@ export function cacheKey(parts: {
   readonly version: string;
   /** The digest of the policy the replay was judged under. */
   readonly policy: string;
+  /** The digest of the key index of the run (`key-index.ts`); empty when it looked for no key. */
+  readonly keys: string;
 }): string {
-  return `${parts.bytes}:${parts.mtimeMs}:${parts.version}:${parts.policy}`;
+  return `${parts.bytes}:${parts.mtimeMs}:${parts.version}:${parts.policy}:${parts.keys}`;
 }
 
 /** Makes the folder, or checks the one that is there is a real folder only this user can use. */

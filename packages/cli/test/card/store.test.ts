@@ -50,22 +50,23 @@ const summary = (id: string, over: Partial<SessionSummary> = {}): SessionSummary
   ...over,
 });
 const entry = (id: string, mtimeMs = 1_000): CacheEntry => ({
-  key: cacheKey({ bytes: 10, mtimeMs, version: '0.29.0', policy: 'p' }),
+  key: cacheKey({ bytes: 10, mtimeMs, version: '0.29.0', policy: 'p', keys: 'k' }),
   mtimeMs,
   summary: summary(id),
 });
 
 describe('the cache key', () => {
-  it('changes with the size, the date, the version and the policy', () => {
-    const base = { bytes: 10, mtimeMs: 5, version: '0.29.0', policy: 'abc' };
+  it('changes with the size, the date, the version, the policy and the keys', () => {
+    const base = { bytes: 10, mtimeMs: 5, version: '0.29.0', policy: 'abc', keys: 'k1' };
     const keys = new Set([
       cacheKey(base),
       cacheKey({ ...base, bytes: 11 }),
       cacheKey({ ...base, mtimeMs: 6 }),
       cacheKey({ ...base, version: '0.30.0' }),
       cacheKey({ ...base, policy: 'abd' }),
+      cacheKey({ ...base, keys: 'k2' }),
     ]);
-    expect(keys.size).toBe(5);
+    expect(keys.size).toBe(6);
   });
 
   it('is a hit only for the key that was stored', () => {
