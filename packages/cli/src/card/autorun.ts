@@ -48,13 +48,18 @@ const LATER_HOOKS: ReadonlySet<string> = new Set([
 ]);
 
 /** Whether a finding runs when an agent opens the folder, rather than when it later commits or pushes. */
-export function runsOnOpen(hit: Pick<RepoExecHit, 'kind' | 'what'>): boolean {
+export function runsOnOpen(hit: Pick<RepoExecHit, 'kind' | 'what' | 'hooksJudged'>): boolean {
   if (hit.kind === 'git-hook-routine') {
     const name = hit.what.split(',')[0]?.trim() ?? '';
     return !LATER_HOOKS.has(name);
   }
-  // The key only says where hooks are; the hooks it leads to are judged one by one.
-  return !(hit.kind === 'git-config-exec' && hit.what.toLowerCase() === 'core.hookspath');
+  // The key only says where hooks are. When the folder it names was found, the hooks in it were judged
+  // one by one and count on their own; when it could not be placed (`~`, a variable), the key counts.
+  return !(
+    hit.kind === 'git-config-exec' &&
+    hit.what.toLowerCase() === 'core.hookspath' &&
+    hit.hooksJudged === true
+  );
 }
 
 /** What the folder runs by itself, or null when it runs nothing. Reads only; runs nothing. */

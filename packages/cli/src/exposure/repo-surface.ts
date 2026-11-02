@@ -35,6 +35,11 @@ export interface RepoExecHit {
   readonly file: string;
   /** The key, hook name or script this hit is about. */
   readonly what: string;
+  /**
+   * On a `core.hooksPath` key only: the folder it names was found and its hooks were judged one by
+   * one, each with a finding of its own. Absent when the folder could not be placed (`~`, a variable).
+   */
+  readonly hooksJudged?: true;
 }
 
 export type RepoExecKind =
@@ -573,7 +578,12 @@ function hooksPathHits(
       if (key !== 'core.hookspath') continue;
       const folder = hooksFolder(value, home.checkout);
       if (folder !== undefined && samePath(folder, home.hooks, io)) continue;
-      hits.push({ kind: 'git-config-exec', file: labelOf(root, file, io), what: key });
+      hits.push({
+        kind: 'git-config-exec',
+        file: labelOf(root, file, io),
+        what: key,
+        ...(folder === undefined ? {} : { hooksJudged: true as const }),
+      });
       if (folder !== undefined) hits.push(...gitHookHits(root, folder, plat, io, strict));
     }
   }
