@@ -35,8 +35,16 @@ export interface CardCoverage {
   readonly unreadable: number;
   /** Sessions the agents keep that are older than the window. */
   readonly older: number;
-  /** The key check: done, cut short, or nothing to check. */
+  /** The key check: every session that can be checked is, cut short, or nothing to check. */
   readonly keys: 'checked' | 'not-finished' | 'no-sessions';
+  /** Sessions whose keys were checked: in this run or in an earlier one. The sessions too large are not. */
+  readonly keysChecked: number;
+  /** Of those, read from what an earlier run kept. */
+  readonly keysFromCache: number;
+  /** Sessions that can be checked and were not reached in time, or whose check was lost. */
+  readonly keysNotChecked: number;
+  /** Checked, but a file could not be read or a bound of the check was reached: not kept for later. */
+  readonly keysIncomplete: number;
   readonly folders: {
     readonly found: number;
     readonly checked: number;
@@ -64,6 +72,13 @@ export interface CardData {
     /** Transcripts replayed in this run. */
     readonly replayed: number;
     readonly workers: number;
+    /** From the start until the replay had nothing more to do: its last answer (0 when none was needed). */
+    readonly replayMs: number;
+    /**
+     * From the start until the key check had nothing more to do: its last answer, or, when everything
+     * was kept from an earlier run, the moment the kept results were read and merged.
+     */
+    readonly keysMs: number;
   };
 }
 

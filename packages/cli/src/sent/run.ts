@@ -80,7 +80,7 @@ export const ID_NOT_SHOWN = '[an id that cannot be printed]';
 /** An id as a record gives it: plain characters, a bound on its length. */
 const ID_SHAPE = /^[A-Za-z0-9._:-]{1,64}$/;
 
-const printableId = (id: string, finder: KeyFinder): string =>
+export const printableId = (id: string, finder: KeyFinder): string =>
   ID_SHAPE.test(id) && !finder.hasPiece(id) ? id : ID_NOT_SHOWN;
 
 /**
@@ -105,7 +105,7 @@ export function printableSession(
 }
 
 /** A finding with its session, subagent and source as they may be printed. */
-function printableFinding(f: Finding, finder: KeyFinder): Finding {
+export function printableFinding(f: Finding, finder: KeyFinder): Finding {
   const { session, subagent } = printableSession(f.session, f.subagent, finder);
   // `env` and `stroq canary` are fixed labels, not paths.
   const source =

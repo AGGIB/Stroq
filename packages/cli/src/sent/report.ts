@@ -258,8 +258,11 @@ export function buildReport(parts: {
  * it was stopped is read from the result, which the call can write: such a key is never counted
  * as having gone nowhere.
  */
-export const stoppedTowardOthers = (report: SentReport): number =>
-  report.findings.filter((f) => f.tier === 'blocked' && f.place.wouldBe === 'third_party').length;
+export const stoppedFindings = (findings: readonly Finding[]): number =>
+  findings.filter((f) => f.tier === 'blocked' && f.place.wouldBe === 'third_party').length;
+
+/** `stoppedFindings` of a report. */
+export const stoppedTowardOthers = (report: SentReport): number => stoppedFindings(report.findings);
 
 /** Findings in one tier. */
 export const inTier = (report: SentReport, tier: Finding['tier']): readonly Finding[] =>

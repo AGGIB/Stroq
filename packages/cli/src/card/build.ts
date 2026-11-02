@@ -1,25 +1,23 @@
 // One run of the card: find the sessions of the last N days, count what a text told the agent to run,
 // look for keys that went out and for folders that run code on open, and rank what is worth a look.
 //
-// The work is split in jobs for a pool of workers (`pool.ts`, `jobs.ts`): the key check is one job, the
-// folder check another, and each transcript that is not already summed up in the cache is one more,
-// newest first. What the cache holds is keyed by the file's size and date, Stroq's version and the policy
-// the replay was judged under, so a changed transcript, a new version or a new policy checks it again.
-// After `budgetMs` no job is started; what was not reached is counted and said, and the next run
-// continues from the cache.
+// The work is split in jobs for a pool of workers (`pool.ts`, `jobs.ts`): the folder check is one job,
+// and each transcript is up to two more, newest first: its replay (when it is not already summed up in
+// the cache) and its key check (when its result is not kept; `keys-run.ts`). What the caches hold is keyed
+// by the file's size and date and Stroq's version, and by the policy the replay was judged under or the
+// keys the check looked for, so a changed transcript, a new version, a new policy or a new key checks it
+// again. After `budgetMs` no job is started; what was not reached is counted and said, and the next run
+// continues from the caches.
 import { statSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { loadPolicyWithSource } from '../engine-factory.js';
-import { keyFinder, loadKeys } from '../sent/keys.js';
-import { projectDirs } from '../sent/run.js';
-import type { SentReport } from '../sent/report.js';
-import { stoppedTowardOthers } from '../sent/report.js';
 import { CARD_SCHEMA, KEPT, type CardCounts, type CardData } from './data.js';
 import type { CardJob, CardResult } from './jobs.js';
 import { buildMoments, type ToldInput } from './moments.js';
 import { runPool, type Channel } from './pool.js';
 import type { AutorunResult } from './autorun.js';
-import { scrubber, scrubSummary } from './scrub.js';
+import { startKeys, type KeyOutcome } from './keys-run.js';
+import { scrubSummary } from './scrub.js';
 import type { CacheEntry, SessionSummary } from './schema.js';
 import { cacheKey, cachedSummary, readSessionCache, writeSessionCache } from './store.js';
 import { isTooLarge, listWindow, type WindowSession } from './window.js';
@@ -97,7 +95,7 @@ interface Gathered {
   readonly replayed: number;
   readonly notChecked: number;
   readonly unreadable: number;
-  readonly sent: SentReport | null;
+  readonly keys: KeyOutcome;
   readonly folders: AutorunResult;
   readonly cacheSaved: boolean;
 }
@@ -117,53 +115,42 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
   );
   const fromCache = summaries.filter((s) => s !== undefined).length;
   const tooLarge = sessions.filter((s, i) => summaries[i] === undefined && isTooLarge(s)).length;
-  const pending = sessions
-    .map((session, index) => ({ session, index }))
-    .filter(({ session, index }) => summaries[index] === undefined && !isTooLarge(session));
 
   const { dirs, total: folderTotal } = sessionFolders(sessions, run.home);
+  // The keys this machine holds, in this thread and the workers only: the check looks for them, and
+  // anything the card keeps is cleaned of them.
+  const keys = startKeys(
+    { home: run.home, env: run.env, stroqHome: run.stroqHome, cwd: run.cwd, version: run.version },
+    sessions,
+  );
+  const keysReadyAt = Date.now();
   const jobs: CardJob[] = [];
-  const kinds: ('sent' | 'repos' | { session: number })[] = [];
-  if (sessions.length > 0) {
-    jobs.push({
-      kind: 'sent',
-      refs: sessions.map((s) => s.ref),
-      home: run.home,
-      cwd: run.cwd,
-      stroqHome: run.stroqHome,
-      now: run.now.getTime(),
-    });
-    kinds.push('sent');
-  }
+  const kinds: ('repos' | { session: number } | { keys: number })[] = [];
   if (dirs.length > 0) {
     jobs.push({ kind: 'repos', dirs, stopAt: started + budget - FOLDER_MARGIN_MS });
     kinds.push('repos');
   }
-  for (const { session, index } of pending) {
-    jobs.push({ kind: 'session', agent: session.agent, path: session.path });
-    kinds.push({ session: index });
-  }
+  // Newest first, a session's replay and then its key check: when the time is up, both halves of the
+  // card stop at about the same session.
+  sessions.forEach((session, index) => {
+    if (summaries[index] === undefined && !isTooLarge(session)) {
+      jobs.push({ kind: 'session', agent: session.agent, path: session.path });
+      kinds.push({ session: index });
+    }
+    const keyJob = keys.jobFor(index);
+    if (keyJob !== null) {
+      jobs.push(keyJob);
+      kinds.push({ keys: index });
+    }
+  });
 
-  // The keys this machine holds, in this thread only, to take any of them out of what is kept.
-  const scrub = scrubber(
-    keyFinder(
-      loadKeys({
-        home: run.home,
-        env: run.env,
-        projectDirs: projectDirs(
-          run.cwd,
-          sessions.map((s) => s.ref),
-        ),
-        stroqHome: run.stroqHome,
-      }).keys,
-    ),
-  );
-
-  let sent: SentReport | null = null;
   let folders = ZERO_FOLDERS;
   const fresh = new Map<number, SessionSummary>();
-  let unreadable = 0;
+  /** Sessions (by place in the window) that could not be read, in either half. */
+  const unreadable = new Set<number>();
   let done = 0;
+  let lastKeyAt = 0;
+  let lastReplayAt = 0;
   const workers = run.workers ?? defaultWorkers();
   const outcome = await runPool<CardJob, CardResult>(jobs, {
     size: workers,
@@ -172,22 +159,44 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
     ...(run.graceMs === undefined ? {} : { graceMs: run.graceMs }),
     onResult: (job, result) => {
       const kind = kinds[job];
-      if (result.kind === 'sent') sent = result.report;
-      else if (result.kind === 'repos') folders = result.result;
-      else if (result.kind === 'session' && kind !== undefined && typeof kind === 'object') {
+      if (result.kind === 'repos') folders = result.result;
+      else if (result.kind === 'keys' && kind !== undefined && typeof kind === 'object') {
+        lastKeyAt = Date.now();
+        keys.accept((kind as { keys: number }).keys, result.answer);
+      } else if (result.kind === 'session' && kind !== undefined && typeof kind === 'object') {
         done += 1;
+        lastReplayAt = Date.now();
         run.progress?.(fromCache + done, sessions.length);
-        if (result.summary === null) unreadable += 1;
-        else fresh.set(kind.session, scrubSummary(result.summary, scrub));
+        const at = (kind as { session: number }).session;
+        if (result.summary === null) unreadable.add(at);
+        else fresh.set(at, scrubSummary(result.summary, keys.scrub));
       }
     },
   });
 
   for (const [index, summary] of fresh) summaries[index] = summary;
-  const isSession = (job: number): boolean => typeof kinds[job] === 'object';
-  const notChecked = [...outcome.notStarted, ...outcome.unfinished].filter(isSession).length;
-  const lost = outcome.failed.filter(isSession).length;
-  const cacheSaved = saveCache(run.stroqHome, cache, sessions, keyOf, fresh);
+  const replayJob = (job: number): number | null => {
+    const kind = kinds[job];
+    return typeof kind === 'object' && 'session' in kind ? kind.session : null;
+  };
+  const keyJob = (job: number): number | null => {
+    const kind = kinds[job];
+    return typeof kind === 'object' && 'keys' in kind ? kind.keys : null;
+  };
+  const replays = (list: readonly number[]): number[] =>
+    list.map(replayJob).filter((at): at is number => at !== null);
+  const notChecked = replays([...outcome.notStarted, ...outcome.unfinished]).length;
+  for (const at of replays(outcome.failed)) unreadable.add(at);
+  for (const job of outcome.failed) {
+    const at = keyJob(job);
+    if (at !== null) keys.accept(at, null);
+  }
+  const mergeStarted = Date.now();
+  const keyOutcome = keys.finish();
+  const keysMs =
+    (lastKeyAt === 0 ? keysReadyAt : lastKeyAt) - started + (Date.now() - mergeStarted);
+  for (const at of keyOutcome.unreadable) unreadable.add(at);
+  const cacheSaved = saveCache(run.stroqHome, cache, sessions, keyOf, fresh) && keyOutcome.saved;
   return assemble(
     days,
     run,
@@ -196,12 +205,20 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
       fromCache,
       replayed: fresh.size,
       notChecked,
-      unreadable: unreadable + lost,
-      sent,
+      unreadable: unreadable.size,
+      keys: keyOutcome,
       folders,
       cacheSaved,
     },
-    { listing, tooLarge, folderTotal, started, workers },
+    {
+      listing,
+      tooLarge,
+      folderTotal,
+      started,
+      workers,
+      keysMs,
+      replayMs: lastReplayAt === 0 ? 0 : lastReplayAt - started,
+    },
   );
 }
 
@@ -233,6 +250,8 @@ interface Context {
   readonly folderTotal: number;
   readonly started: number;
   readonly workers: number;
+  readonly keysMs: number;
+  readonly replayMs: number;
 }
 
 function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): CardData {
@@ -253,13 +272,13 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
         },
       });
   });
-  const findings = got.sent?.findings ?? [];
+  const findings = got.keys.findings;
   const moments = buildMoments({ told, findings, repos: got.folders.repos, home: run.home });
   const counts: CardCounts = {
     commands: counted.reduce((sum, s) => sum + s.commands, 0),
     toldByText: counted.reduce((sum, s) => sum + s.told, 0),
     keysSent: findings.filter((f) => f.tier === 'third_party').length,
-    keysStopped: got.sent === null ? 0 : stoppedTowardOthers(got.sent),
+    keysStopped: got.keys.stopped,
     keysSeen: findings.filter((f) => f.tier === 'seen').length,
     autorunRepos: got.folders.repos.length,
   };
@@ -282,7 +301,16 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
       tooLarge: ctx.tooLarge,
       unreadable: got.unreadable,
       older: ctx.listing.older,
-      keys: sessions.length === 0 ? 'no-sessions' : got.sent === null ? 'not-finished' : 'checked',
+      keys:
+        sessions.length === 0
+          ? 'no-sessions'
+          : got.keys.notChecked > 0
+            ? 'not-finished'
+            : 'checked',
+      keysChecked: got.keys.checked,
+      keysFromCache: got.keys.fromCache,
+      keysNotChecked: got.keys.notChecked,
+      keysIncomplete: got.keys.incomplete,
       folders: {
         found: ctx.folderTotal,
         checked: got.folders.checked,
@@ -291,6 +319,12 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
       looked: ctx.listing.looked,
       cacheSaved: got.cacheSaved,
     },
-    timing: { totalMs: Date.now() - ctx.started, replayed: got.replayed, workers: ctx.workers },
+    timing: {
+      totalMs: Date.now() - ctx.started,
+      replayed: got.replayed,
+      workers: ctx.workers,
+      replayMs: ctx.replayMs,
+      keysMs: ctx.keysMs,
+    },
   };
 }

@@ -8,6 +8,7 @@
 import { fileURLToPath } from 'node:url';
 import { Worker, isMainThread, parentPort, workerData } from 'node:worker_threads';
 import { handleJob, type CardJob, type CardResult } from './jobs.js';
+import { registerKeyIndex, registeredKeyIndex, type RegisteredIndex } from './key-registry.js';
 import type { Channel } from './pool.js';
 
 const ROLE = 'stroq-card-worker';
@@ -30,7 +31,8 @@ export const canUseThreads = (): boolean =>
 /** A worker thread, as the pool sees it. */
 export function threadChannel(): Channel<CardJob, CardResult> {
   const worker = new Worker(fileURLToPath(import.meta.url), {
-    workerData: { role: ROLE },
+    // The keys go to the thread once, here, and not with each job: in memory, as a copy.
+    workerData: { role: ROLE, index: registeredKeyIndex() },
     resourceLimits: { maxOldGenerationSizeMb: WORKER_HEAP_MB },
   });
   let failure: (reason: string) => void = () => undefined;
@@ -99,6 +101,7 @@ const isWorkerStart = (): boolean =>
 
 if (isWorkerStart() && parentPort !== null) {
   const port = parentPort;
+  registerKeyIndex((workerData as { index?: RegisteredIndex | null }).index ?? null);
   port.on('message', (request: Request) => {
     void handleJob(request.job).then((result) => {
       port.postMessage({ id: request.id, result } satisfies Reply);

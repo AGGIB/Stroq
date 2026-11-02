@@ -45,7 +45,7 @@ const stable = (json: string) => {
     ...data,
     generated: undefined,
     timing: undefined,
-    coverage: { ...data.coverage, fromCache: 0 },
+    coverage: { ...data.coverage, fromCache: 0, keysFromCache: 0 },
   };
 };
 

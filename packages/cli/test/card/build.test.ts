@@ -53,7 +53,7 @@ const stable = (data: CardData) => ({
   ...data,
   generated: undefined,
   timing: undefined,
-  coverage: { ...data.coverage, fromCache: 0 },
+  coverage: { ...data.coverage, fromCache: 0, keysFromCache: 0 },
 });
 
 describe('the card on a machine with sessions', () => {

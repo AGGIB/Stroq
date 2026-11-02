@@ -1,4 +1,5 @@
 import { describe, it } from 'vitest';
+import { hitsOf, sanitizeKeys } from '../../src/card/key-result.js';
 import { commandCouldLink, couldCarryLink } from '../../src/card/lean.js';
 import { packagesOf } from '../../src/card/package-claims.js';
 import { scrubber } from '../../src/card/scrub.js';
@@ -61,7 +62,63 @@ const SHAPES: readonly (readonly [string, (size: number) => string])[] = [
   ['long words', (size) => 'x'.repeat(size)],
 ];
 
+/** A key this gate looks for; made up. */
+const GATE_KEY = { name: 'GATE_KEY', source: 'env', value: 'FAKEgateKeyValue0123456789abcdef' };
+
 describe('the card reads session text in linear time', () => {
+  it.each(SHAPES)('the cleaning of a key result before it is kept: %s', (_name, shape) => {
+    const finder = keyFinder([GATE_KEY]);
+    const scrub = scrubber(finder);
+    gate(
+      (text) =>
+        sanitizeKeys(
+          {
+            id: text,
+            hits: [
+              {
+                k: 0,
+                place: {
+                  tier: 'third_party',
+                  route: 'command',
+                  tool: text,
+                  detail: text,
+                  host: text,
+                  service: text,
+                  then: { route: 'command', host: text, at: text, detail: text },
+                },
+                at: text,
+                subagent: text,
+                times: 1,
+                seen: 1,
+                later: 0,
+              },
+            ],
+          },
+          finder,
+          scrub,
+        ),
+      shape,
+    );
+  });
+
+  it.each(SHAPES)('the times and places a key result keeps: %s', (_name, shape) => {
+    gate(
+      (text) =>
+        hitsOf(
+          [
+            {
+              key: 0,
+              place: { tier: 'seen', route: 'result', tool: 'Read', then: undefined } as never,
+              at: text,
+              subagent: text,
+            },
+          ],
+          [0],
+        ),
+      shape,
+    );
+  });
+
   it.each(SHAPES)('the key and token scrubber: %s', (_name, shape) => {
     gate(scrubber(keyFinder([])), shape);
   });

@@ -88,7 +88,14 @@ function notes(data: CardData): string[] {
     out.push(`${plural(k.tooLarge, 'session was', 'sessions were')} too large to check.`);
   if (k.unreadable > 0)
     out.push(`${plural(k.unreadable, 'session', 'sessions')} could not be read.`);
-  if (k.keys === 'not-finished') out.push('The key check did not finish; run again.');
+  if (k.keys === 'not-finished')
+    out.push(
+      `Keys checked in ${num(k.keysChecked)} of ${num(k.found)} sessions; run again to check the rest.`,
+    );
+  if (k.keysIncomplete > 0)
+    out.push(
+      `${plural(k.keysIncomplete, 'session', 'sessions')} could not be checked for keys in full.`,
+    );
   if (k.folders.checked < k.folders.found)
     out.push(
       `Looked at ${num(k.folders.checked)} of ${num(k.folders.found)} folders for code that runs on open.`,

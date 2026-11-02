@@ -165,6 +165,30 @@ describe('the card: the time ran out', () => {
       expect([...line].length, line).toBeLessThanOrEqual(WIDTH);
   });
 
+  it('says how many sessions the key check covered, in plain words, and that a second run does the rest', () => {
+    const cut = card({
+      coverage: {
+        ...card().coverage,
+        keys: 'not-finished',
+        found: 1_999,
+        keysChecked: 812,
+        keysNotChecked: 1_179,
+      },
+    });
+    const lines = renderCard(cut, HOME);
+    expect(text(lines).replace(/\s+/g, ' ')).toContain(
+      'Keys checked in 812 of 1,999 sessions; run again to check the rest.',
+    );
+    for (const line of lines) expect([...line].length, line).toBeLessThanOrEqual(WIDTH);
+  });
+
+  it('says how many sessions the key check could not finish', () => {
+    const odd = card({ coverage: { ...card().coverage, keysIncomplete: 3 } });
+    expect(text(renderCard(odd, HOME)).replace(/\s+/g, ' ')).toContain(
+      '3 sessions could not be checked for keys in full.',
+    );
+  });
+
   it('says what could not be read, what was too large, and a key check that did not finish', () => {
     const odd = card({
       coverage: {
@@ -172,13 +196,17 @@ describe('the card: the time ran out', () => {
         tooLarge: 2,
         unreadable: 1,
         keys: 'not-finished',
+        keysChecked: 1_000,
+        keysNotChecked: 756,
         folders: { found: 200, checked: 150, capped: true },
       },
     });
     const out = text(renderCard(odd, HOME));
     expect(out).toContain('2 sessions were too large to check.');
     expect(out).toContain('1 session could not be read.');
-    expect(out).toContain('The key check did not finish; run again.');
+    expect(out.replace(/\s+/g, ' ')).toContain(
+      'Keys checked in 1,000 of 1,756 sessions; run again to check the rest.',
+    );
     expect(out.replace(/\s+/g, ' ')).toContain(
       'Looked at 150 of 200 folders for code that runs on open.',
     );

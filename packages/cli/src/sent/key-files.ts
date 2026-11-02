@@ -59,12 +59,25 @@ const LOOKS_ONLY: ReadonlySet<string> = new Set([
 const asSent = (place: Place): Place =>
   place.tier === 'maybe' && place.local === true ? { ...place, tier: 'third_party' } : place;
 
+/** The index of a finder, by home: a finder's keys do not change, so many sessions share one. */
+const INDEXES = new WeakMap<KeyFinder, Map<string | undefined, KeyFileIndex>>();
+
 /**
  * The key files keys were read from, by path, and the names they and their folders go by. A path
  * is spelled as `normalPath` spells it, so a command in either system's spelling names it; `~/`
  * is the home folder this machine gave (`USERPROFILE` on Windows).
  */
 export function keyFileIndex(finder: KeyFinder, home: string | undefined): KeyFileIndex {
+  let byHome = INDEXES.get(finder);
+  if (byHome === undefined) INDEXES.set(finder, (byHome = new Map()));
+  const known = byHome.get(home);
+  if (known !== undefined) return known;
+  const built = buildKeyFileIndex(finder, home);
+  byHome.set(home, built);
+  return built;
+}
+
+function buildKeyFileIndex(finder: KeyFinder, home: string | undefined): KeyFileIndex {
   const keysOf = new Map<string, number[]>();
   const environment: number[] = [];
   finder.keys.forEach((key, i) => {
