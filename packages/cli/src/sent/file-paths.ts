@@ -241,6 +241,8 @@ export function namedEnds(command: string): { readonly ends: Set<string>; readon
 export interface Naming {
   readonly kind: 'file' | 'folder';
   readonly sure: boolean;
+  /** The word is a pattern: the file is named by what a wildcard may fill in, not by its own name. */
+  readonly glob?: true;
 }
 
 /**
@@ -270,12 +272,12 @@ function patternNames(pattern: string, file: string): Naming | null {
   let sure = true;
   for (let i = 0; i < want.length; i += 1) {
     const part = want[i] as string;
-    if (part === '**') return { kind: 'file', sure };
+    if (part === '**') return { kind: 'file', sure, glob: true };
     const match = partMatches(part, have[i] as string);
     if (match === 'no') return null;
     if (match === 'dot') sure = false;
   }
-  return { kind: want.length === have.length ? 'file' : 'folder', sure };
+  return { kind: want.length === have.length ? 'file' : 'folder', sure, glob: true };
 }
 
 /** A drive as Git Bash (`/c/w`), Cygwin (`/cygdrive/c/w`) and WSL (`/mnt/c/w`) name it. */
@@ -341,7 +343,9 @@ function endNames(path: string, file: string): Naming | null {
 const better = (a: Naming | null, b: Naming | null): Naming | null => {
   if (a === null) return b;
   if (b === null) return a;
-  const rank = (n: Naming): number => (n.kind === 'file' ? 0 : 2) + (n.sure ? 0 : 1);
+  // A name over a pattern that may take the file in.
+  const rank = (n: Naming): number =>
+    (n.kind === 'file' ? 0 : 2) + (n.sure ? 0 : 1) + (n.glob === true ? 4 : 0);
   return rank(b) < rank(a) ? b : a;
 };
 
@@ -362,7 +366,13 @@ export function namesFileHow(
     // Braces or brackets alone are no path, whatever makes something of them.
     if (pattern && !pathLike(c)) continue;
     const take = (n: Naming | null): Naming | null =>
-      n === null ? null : { kind: n.kind, sure: n.sure && word.sure };
+      n === null
+        ? null
+        : {
+            kind: n.kind,
+            sure: n.sure && word.sure,
+            ...(n.glob === true ? { glob: true as const } : {}),
+          };
     if (isAbsolutePath(c)) found = better(found, take(absoluteNames(c, file, pattern)));
     else {
       if (c.startsWith('~')) {
@@ -374,7 +384,7 @@ export function namesFileHow(
       // Any other relative path is read as the end of a path below, whatever folder it is under.
       if (!pattern) found = better(found, take(endNames(c, file)));
     }
-    if (found?.kind === 'file' && found.sure) return found;
+    if (found?.kind === 'file' && found.sure && found.glob !== true) return found;
   }
   return found;
 }

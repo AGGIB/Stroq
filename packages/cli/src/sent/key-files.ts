@@ -57,7 +57,9 @@ const LOOKS_ONLY: ReadonlySet<string> = new Set([
  * company's, as a key in such a request is, though the report says it was this machine.
  */
 const asSent = (place: Place): Place =>
-  place.tier === 'maybe' && place.local === true ? { ...place, tier: 'third_party' } : place;
+  place.tier === 'maybe' && place.local === true && place.route !== 'linked'
+    ? { ...place, tier: 'third_party' }
+    : place;
 
 /** The index of a finder, by home: a finder's keys do not change, so many sessions share one. */
 const INDEXES = new WeakMap<KeyFinder, Map<string | undefined, KeyFileIndex>>();

@@ -178,7 +178,7 @@ export function buildMoments(inputs: MomentInputs): Moment[] {
   const repos = [...inputs.repos]
     .sort((a, b) => b.items.length + b.more - (a.items.length + a.more) || (a.dir < b.dir ? -1 : 1))
     .map((repo) => repoMoment(repo, home));
-  return [...told, ...keys.sent, ...keys.seen, ...repos]
+  return [...told, ...keys.sent, ...keys.maybe, ...keys.seen, ...repos]
     .slice(0, KEPT)
     .map((moment, i) => ({ ...moment, n: i + 1 }));
 }

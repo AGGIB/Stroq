@@ -97,7 +97,13 @@ export const sessionCacheSchema = z
 export type SessionCacheFile = z.infer<typeof sessionCacheSchema>;
 export type CacheEntry = z.infer<typeof cacheEntrySchema>;
 
-export const MOMENT_KINDS = ['told-by-text', 'key-sent', 'key-seen', 'autorun-repo'] as const;
+export const MOMENT_KINDS = [
+  'told-by-text',
+  'key-sent',
+  'key-maybe',
+  'key-seen',
+  'autorun-repo',
+] as const;
 export type MomentKind = (typeof MOMENT_KINDS)[number];
 
 /** One block of `stroq show`: a title and rows of label and value. */

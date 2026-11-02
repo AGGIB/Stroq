@@ -24,7 +24,7 @@ import {
 import { plainText, valueHolds } from './key-text.js';
 import { shellJoined } from './needles.js';
 import { baseName, isAbsolutePath, joinPath, normalPath } from './path-form.js';
-import { farther, type KeyOf, type Place, type Route } from './place.js';
+import { farther, linkedPlace, type KeyOf, type Place, type Route, type Via } from './place.js';
 import {
   commandReading,
   countCut,
@@ -118,6 +118,31 @@ function wordsWritten(args: readonly Word[], body: string): string {
 }
 
 /**
+ * How a text that is not a key's value links a stage to the key: a key file named, the environment
+ * printed, a folder or a pattern that takes the file in. A stage that makes a request is a send of the key
+ * only if the text reached it as data (`proof`): `named` is the stage naming it in its own words or being
+ * piped what a stage that names it printed, `piped` is only the second (a printer that also sends is not
+ * the data it sends), `none` is never (a folder or a pattern names no file). Any other request is the
+ * key's maybe, linked by `via`.
+ */
+export interface Link {
+  readonly via: Via;
+  readonly proof: 'named' | 'piped' | 'none';
+}
+
+/** A place a stage gave, as a maybe unless the link is the proof of a send. */
+function linkedByReach(place: Place | null, reach: Reach, link: Link | undefined): Place | null {
+  if (place === null || link === undefined || place.tier !== 'third_party') return place;
+  const flows =
+    link.proof === 'named'
+      ? reach.direct || reach.piped
+      : link.proof === 'piped' && reach.piped && !reach.direct;
+  if (flows) return place;
+  // Reached only because an earlier step held the text: it is no more than that.
+  return linkedPlace(place, reach.direct || reach.piped ? link.via : 'earlier-step');
+}
+
+/**
  * Every place a command put a text `holds` finds in it: each stage reached in each text the core
  * reads, then the plain cut for what sends. `sendOnly` places only what sends. Every file a stage
  * reached writes is kept with every text written to it.
@@ -128,6 +153,7 @@ function placeIn(
   key: KeyOf,
   cwd: string | null,
   sendOnly: boolean,
+  link?: Link,
 ): Placed {
   const has = (stage: Stage): boolean => holds(stage.text) || holds(stage.body);
   let place: Place | null = null;
@@ -161,7 +187,7 @@ function placeIn(
       any = true;
       const facts = reading.facts(reach.stage);
       if (word === '' && reach.direct) word = shownName(facts, holds);
-      add(stagePlace(reach, reading, key, holds, sendOnly));
+      add(linkedByReach(stagePlace(reach, reading, key, holds, sendOnly), reach, link));
       // It names more files it may write than are read: one not read may be sent unseen.
       if (facts.writesCut === true) writtenCut = true;
       if (facts.writes.length === 0) continue;
@@ -183,7 +209,7 @@ function placeIn(
   // The plain cut, read for sends: a heredoc the lexer read wrongly can hide no request.
   for (const reach of reached(reading.plain, has, reading.facts)) {
     any = true;
-    add(stagePlace(reach, reading, key, holds, true));
+    add(linkedByReach(stagePlace(reach, reading, key, holds, true), reach, link));
   }
   const files = [...written].map(([path, text]) => ({ path, text }));
   return { place, written: files, word, reached: any, sent, writtenCut };
@@ -490,22 +516,44 @@ export function fileUse(
       (out) => namesFile(out, target, folders) === 'file',
     );
   };
+  // `glob`: null any naming, false only a naming by the file's own name, true only a pattern.
   const namesAs =
-    (kind: 'file' | 'folder', sure: boolean) =>
+    (kind: 'file' | 'folder', sure: boolean, glob: boolean | null) =>
     (text: string): boolean =>
       commandPathWords(text).some((w) => {
         const named = namesFileHow(w, target, folders);
-        return named !== null && named.kind === kind && named.sure === sure;
+        return (
+          named !== null &&
+          named.kind === kind &&
+          named.sure === sure &&
+          (glob === null || (named.glob === true) === glob)
+        );
       }) && !skips(text);
-  // Sure namings first; one only a pattern someone may fill in reaches is at most maybe.
-  for (const [kind, sure] of [
-    ['file', true],
-    ['folder', true],
-    ['file', false],
-    ['folder', false],
-  ] as const) {
+  // Sure namings first, and of those the file by its own name: that is the only one a request sends.
+  // A pattern, a folder, or a naming only a pattern someone may fill in reaches is at most a maybe,
+  // linked to the key by what it named.
+  const passes: readonly {
+    readonly kind: 'file' | 'folder';
+    readonly sure: boolean;
+    readonly glob: boolean | null;
+    readonly link: Link;
+  }[] = [
+    { kind: 'file', sure: true, glob: false, link: { via: 'pattern', proof: 'named' } },
+    { kind: 'file', sure: true, glob: true, link: { via: 'pattern', proof: 'none' } },
+    { kind: 'folder', sure: true, glob: null, link: { via: 'folder', proof: 'none' } },
+    { kind: 'file', sure: false, glob: null, link: { via: 'pattern', proof: 'none' } },
+    { kind: 'folder', sure: false, glob: null, link: { via: 'folder', proof: 'none' } },
+  ];
+  for (const { kind, sure, glob, link } of passes) {
     if (!kinds.has(sure ? kind : `${kind}?`)) continue;
-    const { place } = placeIn(reading, namesAs(kind, sure), key, ctx.cwd, kind === 'folder');
+    const { place } = placeIn(
+      reading,
+      namesAs(kind, sure, glob),
+      key,
+      ctx.cwd,
+      kind === 'folder',
+      link,
+    );
     if (place !== null && place.tier !== 'seen')
       return { place: sure ? place : atMostMaybe(place), folder: kind === 'folder' };
   }
@@ -559,12 +607,16 @@ export function environmentUse(command: string, ctx: ShellContext): Place | null
     countCut(command);
     return unreadCommand();
   }
+  // A request is a send of the environment only when it is piped what the printer printed: `env |
+  // curl -d @-`. One that merely ran beside `set -x`, `export -p` or a script that reads `environ`
+  // may have, and is a maybe.
   const { place } = placeIn(
     commandReading(command, ctx.cwd),
     printsEnvironment,
     NO_KEY,
     ctx.cwd,
     true,
+    { via: 'environment', proof: 'piped' },
   );
   return place === null || place.tier === 'seen' ? null : place;
 }

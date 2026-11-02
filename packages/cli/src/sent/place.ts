@@ -31,6 +31,7 @@ export const placeRank = (place: Pick<Place, 'tier' | 'wouldBe'>): number =>
 export type Route =
   | 'command'
   | 'command-near'
+  | 'linked'
   | 'command-ran'
   | 'command-unread'
   | 'post'
@@ -51,6 +52,15 @@ export type Route =
   | 'reply'
   | 'record'
   | 'cut';
+
+/**
+ * How a call that made a request came to be linked to a key whose value it does not hold: it used a
+ * variable the key was once put in (`variable`), ran where the environment was printed
+ * (`environment`), named a folder the key's file is in (`folder`), named files by a pattern or `.` that
+ * may take in the key's file (`pattern`), or ran after a step that named the file or printed the
+ * environment (`earlier-step`). None of these is a send of the key: a maybe, with words of its own.
+ */
+export type Via = 'variable' | 'environment' | 'folder' | 'pattern' | 'earlier-step';
 
 /**
  * What a bound of the check dropped, on a `cut` place: a variable past those a session follows,
@@ -107,6 +117,8 @@ export interface Place {
   readonly saidStopped?: true;
   /** A claude.ai connector: the MCP server runs at Anthropic for another service. */
   readonly connector?: true;
+  /** For `linked`: how the call that made the request came to be linked to a key it does not hold. */
+  readonly via?: Via;
   /** For `secret-store`: the hosting service the key was stored at, by a name from a table. */
   readonly service?: string;
   /** For `write-script`, `write-sent` and `write-push`: what became of the written file. */
@@ -196,3 +208,14 @@ const CALL_ORDER: readonly Tier[] = ['third_party', 'maybe', 'own_service', 'see
 /** The farther of two places one call reached; the first when they tie. */
 export const farther = (a: Place, b: Place): Place =>
   CALL_ORDER.indexOf(b.tier) < CALL_ORDER.indexOf(a.tier) ? b : a;
+
+/**
+ * A place that a call put a key in without holding its value, as a maybe: the call made a request,
+ * and what links it to the key is `via`, which is no proof that the key went. The host and the program
+ * are the request's. Any place that is not a send is as it was.
+ */
+export function linkedPlace(place: Place, via: Via): Place {
+  if (place.tier !== 'third_party') return place;
+  const { then: _then, ...rest } = place;
+  return { ...rest, tier: 'maybe', route: 'linked', via };
+}

@@ -658,15 +658,18 @@ export function accountedParser(parser: LineParser, analyzer: SessionAnalyzer): 
 }
 
 /**
- * Where a later call that uses a variable a key was put in took it: another company's when the call
- * can send (a `$` is never the strict proof of the key's own use), maybe when it runs a program,
- * and seen by the AI when it only reads or prints.
+ * Where a later call that uses a variable a key was put in took it. The call does not hold the key's
+ * value: it holds a name, which an earlier call set to a text with the key in it, and a name is shared
+ * (`key`, `token`, a Firebase query's `"$key"`). So the call that can send is a maybe, linked to the
+ * key by the variable, and not a send; a call that runs a program with it is a maybe too, and one that
+ * only reads or prints is the AI seeing the key.
  */
 function variablePlace(facts: CallFacts, tool: string): Place {
   if (facts.sends)
     return {
-      tier: 'third_party',
-      route: 'command',
+      tier: 'maybe',
+      route: 'linked',
+      via: 'variable',
       tool,
       ...(facts.sender === '' ? {} : { detail: facts.sender }),
       ...(facts.host === undefined ? {} : { host: facts.host }),

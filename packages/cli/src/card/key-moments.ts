@@ -68,6 +68,7 @@ function manyKeysGroups(
   group: readonly Finding[],
   home: string,
   advice: string,
+  went: string,
 ): { title: string; rows: [string, string][] }[] {
   const first = group[0] as Finding;
   const listed = group.slice(0, group.length > 16 ? LISTED : 16);
@@ -81,7 +82,7 @@ function manyKeysGroups(
       title: 'What happened',
       rows: [
         ['Keys', plural(group.length, 'key', 'keys')],
-        ['Where it went', clean(describePlace(first.place), 200)],
+        ['Where it went', clean(went, 200)],
         ['When', when(first.at)],
         ['What to do', clean(advice, 200)],
       ],
@@ -96,13 +97,14 @@ function moment(
   group: readonly Finding[],
   home: string,
   advice: string,
+  went?: string,
 ): Draft {
   const first = group[0] as Finding;
   const session = placeOf(first);
   const what =
     group.length === 1
       ? [{ title: 'What happened', rows: oneKeyRows(first, home) }]
-      : manyKeysGroups(group, home, advice);
+      : manyKeysGroups(group, home, advice, went ?? describePlace(first.place));
   return {
     kind,
     line,
@@ -135,6 +137,26 @@ function sentMoment(group: readonly Finding[], home: string): Draft {
   return moment('key-sent', line, group, home, advice);
 }
 
+/** A key a request may have sent without holding it: told as a maybe, and not counted as sent. */
+function maybeMoment(group: readonly Finding[], home: string): Draft {
+  const first = group[0] as Finding;
+  const host = first.place.host === undefined ? 'another company' : clean(first.place.host, 60);
+  const one = group.length === 1;
+  const subject = one ? clean(first.name, 60) : `${group.length} keys`;
+  const line = `Your agent may have sent ${subject} to ${host}. The command that made the request did not hold ${one ? 'it' : 'them'}, so Stroq cannot tell.`;
+  const went = describePlace(first.place);
+  return moment(
+    'key-maybe',
+    line,
+    group,
+    home,
+    'check what that command sent; rotate each key it carried',
+    one
+      ? went
+      : went.replaceAll('this key was', 'these keys were').replaceAll('this key', 'these keys'),
+  );
+}
+
 function seenMoment(group: readonly Finding[], home: string): Draft {
   const first = group[0] as Finding;
   const folder = first.session.cwd === null ? '' : ` in ${shortPath(first.session.cwd, home, 30)}`;
@@ -165,7 +187,7 @@ function seenMoment(group: readonly Finding[], home: string): Draft {
 export function keyMoments(
   findings: readonly PlacedFinding[],
   home: string,
-): { readonly sent: Draft[]; readonly seen: Draft[] } {
+): { readonly sent: Draft[]; readonly maybe: Draft[]; readonly seen: Draft[] } {
   const ordered = [...findings].sort(compareFindings) as PlacedFinding[];
   const sentTo = (f: PlacedFinding): string =>
     `${f.sessionNo}\u0000${f.place.host ?? ''}\u0000${viaSsh(f) ? 'ssh' : ''}`;
@@ -174,6 +196,10 @@ export function keyMoments(
       ordered.filter((f) => f.tier === 'third_party'),
       sentTo,
     ).map((g) => sentMoment(g, home)),
+    maybe: groupBy(
+      ordered.filter((f) => f.tier === 'maybe' && f.place.route === 'linked'),
+      sentTo,
+    ).map((g) => maybeMoment(g, home)),
     seen: groupBy(
       ordered.filter((f) => f.tier === 'seen'),
       (f) => String(f.sessionNo),

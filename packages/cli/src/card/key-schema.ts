@@ -23,6 +23,7 @@ const tier = z.enum(TIER_NAMES);
 const ROUTE_NAMES = [
   'command',
   'command-near',
+  'linked',
   'command-ran',
   'command-unread',
   'post',
@@ -50,6 +51,8 @@ const ALL_ROUTES: [Exclude<Route, (typeof ROUTE_NAMES)[number]>] extends [never]
 void ALL_ROUTES;
 const route = z.enum(ROUTE_NAMES);
 
+const viaSchema = z.enum(['variable', 'environment', 'folder', 'pattern', 'earlier-step']);
+
 const thenSchema = z
   .object({
     route,
@@ -73,6 +76,7 @@ const placeSchema = z
     wouldBe: tier.optional(),
     saidStopped: z.literal(true).optional(),
     connector: z.literal(true).optional(),
+    via: viaSchema.optional(),
     service: text.optional(),
     then: thenSchema.optional(),
     cut: z.enum(['variables', 'key-files', 'folders']).optional(),

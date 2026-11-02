@@ -287,3 +287,57 @@ describe('sessions whose names are hidden', () => {
     expect(build([saw(1, 'A_KEY'), saw(2, 'B_KEY')])).toHaveLength(2);
   });
 });
+
+describe('keys a request may have sent', () => {
+  const linked = (host = 'hacker-news.firebaseio.com', via: Place['via'] = 'variable'): Place => ({
+    tier: 'maybe',
+    route: 'linked',
+    via,
+    tool: 'Bash',
+    detail: 'curl',
+    host,
+  });
+
+  it('are one moment that says it may have, and why it is not more', () => {
+    const moments = build(names(10).map((n) => finding(1, n, linked())));
+    expect(moments).toHaveLength(1);
+    const [m] = moments;
+    expect(m?.kind).toBe('key-maybe');
+    expect(m?.line).toBe(
+      'Your agent may have sent 10 keys to hacker-news.firebaseio.com. The command that made the request did not hold them, so Stroq cannot tell.',
+    );
+    for (const n of names(10)) expect(rowsOf(m as never)).toContain(n);
+    expect(rowsOf(m as never)).toContain('used a variable these keys were put in earlier');
+    expect(momentSchema.safeParse(m).success).toBe(true);
+  });
+
+  it('say it for one key too', () => {
+    const [m] = build([finding(1, 'A_KEY', linked('203.0.113.7', 'folder'))]);
+    expect(m?.line).toBe(
+      'Your agent may have sent A_KEY to 203.0.113.7. The command that made the request did not hold it, so Stroq cannot tell.',
+    );
+  });
+
+  it('come after the keys sent and before the keys the AI saw', () => {
+    const moments = build([
+      finding(3, 'SEEN_KEY', seen()),
+      finding(2, 'MAYBE_KEY', linked()),
+      finding(1, 'SENT_KEY', sent()),
+    ]);
+    expect(moments.map((m) => m.kind)).toEqual(['key-sent', 'key-maybe', 'key-seen']);
+  });
+
+  it('are a moment for each session and host', () => {
+    const moments = build([
+      finding(1, 'A_KEY', linked('one.example.invalid')),
+      finding(1, 'B_KEY', linked('two.example.invalid')),
+      finding(2, 'C_KEY', linked('one.example.invalid')),
+    ]);
+    expect(moments).toHaveLength(3);
+  });
+
+  it('are not made for a maybe that is no link', () => {
+    const ran: Place = { tier: 'maybe', route: 'command-ran', tool: 'Bash', detail: 'node' };
+    expect(build([finding(1, 'A_KEY', ran)])).toEqual([]);
+  });
+});

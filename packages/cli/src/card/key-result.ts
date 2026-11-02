@@ -209,9 +209,10 @@ export function findingsOf(
 
 /**
  * One finding for each key in each session it was found in, for the places a moment is made from: a key
- * sent in several sessions is in each, with that session's own place. Only the keys that left this machine
- * and the keys the AI saw are kept, and a key the AI saw in one session is kept only if it was sent in
- * none: it is told by the most external place it reached, as `findingsOf` tells it. Each finding says
+ * sent in several sessions is in each, with that session's own place. Only the keys that left this machine,
+ * the keys a request may have sent without holding them, and the keys the AI saw are kept, and the last
+ * two only while no place more external was reached: a key is told by the most external place it
+ * reached, as `findingsOf` tells it. Each finding says
  * which session of the window it is from, by its number, since a session's printed name may be hidden.
  * The order is the one findings are listed in.
  */
@@ -227,12 +228,17 @@ export function findingsBySession(
       if (held === undefined || placeRank(one.sighting.place) < placeRank(held))
         farthest.set(index, one.sighting.place);
     }
+  /** Whether a place is told in a moment, given the farthest place its key reached anywhere. */
+  const told = (place: Place, reached: Place | undefined): boolean => {
+    if (place.tier === 'third_party') return true;
+    // A request that did not hold the key, but ran where it was: only while nothing sent it.
+    if (place.tier === 'maybe' && place.route === 'linked') return reached?.tier === 'maybe';
+    return place.tier === 'seen' && reached?.tier === 'seen';
+  };
   const found: PlacedFinding[] = [];
   for (const [sessionNo, { session, keys: seen }] of numbered)
     for (const [index, one] of seen) {
-      const tier = one.sighting.place.tier;
-      if (tier !== 'third_party' && !(tier === 'seen' && farthest.get(index)?.tier === 'seen'))
-        continue;
+      if (!told(one.sighting.place, farthest.get(index))) continue;
       const [finding] = collectFromSummaries(keys, [{ session, keys: new Map([[index, one]]) }]);
       if (finding !== undefined) found.push({ ...printableFinding(finding, finder), sessionNo });
     }

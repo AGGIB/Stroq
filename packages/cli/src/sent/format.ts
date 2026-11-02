@@ -285,6 +285,7 @@ function tierLines(report: SentReport, home: string): string[] {
 const CALL_ROUTES = new Set([
   'command',
   'command-near',
+  'linked',
   'command-ran',
   'command-unread',
   'post',
