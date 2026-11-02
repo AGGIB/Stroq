@@ -37,13 +37,22 @@ export const NO_KEY_CACHE: KeyCache = {
   canaries: null,
 };
 
+/**
+ * The version of the logic of the key check: where a key went, and which values are traced. It is bumped
+ * with every change to either, since a development build keeps the Stroq version of the build before it
+ * and would be handed the results of the logic before it.
+ */
+export const KEY_CHECK_LOGIC = 2;
+
 /** Everything a result depends on in the transcript and the program; the digest covers the keys. */
 export function keyCacheKey(parts: {
   readonly bytes: number;
   readonly mtimeMs: number;
   readonly version: string;
+  /** The logic of the check; the current one unless a test names another. */
+  readonly logic?: number;
 }): string {
-  return `${parts.bytes}:${parts.mtimeMs}:${parts.version}`;
+  return `${parts.bytes}:${parts.mtimeMs}:${parts.version}:l${parts.logic ?? KEY_CHECK_LOGIC}`;
 }
 
 function parse(text: string): unknown {

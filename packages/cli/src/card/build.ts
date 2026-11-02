@@ -349,6 +349,7 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
       notChecked: got.notChecked,
       tooSlow: got.tooSlow,
       tooLarge: ctx.tooLarge,
+      placeholders: got.keys.placeholders,
       unreadable: got.unreadable,
       older: ctx.listing.older,
       keys:

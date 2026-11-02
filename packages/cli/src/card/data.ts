@@ -40,6 +40,8 @@ export interface CardCoverage {
   readonly tooSlow: number;
   /** Past the size the card replays. */
   readonly tooLarge: number;
+  /** Values in key files that look like examples or placeholders: not traced, and counted here. */
+  readonly placeholders: number;
   /** Could not be read, or the worker that held them died. */
   readonly unreadable: number;
   /** Sessions the agents keep that are older than the window. */

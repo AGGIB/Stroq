@@ -55,6 +55,8 @@ export interface KeysCompared {
   readonly truncated?: true;
   /** Lines named like a key whose value is not compared: too short, a placeholder, a path. */
   readonly rejectedLines?: number;
+  /** Distinct values that look like examples or placeholders: not traced (`key-quality.ts`). */
+  readonly placeholders?: number;
   /** Env files one folder below a project folder read, not read. */
   readonly subfolderEnvFiles?: number;
 }
@@ -66,6 +68,7 @@ export const keysLeftOut = (keys: KeysCompared): boolean =>
   keys.truncated === true ||
   (keys.canaryCheckCut ?? 0) > 0 ||
   (keys.rejectedLines ?? 0) > 0 ||
+  (keys.placeholders ?? 0) > 0 ||
   (keys.subfolderEnvFiles ?? 0) > 0;
 
 /**
@@ -81,6 +84,7 @@ export type NotChecked =
   | 'key-files'
   | 'search-cut'
   | 'rejected-lines'
+  | 'placeholder-values'
   | 'subfolder-env-files'
   | 'no-sessions'
   | 'unreadable-files'
@@ -196,6 +200,7 @@ export function keysCompared(set: KeySet): KeysCompared {
     ...(set.skippedFiles > 0 ? { skippedFiles: set.skippedFiles } : {}),
     ...(set.truncated ? { truncated: true as const } : {}),
     ...(set.rejectedLines > 0 ? { rejectedLines: set.rejectedLines } : {}),
+    ...(set.placeholders > 0 ? { placeholders: set.placeholders } : {}),
     ...(set.subfolderEnvFiles > 0 ? { subfolderEnvFiles: set.subfolderEnvFiles } : {}),
   };
 }
@@ -230,6 +235,7 @@ export function buildReport(parts: {
     ...(cut > 0 ? ['search-cut' as const] : []),
     ...((parts.workCut ?? 0) > 0 || parts.workSpent === true ? ['work-cut' as const] : []),
     ...((parts.keys.rejectedLines ?? 0) > 0 ? ['rejected-lines' as const] : []),
+    ...((parts.keys.placeholders ?? 0) > 0 ? ['placeholder-values' as const] : []),
     ...((parts.keys.subfolderEnvFiles ?? 0) > 0 ? ['subfolder-env-files' as const] : []),
   ];
   const notChecked = [...parts.notChecked, ...labels.filter((l) => !parts.notChecked.includes(l))];

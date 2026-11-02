@@ -48,6 +48,8 @@ export interface KeyOutcome {
    * made from, so that a moment tells what one session did and not what the key did in the end.
    */
   readonly bySession: readonly PlacedFinding[];
+  /** Distinct values in key files that look like examples or placeholders, so were not looked for. */
+  readonly placeholders: number;
   /** Keys sent to another company that were stopped before they left. */
   readonly stopped: number;
   /** Sessions whose keys were checked: now or in an earlier run. Too large ones are not among them. */
@@ -100,7 +102,7 @@ export function startKeys(env: KeysEnv, sessions: readonly WindowSession[]): Key
   const scrub = scrubber(finder);
   const shown = shownWith(finder, scrub);
   const checkable = sessions.map((s) => !isTooLarge(s));
-  if (loaded.keys.length === 0) return nothingToLookFor(shown, checkable);
+  if (loaded.keys.length === 0) return nothingToLookFor(shown, checkable, loaded.placeholders);
 
   const mcp = loadMcpServers({ home: env.home, projectDirs: dirs });
   const index = prepareIndex({ home: env.home, keys: loaded.keys, mcp: [...mcp.known] });
@@ -112,6 +114,7 @@ export function startKeys(env: KeysEnv, sessions: readonly WindowSession[]): Key
   // stamp other files are kept under, and a new salt each run would be a new digest each run).
   const rewrite = cache.salt === null || cache.digest !== digest;
   return new Run({
+    placeholders: loaded.placeholders,
     env,
     sessions,
     finder,
@@ -143,7 +146,11 @@ function shownWith(finder: KeyFinder, scrub: Scrub): Shown {
 }
 
 /** A machine that holds no key to look for: every session that can be checked is, at once. */
-function nothingToLookFor(shown: Shown, checkable: readonly boolean[]): KeysRun {
+function nothingToLookFor(
+  shown: Shown,
+  checkable: readonly boolean[],
+  placeholders: number,
+): KeysRun {
   const checked = checkable.filter(Boolean).length;
   return {
     ...shown,
@@ -153,6 +160,7 @@ function nothingToLookFor(shown: Shown, checkable: readonly boolean[]): KeysRun 
     finish: () => ({
       findings: [],
       bySession: [],
+      placeholders,
       stopped: 0,
       checked,
       fromCache: 0,
@@ -165,6 +173,7 @@ function nothingToLookFor(shown: Shown, checkable: readonly boolean[]): KeysRun 
 }
 
 interface RunParts {
+  readonly placeholders: number;
   readonly env: KeysEnv;
   readonly sessions: readonly WindowSession[];
   readonly finder: KeyFinder;
@@ -261,6 +270,7 @@ class Run implements KeysRun {
     return {
       findings,
       bySession,
+      placeholders: this.p.placeholders,
       stopped: stoppedFindings(findings),
       checked: this.results.size,
       fromCache: this.fromCache.size,

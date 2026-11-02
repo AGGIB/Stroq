@@ -86,6 +86,12 @@ function notes(data: CardData): string[] {
     );
   if (k.tooSlow > 0)
     out.push(`${plural(k.tooSlow, 'session', 'sessions')} could not be checked in time.`);
+  if (k.placeholders > 0)
+    out.push(
+      k.placeholders === 1
+        ? '1 value in your key files looks like an example or a placeholder, so it is not traced.'
+        : `${num(k.placeholders)} values in your key files look like examples or placeholders, so they are not traced.`,
+    );
   if (k.tooLarge > 0)
     out.push(`${plural(k.tooLarge, 'session was', 'sessions were')} too large to check.`);
   if (k.unreadable > 0)

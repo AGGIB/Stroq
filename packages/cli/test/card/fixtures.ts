@@ -24,6 +24,7 @@ export function card(over: Partial<CardData> = {}): CardData {
       fromCache: 0,
       notChecked: 0,
       tooSlow: 0,
+      placeholders: 0,
       tooLarge: 0,
       unreadable: 0,
       older: 12,

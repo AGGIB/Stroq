@@ -17,6 +17,7 @@ import { KEY_CACHE_SCHEMA, type KeyCacheEntry } from '../../src/card/key-schema.
 import {
   entriesUnder,
   keptKeys,
+  KEY_CHECK_LOGIC,
   keyCacheKey,
   NO_KEY_CACHE,
   readKeyCache,
@@ -187,12 +188,15 @@ describe('what the key check does not trust', () => {
   it('does not use a result for a transcript that changed or for another Stroq', () => {
     write({ '/s/a.jsonl': entry() });
     const entries = entriesUnder(readKeyCache(home), DIGEST);
-    const key = (over: Partial<{ bytes: number; mtimeMs: number; version: string }>): string =>
-      keyCacheKey({ bytes: 100, mtimeMs: 5, version: '0.29.0', ...over });
+    const key = (
+      over: Partial<{ bytes: number; mtimeMs: number; version: string; logic: number }>,
+    ): string => keyCacheKey({ bytes: 100, mtimeMs: 5, version: '0.29.0', ...over });
     expect(keptKeys(entries, '/s/a.jsonl', key({}))?.id).toBe('session-1');
     expect(keptKeys(entries, '/s/a.jsonl', key({ bytes: 101 }))).toBeNull();
     expect(keptKeys(entries, '/s/a.jsonl', key({ mtimeMs: 6 }))).toBeNull();
     expect(keptKeys(entries, '/s/a.jsonl', key({ version: '0.30.0' }))).toBeNull();
+    // The same Stroq version with other logic for the check (a development build): not used.
+    expect(keptKeys(entries, '/s/a.jsonl', key({ logic: KEY_CHECK_LOGIC - 1 }))).toBeNull();
     expect(keptKeys(entries, '/s/b.jsonl', key({}))).toBeNull();
   });
 

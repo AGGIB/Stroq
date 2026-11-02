@@ -36,6 +36,7 @@ const EMPTY: KeySet = {
   partial: [],
   skippedFiles: 0,
   rejectedLines: 0,
+  placeholders: 0,
   subfolderEnvFiles: 0,
   canariesNotFound: 0,
 };
