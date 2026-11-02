@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildMoments } from '../../src/card/moments.js';
 import { momentSchema } from '../../src/card/schema.js';
-import type { Finding } from '../../src/sent/findings.js';
+import type { PlacedFinding } from '../../src/card/key-moments.js';
 import type { Place } from '../../src/sent/place.js';
 
 /**
@@ -14,7 +14,13 @@ import type { Place } from '../../src/sent/place.js';
 const HOME = '/Users/dev';
 const path = (n: number): string => `/Users/dev/.claude/projects/-w/sess-${n}.jsonl`;
 
-const finding = (n: number, name: string, place: Place, over: Partial<Finding> = {}): Finding => ({
+const finding = (
+  n: number,
+  name: string,
+  place: Place,
+  over: Partial<PlacedFinding> = {},
+): PlacedFinding => ({
+  sessionNo: n,
   tier: place.tier,
   name,
   source: `/Users/dev/app${n}/.env`,
@@ -46,7 +52,8 @@ const seen = (): Place => ({
 const names = (count: number, prefix = 'KEY'): string[] =>
   Array.from({ length: count }, (_, i) => `${prefix}_${i + 1}`);
 
-const build = (findings: Finding[]) => buildMoments({ told: [], findings, repos: [], home: HOME });
+const build = (findings: PlacedFinding[]) =>
+  buildMoments({ told: [], findings, repos: [], home: HOME });
 const rowsOf = (m: {
   groups: readonly { rows: readonly (readonly [string, string])[] }[];
 }): string => m.groups.flatMap((g) => g.rows.map(([k, v]) => `${k}: ${v}`)).join('\n');
@@ -178,5 +185,105 @@ describe('what the moments leave room for', () => {
   it('puts keys sent before keys seen', () => {
     const moments = build([finding(3, 'SEEN_KEY', seen()), finding(1, 'SENT_KEY', sent())]);
     expect(moments.map((m) => m.kind)).toEqual(['key-sent', 'key-seen']);
+  });
+});
+
+describe('a key found in several places', () => {
+  const gh = (): Place => ({
+    tier: 'third_party',
+    route: 'post',
+    tool: 'Bash',
+    detail: 'gh',
+    host: 'api.github.com',
+  });
+
+  it("is in the moment of each session and host: three keys scp'd in one session, one posted in another", () => {
+    // The findings are one for each key in each session it was found in.
+    const moments = build([
+      finding(1, 'K1', sent('203.0.113.7', 'scp')),
+      finding(1, 'K2', sent('203.0.113.7', 'scp')),
+      finding(1, 'K3', sent('203.0.113.7', 'scp')),
+      finding(2, 'K1', gh()),
+    ]);
+    expect(moments.map((m) => m.kind)).toEqual(['key-sent', 'key-sent']);
+    const [a, b] = moments;
+    expect(a?.line).toBe(
+      'Your agent sent 3 keys to 203.0.113.7 over ssh. If that server is yours, nothing to do; if not, treat them as leaked.',
+    );
+    expect(a?.session?.id).toBe('sess-1');
+    for (const k of ['K1', 'K2', 'K3']) expect(rowsOf(a as never)).toContain(`${k}, kept in `);
+    expect(b?.line).toBe('Your agent sent K1 to api.github.com. Treat that key as leaked.');
+    expect(b?.session?.id).toBe('sess-2');
+    expect(rowsOf(b as never)).toContain('Key: K1');
+    expect(rowsOf(b as never)).not.toContain('K2');
+    expect(rowsOf(b as never)).not.toContain('K3');
+    expect(rowsOf(b as never)).toContain('api.github.com, posted by a gh command');
+  });
+
+  it('puts a moment with a decoy first, then the oldest', () => {
+    const moments = build([
+      finding(3, 'C_KEY', sent('three.example.invalid')),
+      finding(1, 'A_KEY', sent('one.example.invalid')),
+      finding(2, 'B_KEY', sent('two.example.invalid'), { canary: true }),
+    ]);
+    expect(moments.map((m) => m.session?.id)).toEqual(['sess-2', 'sess-1', 'sess-3']);
+  });
+
+  it('keeps the other places out of a moment: a moment lists only the keys found in its session', () => {
+    const moments = build([
+      finding(1, 'K1', sent('one.example.invalid')),
+      finding(2, 'K2', sent('one.example.invalid')),
+      finding(2, 'K1', sent('two.example.invalid')),
+    ]);
+    const lists = moments.map((m) => rowsOf(m as never));
+    expect(moments).toHaveLength(3);
+    expect(lists.filter((l) => l.includes('K1')).length).toBe(2);
+    expect(lists.filter((l) => l.includes('K2')).length).toBe(1);
+  });
+});
+
+describe('sessions whose names are hidden', () => {
+  const hidden = (n: number, name: string, host: string, over: Partial<PlacedFinding> = {}) =>
+    finding(n, name, sent(host), {
+      session: {
+        agent: 'claude-code',
+        id: '[an id that cannot be printed]',
+        path: '[a name that holds a key]',
+        cwd: '[a name that holds a key]',
+      },
+      ...over,
+    });
+
+  it('are not one session because they read the same: each is a moment', () => {
+    const moments = build([
+      hidden(1, 'A_KEY', 'api.github.com'),
+      hidden(2, 'B_KEY', 'api.github.com'),
+      hidden(3, 'C_KEY', 'api.github.com'),
+    ]);
+    expect(moments).toHaveLength(3);
+    expect(moments.map((m) => rowsOf(m as never).includes('A_KEY'))).toEqual([true, false, false]);
+  });
+
+  it('are one moment for the keys of one session', () => {
+    const moments = build([
+      hidden(1, 'A_KEY', 'api.github.com'),
+      hidden(1, 'B_KEY', 'api.github.com'),
+      hidden(2, 'C_KEY', 'api.github.com'),
+    ]);
+    expect(moments).toHaveLength(2);
+    expect(moments[0]?.line).toContain('2 keys');
+  });
+
+  it('are told apart for the keys the AI saw too', () => {
+    const saw = (n: number, name: string) =>
+      finding(n, name, seen(), {
+        session: {
+          agent: 'claude-code',
+          id: '[an id that cannot be printed]',
+          path: '[a name that holds a key]',
+          cwd: null,
+        },
+      });
+    expect(build([saw(1, 'A_KEY'), saw(2, 'B_KEY')])).toHaveLength(2);
   });
 });

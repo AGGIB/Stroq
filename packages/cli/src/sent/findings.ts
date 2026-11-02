@@ -206,13 +206,19 @@ export function collectFromSummaries(
       ...(b.sighting.place.tier === 'seen' ? laterOf(b) : {}),
     };
   });
-  // A canary leads its place: it is the clearest sign that something steered the agent.
+  return findings.sort(compareFindings);
+}
+
+/**
+ * The order findings are listed in: by place, most external first; in a place a canary leads, since it
+ * is the clearest sign that something steered the agent; then the earliest first.
+ */
+export function compareFindings(a: Finding, b: Finding): number {
   const decoyFirst = (f: Finding): number => (f.canary === true ? 0 : 1);
-  return findings.sort(
-    (a, b) =>
-      tierRank(a.tier) - tierRank(b.tier) ||
-      decoyFirst(a) - decoyFirst(b) ||
-      (earlier(a.at ?? '', b.at ?? '') ? -1 : earlier(b.at ?? '', a.at ?? '') ? 1 : 0),
+  return (
+    tierRank(a.tier) - tierRank(b.tier) ||
+    decoyFirst(a) - decoyFirst(b) ||
+    (earlier(a.at ?? '', b.at ?? '') ? -1 : earlier(b.at ?? '', a.at ?? '') ? 1 : 0)
   );
 }
 

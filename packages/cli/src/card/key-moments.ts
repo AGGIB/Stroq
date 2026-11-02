@@ -8,11 +8,20 @@
 // yours, nothing to do; if not, treat them as leaked." That is a choice of words and nothing else: it
 // reads no ssh config and changes no count, no place and no order. A key's name, source and host came from
 // a file or a session, so each goes through `clean` as everywhere on the card.
-import type { Finding } from '../sent/findings.js';
+import { compareFindings, type Finding } from '../sent/findings.js';
 import { describePlace, doLine, when } from '../sent/phrases.js';
 import { isAgent, sessionRows, withTranscript, type SessionPlace } from './moment-parts.js';
 import type { Moment } from './schema.js';
 import { clean, plural, shortPath } from './text.js';
+
+/**
+ * A finding of one key in one session of the window, with the session's place in the window. What groups
+ * findings into a moment is that number and not the session's name: a name that holds a piece of a key
+ * is printed as a fixed phrase, the same for many sessions.
+ */
+export interface PlacedFinding extends Finding {
+  readonly sessionNo: number;
+}
 
 /** The programs that log in to a server and copy or run something there. */
 const SSH_PROGRAMS: ReadonlySet<string> = new Set(['ssh', 'scp', 'sftp', 'rsync']);
@@ -26,8 +35,8 @@ const LISTED = 15;
 type Draft = Omit<Moment, 'n'>;
 
 /** Groups in the order their first member came, each with its members in order. */
-function groupBy(findings: readonly Finding[], keyOf: (f: Finding) => string): Finding[][] {
-  const groups = new Map<string, Finding[]>();
+function groupBy<F extends Finding>(findings: readonly F[], keyOf: (f: F) => string): F[][] {
+  const groups = new Map<string, F[]>();
   for (const f of findings) {
     const key = keyOf(f);
     const held = groups.get(key);
@@ -147,21 +156,27 @@ function seenMoment(group: readonly Finding[], home: string): Draft {
   return moment('key-seen', line, group, home, '');
 }
 
-/** The key moments, by kind: each is one moment for a session and a destination. */
+/**
+ * The key moments, by kind: each is one moment for a session and a destination, made from the findings
+ * of that session and no other. `findings` has one for each key in each session it was found in, so a
+ * key found in two places is in two moments; the moments come in the order findings are listed in (a
+ * decoy first, then the earliest).
+ */
 export function keyMoments(
-  findings: readonly Finding[],
+  findings: readonly PlacedFinding[],
   home: string,
 ): { readonly sent: Draft[]; readonly seen: Draft[] } {
-  const sentTo = (f: Finding): string =>
-    `${f.session.path}\u0000${f.place.host ?? ''}\u0000${viaSsh(f) ? 'ssh' : ''}`;
+  const ordered = [...findings].sort(compareFindings) as PlacedFinding[];
+  const sentTo = (f: PlacedFinding): string =>
+    `${f.sessionNo}\u0000${f.place.host ?? ''}\u0000${viaSsh(f) ? 'ssh' : ''}`;
   return {
     sent: groupBy(
-      findings.filter((f) => f.tier === 'third_party'),
+      ordered.filter((f) => f.tier === 'third_party'),
       sentTo,
     ).map((g) => sentMoment(g, home)),
     seen: groupBy(
-      findings.filter((f) => f.tier === 'seen'),
-      (f) => f.session.path,
+      ordered.filter((f) => f.tier === 'seen'),
+      (f) => String(f.sessionNo),
     ).map((g) => seenMoment(g, home)),
   };
 }

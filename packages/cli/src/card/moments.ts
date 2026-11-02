@@ -7,10 +7,9 @@
 // none of the internal terms of the guard.
 import { isShellTool } from '@stroq/core';
 import { when } from '../sent/phrases.js';
-import type { Finding } from '../sent/findings.js';
 import type { AutorunItem, AutorunRepo } from './autorun.js';
 import { KEPT } from './data.js';
-import { keyMoments } from './key-moments.js';
+import { keyMoments, type PlacedFinding } from './key-moments.js';
 import { pasteable, sessionRows, withTranscript, type SessionPlace } from './moment-parts.js';
 import type { Moment, ToldMoment } from './schema.js';
 import { clean, shortPath } from './text.js';
@@ -24,7 +23,8 @@ export interface ToldInput {
 
 export interface MomentInputs {
   readonly told: readonly ToldInput[];
-  readonly findings: readonly Finding[];
+  /** One for each key in each session it was found in; a key found in two places is in both. */
+  readonly findings: readonly PlacedFinding[];
   readonly repos: readonly AutorunRepo[];
   readonly home: string;
 }

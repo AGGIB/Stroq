@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildMoments } from '../../src/card/moments.js';
 import type { ToldMoment } from '../../src/card/schema.js';
+import type { PlacedFinding } from '../../src/card/key-moments.js';
 import type { Finding } from '../../src/sent/findings.js';
 
 const HOME = '/Users/dev';
@@ -26,7 +27,8 @@ const place = {
   cwd: '/Users/dev/shop',
 };
 
-const finding = (over: Partial<Finding> & Pick<Finding, 'tier'>): Finding => ({
+const finding = (over: Partial<Finding> & Pick<Finding, 'tier'>): PlacedFinding => ({
+  sessionNo: 1,
   name: 'AWS_SECRET_ACCESS_KEY',
   source: '~/.aws/credentials',
   provider: 'AWS',

@@ -8,6 +8,7 @@
 import type { Sighting } from '../sent/analyze.js';
 import {
   collectFromSummaries,
+  compareFindings,
   earlier,
   isoTime,
   type Finding,
@@ -18,6 +19,7 @@ import {
 import type { Key, KeyFinder } from '../sent/keys.js';
 import { placeRank, type Place } from '../sent/place.js';
 import { printableFinding, printableId } from '../sent/run.js';
+import type { PlacedFinding } from './key-moments.js';
 import type { Scrub } from './scrub.js';
 import { MAX_HITS, type SessionKeys, type StoredHit } from './key-schema.js';
 import { isInside } from './within.js';
@@ -203,4 +205,36 @@ export function findingsOf(
   summaries: readonly SessionKeySummary[],
 ): Finding[] {
   return collectFromSummaries(keys, summaries).map((f) => printableFinding(f, finder));
+}
+
+/**
+ * One finding for each key in each session it was found in, for the places a moment is made from: a key
+ * sent in several sessions is in each, with that session's own place. Only the keys that left this machine
+ * and the keys the AI saw are kept, and a key the AI saw in one session is kept only if it was sent in
+ * none: it is told by the most external place it reached, as `findingsOf` tells it. Each finding says
+ * which session of the window it is from, by its number, since a session's printed name may be hidden.
+ * The order is the one findings are listed in.
+ */
+export function findingsBySession(
+  keys: readonly Key[],
+  finder: KeyFinder,
+  numbered: readonly (readonly [number, SessionKeySummary])[],
+): PlacedFinding[] {
+  const farthest = new Map<number, Place>();
+  for (const [, { keys: seen }] of numbered)
+    for (const [index, one] of seen) {
+      const held = farthest.get(index);
+      if (held === undefined || placeRank(one.sighting.place) < placeRank(held))
+        farthest.set(index, one.sighting.place);
+    }
+  const found: PlacedFinding[] = [];
+  for (const [sessionNo, { session, keys: seen }] of numbered)
+    for (const [index, one] of seen) {
+      const tier = one.sighting.place.tier;
+      if (tier !== 'third_party' && !(tier === 'seen' && farthest.get(index)?.tier === 'seen'))
+        continue;
+      const [finding] = collectFromSummaries(keys, [{ session, keys: new Map([[index, one]]) }]);
+      if (finding !== undefined) found.push({ ...printableFinding(finding, finder), sessionNo });
+    }
+  return found.sort(compareFindings);
 }

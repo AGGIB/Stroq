@@ -9,6 +9,7 @@
 import { HIDDEN } from '../sent/analyze.js';
 import { stoppedFindings } from '../sent/report.js';
 import type { Finding, SessionKeySummary } from '../sent/findings.js';
+import type { PlacedFinding } from './key-moments.js';
 import { keyFinder, loadKeys, type KeyFinder } from '../sent/keys.js';
 import { loadMcpServers } from '../sent/mcp-config.js';
 import { printableId, projectDirs } from '../sent/run.js';
@@ -19,7 +20,7 @@ import type { KeyAnswer } from './key-job.js';
 import { indexDigest, newSalt, prepareIndex, type PreparedIndex } from './key-index.js';
 import { registerKeyIndex } from './key-registry.js';
 import { namesGuard } from './ordinary-value.js';
-import { fitsKept, findingsOf, sanitizeKeys, summaryOf } from './key-result.js';
+import { findingsBySession, findingsOf, fitsKept, sanitizeKeys, summaryOf } from './key-result.js';
 import type { KeyCacheEntry, SessionKeys } from './key-schema.js';
 import { entriesUnder, keptKeys, keyCacheKey, readKeyCache, writeKeyCache } from './key-store.js';
 import { scrubber, type Scrub } from './scrub.js';
@@ -40,7 +41,13 @@ export interface KeysEnv {
 
 /** What the key check of a run came to. */
 export interface KeyOutcome {
+  /** One finding for each key, under the most external place it reached: what is counted. */
   readonly findings: readonly Finding[];
+  /**
+   * One finding for each key in each session it was found in (sent, or only seen): what the moments are
+   * made from, so that a moment tells what one session did and not what the key did in the end.
+   */
+  readonly bySession: readonly PlacedFinding[];
   /** Keys sent to another company that were stopped before they left. */
   readonly stopped: number;
   /** Sessions whose keys were checked: now or in an earlier run. Too large ones are not among them. */
@@ -145,6 +152,7 @@ function nothingToLookFor(shown: Shown, checkable: readonly boolean[]): KeysRun 
     accept: () => undefined,
     finish: () => ({
       findings: [],
+      bySession: [],
       stopped: 0,
       checked,
       fromCache: 0,
@@ -227,25 +235,32 @@ class Run implements KeysRun {
 
   finish(): KeyOutcome {
     const { sessions, finder, index } = this.p;
-    const summaries: SessionKeySummary[] = [];
+    const numbered: [number, SessionKeySummary][] = [];
     sessions.forEach((s, i) => {
       const result = this.results.get(i);
       if (result === undefined) return;
-      summaries.push(
+      numbered.push([
+        i,
         summaryOf(
           result,
           index.indexOf,
           { agent: s.agent, id: '', path: s.path, cwd: s.cwd },
           this.p.env.since,
         ),
-      );
+      ]);
     });
-    const findings = findingsOf(index.data.keys, finder, summaries);
+    const findings = findingsOf(
+      index.data.keys,
+      finder,
+      numbered.map(([, summary]) => summary),
+    );
+    const bySession = findingsBySession(index.data.keys, finder, numbered);
     const saved = this.save();
     registerKeyIndex(null);
     const checkable = this.p.checkable.filter(Boolean).length;
     return {
       findings,
+      bySession,
       stopped: stoppedFindings(findings),
       checked: this.results.size,
       fromCache: this.fromCache.size,

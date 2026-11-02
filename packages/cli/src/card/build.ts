@@ -316,7 +316,13 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
       });
   });
   const findings = got.keys.findings;
-  const moments = buildMoments({ told, findings, repos: got.folders.repos, home: run.home });
+  // The moments are made from what each session did; the counts are of keys.
+  const moments = buildMoments({
+    told,
+    findings: got.keys.bySession,
+    repos: got.folders.repos,
+    home: run.home,
+  });
   const counts: CardCounts = {
     commands: inside.reduce((sum, s) => sum + s.commands, 0),
     toldByText: inside.reduce((sum, s) => sum + s.told, 0),
