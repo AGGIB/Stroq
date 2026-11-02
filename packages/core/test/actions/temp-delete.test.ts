@@ -31,6 +31,10 @@ describe('a named path under the temp directory is not destructive', () => {
   it.each([
     'rm -rf /tmp/test_output',
     'rm -rf /tmp/test_output && mkdir -p /tmp/test_output',
+    'rm -rf /var/folders/zz/abc_123/T/build',
+    'rm -rf /private/var/folders/zz/abc_123/T/build',
+    'rm -rf /var/folders/n6/cmcn057lg8_xqwf82jfnbr0000gn/T/test_output',
+    'rm -rf /var/folders/zz/abc_123/T/a/b',
     'rm -rf /var/tmp/build-cache',
     'rm -r /tmp/x',
     'rm -fr /tmp/x',
@@ -110,6 +114,13 @@ describe('what stays a question', () => {
     'rm -rf ${TMPDIR:=/}/home',
     // A path that only looks like one.
     'rm -rf /tmpx/y',
+    'rm -rf /var/folders/zz/abc_123/C/build',
+    'rm -rf /var/folders/zz/abc_123/T',
+    'rm -rf /var/folders/zz/abc_123/T/',
+    'rm -rf /var/folders/zz/abc_123/T/*',
+    'rm -rf /var/folders/zz/abc_123/T/../C/x',
+    'rm -rf /var/folders/zz/abc_123',
+    'rm -rf /var/folders',
     'rm -rf /tmp.d/y',
     'rm -rf /home/tmp/x',
     'rm -rf /private/etc',
@@ -211,19 +222,29 @@ describe('a project under the temp directory', () => {
     expect(asksIn(command, cwd), `${cwd}: ${command}`).toBe(false);
   });
 
-  it('is off for a project under $TMPDIR, and under what $TMPDIR is on this machine', () => {
+  it('is off for a project in the per-user temp folder of a Mac, as spelled and as the disk has it', () => {
+    for (const [cwd, command] of [
+      ['/var/folders/zz/abc_123/T/work/proj', 'rm -rf /var/folders/zz/abc_123/T/work/proj'],
+      ['/var/folders/zz/abc_123/T/work/proj', 'rm -rf /var/folders/zz/abc_123/T/work'],
+      ['/var/folders/zz/abc_123/T/work/proj', 'rm -rf /var/folders/zz/abc_123/T/other'],
+      ['/var/folders/zz/abc_123/T/work/proj', 'rm -rf /private/var/folders/zz/abc_123/T/work/proj'],
+      ['/private/var/folders/zz/abc_123/T/work/proj', 'rm -rf /var/folders/zz/abc_123/T/work/proj'],
+      ['/private/var/folders/zz/abc_123/T/work/proj', 'rm -rf /tmp/x'],
+      ['/var/folders/zz/abc_123/T', 'rm -rf /tmp/x'],
+    ] as const)
+      expect(asksIn(command, cwd), `${cwd}: ${command}`).toBe(true);
+  });
+
+  it('is off for a project made in the temp folder of this machine', () => {
     const home = mkdtempSync(join(tmpdir(), 'stroq-temp-project-'));
     try {
-      vi.stubEnv('TMPDIR', home);
       mkdirSync(join(home, 'proj'), { recursive: true });
       const cwd = join(home, 'proj');
       for (const command of [
-        'rm -rf $TMPDIR/proj',
         `rm -rf ${cwd}`,
         `rm -rf ${home}`,
         `rm -rf ${home}/other`,
         `rm -rf ${home}/*`,
-        'rm -rf $TMPDIR/other',
       ])
         expect(asksIn(command, cwd), command).toBe(true);
     } finally {
@@ -235,11 +256,10 @@ describe('a project under the temp directory', () => {
     const home = mkdtempSync(join(tmpdir(), 'stroq-temp-project-'));
     const outside = mkdtempSync(join(dirname(fileURLToPath(import.meta.url)), 'stroq-link-'));
     try {
-      vi.stubEnv('TMPDIR', home);
       mkdirSync(join(home, 'proj'), { recursive: true });
       symlinkSync(join(home, 'proj'), join(outside, 'here'));
-      expect(asksIn('rm -rf $TMPDIR/proj', join(outside, 'here'))).toBe(true);
       expect(asksIn(`rm -rf ${join(home, 'proj')}`, join(outside, 'here'))).toBe(true);
+      expect(asksIn(`rm -rf ${home}/other`, join(outside, 'here'))).toBe(true);
     } finally {
       rmSync(home, { recursive: true, force: true });
       rmSync(outside, { recursive: true, force: true });
@@ -247,10 +267,7 @@ describe('a project under the temp directory', () => {
   });
 
   it('is told by the judgement itself', () => {
-    const system: TempScope = {
-      roots: ['/tmp', '/var/tmp', '/private/tmp', '/private/var/tmp'],
-      tmpdir: null,
-    };
+    const system: TempScope = { roots: ['/tmp', '/var/tmp', '/private/tmp', '/private/var/tmp'] };
     const named = (target: string, cwd: string): boolean =>
       isNamedTempTarget(target, facts(true), cwd, system);
     expect(named('/tmp/x', '/workspace/project')).toBe(true);
@@ -283,93 +300,78 @@ describe('a secret under the temp directory', () => {
     'rm -rf /tmp/.netrc',
     'rm -rf /tmp/.git-credentials',
     'rm -rf /var/tmp/.ssh',
+    'rm -rf /var/folders/zz/abc_123/T/.ssh',
+    'rm -rf /private/var/folders/zz/abc_123/T/id_rsa',
     'rm -rf "/tmp/.ssh"',
   ])('keeps the question: %s', (command) => {
     expect(asks(command), command).toBe(true);
   });
 });
 
-describe('$TMPDIR', () => {
+/**
+ * A variable for the temp directory (`$TMPDIR`, `${TMPDIR:-/tmp}`, `$env:TEMP`) is the shell's to say, and the hook
+ * cannot see the shell of the agent: some agents keep one shell across calls, and `export TMPDIR=$HOME` in one
+ * makes `rm -rf "$TMPDIR/Documents"` in the next the home. A variable form keeps the question, whatever the
+ * environment of the hook holds.
+ */
+describe('a variable for the temp directory', () => {
   const tempDir = mkdtempSync(join(tmpdir(), 'stroq-temp-delete-'));
   afterAll(() => rmSync(tempDir, { recursive: true, force: true }));
 
-  it('is the directory the hook runs in, when that is a temp directory and the line does not set it', () => {
-    vi.stubEnv('TMPDIR', tempDir);
-    expect(asks('rm -rf $TMPDIR/build')).toBe(false);
-    expect(asks('rm -rf "$TMPDIR/build"')).toBe(false);
-    expect(asks('rm -rf "${TMPDIR}/build"')).toBe(false);
-    expect(asks('rm -rf "$TMPDIR"/build')).toBe(false);
-    expect(asks('rm -rf $TMPDIR/build && mkdir -p $TMPDIR/build')).toBe(false);
+  const forms = [
+    'rm -rf $TMPDIR/build',
+    'rm -rf "$TMPDIR/build"',
+    'rm -rf "${TMPDIR}/build"',
+    'rm -rf "$TMPDIR"/build',
+    'rm -rf ${TMPDIR:-/tmp}/build',
+    'rm -rf "${TMPDIR:-/tmp}/build"',
+    'rm -rf $TMPDIR/build && mkdir -p $TMPDIR/build',
+    'rm -rf $TMP/build',
+    'rm -rf $TEMP/build',
+    'rm -rf "$TMPDIR"',
+    'rm -rf $TMPDIR/',
+    'rm -rf $TMPDIR/*',
+    'rm -rf $TMPDIR/a/b',
+    'rm -rf $TMPDIR/../x',
+    'rm -rf $TMPDIR/$X',
+    'rm -rf $TMPDIR_OTHER/x',
+    'rm -rf ${TMPDIR:-/}/x',
+    'Remove-Item -Recurse -Force $env:TEMP\\build',
+    'Remove-Item -Recurse -Force $env:TMP\\build',
+    'Remove-Item -Recurse -Force "$env:TEMP\\build"',
+    'rd /s /q $env:TEMP\\build',
+  ];
+
+  it.each(forms)('keeps the question, whatever the hook holds: %s', (command) => {
+    for (const value of [tempDir, '/tmp', '/var/folders/zz/abc_123/T', '/', '/home/user', '']) {
+      vi.stubEnv('TMPDIR', value);
+      expect(asks(command), `${value}: ${command}`).toBe(true);
+    }
+    vi.stubEnv('TMPDIR', undefined as unknown as string);
+    expect(asks(command), `unset: ${command}`).toBe(true);
   });
 
-  it('is the folder itself, or all of it, or more than a name: a question', () => {
+  it('keeps the question when an earlier call changed it: two commands, classified apart', () => {
     vi.stubEnv('TMPDIR', tempDir);
-    for (const command of [
-      'rm -rf "$TMPDIR"',
-      'rm -rf $TMPDIR',
-      'rm -rf $TMPDIR/',
-      'rm -rf $TMPDIR/*',
-      'rm -rf $TMPDIR/.*',
-      'rm -rf $TMPDIR/..',
-      'rm -rf $TMPDIR/../x',
-      'rm -rf $TMPDIR/x/',
-      'rm -rf $TMPDIR/x/.',
-      'rm -rf $TMPDIR//x',
-      'rm -rf $TMPDIR/$X',
-      'rm -rf $TMPDIR/x*',
-      'rm -rf $TMPDIR_OTHER/x',
-      'rm -rf ${TMPDIR:-/}/x',
-    ])
-      expect(asks(command), command).toBe(true);
-  });
-
-  it.each([
-    ['unset', undefined],
-    ['empty', ''],
-    ['the root', '/'],
-    ['a home directory', '/home/user'],
-    ['a relative path', 'tmp'],
-    ['a path that goes up', '/tmp/../home/user'],
-    ['a glob', '/tmp/*'],
-    ['a path with a variable', '/tmp/$X'],
-    ['a path with a space', '/tmp/a b'],
-    ['a path that is only the prefix of a temp directory', '/tmpx'],
-  ])('is not trusted when it is %s', (_name, value) => {
-    if (value === undefined) vi.stubEnv('TMPDIR', undefined as unknown as string);
-    else vi.stubEnv('TMPDIR', value);
-    expect(asks('rm -rf $TMPDIR/build')).toBe(true);
-    expect(asks('rm -rf "${TMPDIR}/build"')).toBe(true);
-  });
-
-  it('is not trusted once the line sets it, however', () => {
-    vi.stubEnv('TMPDIR', tempDir);
-    for (const command of [
-      'export TMPDIR=/ && rm -rf $TMPDIR/home',
-      'TMPDIR=/; rm -rf $TMPDIR/home',
-      'TMPDIR=/ rm -rf $TMPDIR/home && true',
-      'declare -x TMPDIR=/; rm -rf $TMPDIR/home',
-      'read TMPDIR <<< /; rm -rf $TMPDIR/home',
-      'printf -v TMPDIR / ; rm -rf $TMPDIR/home',
-      'for TMPDIR in /; do rm -rf $TMPDIR/home; done',
-      'eval "export TMPDIR=/"; rm -rf $TMPDIR/home',
-      'source ./env.sh; rm -rf $TMPDIR/home',
-      '. ./env.sh; rm -rf $TMPDIR/home',
-      'export "TM""PDIR=/"; rm -rf $TMPDIR/home',
-    ])
-      expect(asks(command), command).toBe(true);
+    const first = classes('export TMPDIR=$HOME');
+    expect(first).not.toContain('shell.destructive');
+    expect(asks('rm -rf "$TMPDIR/Documents"')).toBe(true);
+    expect(asks('rm -rf $TMPDIR/Documents')).toBe(true);
+    expect(asks('rm -rf "${TMPDIR}/Documents"')).toBe(true);
+    expect(asks('export TMPDIR=$HOME && rm -rf "$TMPDIR/Documents"')).toBe(true);
   });
 });
 
-/** What the rest of a line is, as `isNamedTempTarget` is told: all of it inert, and it does not set `TMPDIR`. */
-const facts = (inert: boolean, setsTempDir = false): LineFacts => ({
+/** What the rest of a line is, as `isNamedTempTarget` is told: all of it inert or not. */
+const facts = (inert: boolean): LineFacts => ({
   inert: () => inert,
-  setsTempDir: () => setsTempDir,
   probe: () => true,
-  scope: () => ({ roots: [], tmpdir: null }),
+  scope: () => ({ roots: [] }),
 });
 
 describe('a link that leaves the temp directory', () => {
-  // The folder the tests make is the temp directory for them: the line names it by `$TMPDIR`.
+  // The folder the tests make is the temp folder for them: a root that is given, and a literal path the hook knows
+  // when it is under the system's own.
   const outside = dirname(fileURLToPath(import.meta.url));
   const scope = mkdtempSync(join(tmpdir(), 'stroq-temp-links-'));
   beforeAll(() => {
@@ -381,49 +383,48 @@ describe('a link that leaves the temp directory', () => {
     symlinkSync('/', join(scope, 'root'));
   });
   afterAll(() => rmSync(scope, { recursive: true, force: true }));
+  const named = (target: string): boolean =>
+    isNamedTempTarget(target, facts(true), CWD, { roots: [scope] });
 
   it.each([
-    ['a link at the name, to somewhere else', 'rm -rf $TMPDIR/out'],
-    ['a link at the name, to the root', 'rm -rf $TMPDIR/root'],
-    ['a link above the name', 'rm -rf $TMPDIR/out/child'],
-    ['a link above the name, deeper', 'rm -rf $TMPDIR/plain/inner/up/child'],
-    ['a link at the end of a path', 'rm -rf $TMPDIR/plain/inner/up'],
-    ['a link to a place that is not there, outside', 'rm -rf $TMPDIR/dangling'],
-  ])('%s keeps the question', (_name, command) => {
-    vi.stubEnv('TMPDIR', scope);
-    expect(asks(command), command).toBe(true);
+    ['a link at the name, to somewhere else', 'out'],
+    ['a link at the name, to the root', 'root'],
+    ['a link above the name', 'out/child'],
+    ['a link above the name, deeper', 'plain/inner/up/child'],
+    ['a link at the end of a path', 'plain/inner/up'],
+    ['a link to a place that is not there, outside', 'dangling'],
+    ['the folder itself', ''],
+    ['the folder with a slash', '/'],
+    ['all of it', '/*'],
+  ])('%s keeps the question', (_name, below) => {
+    expect(named(`${scope}/${below}`.replace('//', '/')), below).toBe(false);
   });
 
   it.each([
-    ['a plain folder', 'rm -rf $TMPDIR/plain'],
-    ['a folder in it', 'rm -rf $TMPDIR/plain/inner'],
-    ['a name that is not there', 'rm -rf $TMPDIR/missing'],
-    ['a name below one that is not there', 'rm -rf $TMPDIR/missing/deeper'],
-    ['a link to a folder inside it', 'rm -rf $TMPDIR/in'],
-    ['a link to a folder inside it, with a name below', 'rm -rf $TMPDIR/in/inner'],
-  ])('%s does not', (_name, command) => {
-    vi.stubEnv('TMPDIR', scope);
-    expect(asks(command), command).toBe(false);
+    ['a plain folder', 'plain'],
+    ['a folder in it', 'plain/inner'],
+    ['a name that is not there', 'missing'],
+    ['a name below one that is not there', 'missing/deeper'],
+    ['a link to a folder inside it', 'in'],
+    ['a link to a folder inside it, with a name below', 'in/inner'],
+  ])('%s does not', (_name, below) => {
+    expect(named(`${scope}/${below}`), below).toBe(true);
   });
 
-  it('is judged where the path is, for a root that is given', () => {
-    const roots: TempScope = { roots: [scope], tmpdir: null };
-    const named = (target: string): boolean => isNamedTempTarget(target, facts(true), CWD, roots);
-    expect(named(`${scope}/plain`)).toBe(true);
-    expect(named(`${scope}/in/inner`)).toBe(true);
-    expect(named(`${scope}/out`)).toBe(false);
-    expect(named(`${scope}/out/child`)).toBe(false);
-    expect(named(`${scope}/root/etc`)).toBe(false);
-    expect(named(scope)).toBe(false);
-    expect(named(`${scope}/`)).toBe(false);
+  // Where the system's own folder is the one the tests made, the command is judged by the same rule.
+  const known =
+    /^\/(?:tmp|var\/tmp|private\/tmp|private\/var\/tmp)\//.test(scope) ||
+    /^\/(?:private\/)?var\/folders\/[A-Za-z0-9_]{2}\/[A-Za-z0-9_]+\/T\//.test(scope);
+  it.skipIf(!known)('is the same through a command', () => {
+    for (const below of ['out', 'root', 'out/child', 'plain/inner/up/child', 'dangling'])
+      expect(asks(`rm -rf ${scope}/${below}`), below).toBe(true);
+    for (const below of ['plain', 'plain/inner', 'missing', 'in', 'in/inner'])
+      expect(asks(`rm -rf ${scope}/${below}`), below).toBe(false);
   });
 });
 
 describe('isNamedTempTarget', () => {
-  const system: TempScope = {
-    roots: ['/tmp', '/var/tmp', '/private/tmp', '/private/var/tmp'],
-    tmpdir: null,
-  };
+  const system: TempScope = { roots: ['/tmp', '/var/tmp', '/private/tmp', '/private/var/tmp'] };
   const named = (target: string, inert = true): boolean =>
     isNamedTempTarget(target, facts(inert), CWD, system);
 
@@ -436,15 +437,69 @@ describe('isNamedTempTarget', () => {
     expect(named('/tmp/x/*', false)).toBe(false);
   });
 
-  it('takes $TMPDIR only when the scope has one, and the line does not set it', () => {
-    const scoped: TempScope = { roots: system.roots, tmpdir: '/var/folders/zz/T' };
-    expect(isNamedTempTarget('$TMPDIR/x', facts(true), CWD, scoped)).toBe(true);
-    expect(isNamedTempTarget('${TMPDIR}/x', facts(true), CWD, scoped)).toBe(true);
-    expect(isNamedTempTarget('$TMPDIR/x', facts(false), CWD, scoped)).toBe(false);
-    expect(isNamedTempTarget('$TMPDIR/x', facts(true, true), CWD, scoped)).toBe(false);
-    expect(isNamedTempTarget('$TMPDIR/x', facts(true), CWD, system)).toBe(false);
-    expect(isNamedTempTarget('$TMPDIR', facts(true), CWD, scoped)).toBe(false);
-    expect(isNamedTempTarget('$TMPDIR/', facts(true), CWD, scoped)).toBe(false);
+  it('takes no variable: the hook cannot see the shell that expands it', () => {
+    for (const target of [
+      '$TMPDIR/x',
+      '${TMPDIR}/x',
+      '${TMPDIR:-/tmp}/x',
+      '$TMP/x',
+      '$TEMP/x',
+      '$env:TEMP\\x',
+      '%TEMP%\\x',
+      '%TMP%/x',
+    ])
+      expect(named(target), target).toBe(false);
+  });
+
+  it('takes the per-user temp folder of a Mac when it is spelled out', () => {
+    for (const target of [
+      '/var/folders/zz/abc_123/T/x',
+      '/private/var/folders/zz/abc_123/T/x',
+      '/var/folders/n6/cmcn057lg8_xqwf82jfnbr0000gn/T/x',
+      '/var/folders/zz/abc_123/T/x/y',
+    ])
+      expect(named(target), target).toBe(true);
+    expect(named('/var/folders/zz/abc_123/T/x/y', false)).toBe(false);
+    for (const target of [
+      '/var/folders',
+      '/var/folders/zz',
+      '/var/folders/zz/abc_123',
+      '/var/folders/zz/abc_123/T',
+      '/var/folders/zz/abc_123/T/',
+      '/var/folders/zz/abc_123/T/*',
+      '/var/folders/zz/abc_123/T/../C/x',
+      '/var/folders/zz/abc_123/C/x',
+      '/var/folders/zz/abc_123/0/x',
+      '/var/folders/zz/abc_123/Tx/y',
+      '/var/folders/zz/abc_123/t/x',
+      '/var/folders/z/abc_123/T/x',
+      '/var/folders/zzz/abc_123/T/x',
+      '/var/folders/zz//T/x',
+      '/var/folders/zz/ab c/T/x',
+      '/var/folders/zz/abc_123/T//x',
+      '/Var/folders/zz/abc_123/T/x',
+      '/private/private/var/folders/zz/abc_123/T/x',
+    ])
+      expect(named(target), target).toBe(false);
+  });
+
+  it('is off where the project is in the per-user temp folder', () => {
+    const cwd = '/var/folders/zz/abc_123/T/work/proj';
+    expect(isNamedTempTarget('/tmp/x', facts(true), cwd, system)).toBe(false);
+    expect(isNamedTempTarget('/var/folders/zz/abc_123/T/work', facts(true), cwd, system)).toBe(
+      false,
+    );
+    expect(isNamedTempTarget('/var/folders/zz/abc_123/T/other', facts(true), cwd, system)).toBe(
+      false,
+    );
+    expect(
+      isNamedTempTarget(
+        '/var/folders/zz/abc_123/T/x',
+        facts(true),
+        '/private/var/folders/zz/abc_123/T/w',
+        system,
+      ),
+    ).toBe(false);
   });
 
   it('takes the folders that are the same place on a Mac', () => {

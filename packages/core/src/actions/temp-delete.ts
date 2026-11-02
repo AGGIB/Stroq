@@ -23,41 +23,39 @@ import { resolveThroughLinks } from './symlink.js';
  * None of this holds where the directory the hook gives is itself in scratch space (`cwdInScope`): the
  * delete of a name under it can be the project, a folder above it or the one beside it.
  *
- * `$TMPDIR/name` is the same path when the hook's own `TMPDIR` is a temp directory and the line
- * neither sets that variable nor does anything that could (`setsTempDir`, and `inert`). The hook
- * and the agent's shell share their environment; a line that changes it is not trusted.
+ * Only a literal path counts: `/tmp`, `/var/tmp`, `/private/tmp`, `/private/var/tmp`, and the per-user
+ * temp folder of a Mac spelled out (`/var/folders/<xx>/<id>/T`, with or without `/private`). A variable
+ * for the temp directory (`$TMPDIR`, `${TMPDIR:-/tmp}`, `$env:TEMP`) is the shell's to say, and the hook
+ * cannot see the shell of the agent: one that keeps its shell across calls can be told `export TMPDIR=$HOME`
+ * in one and `rm -rf "$TMPDIR/Documents"` in the next. A variable form keeps the question.
  */
 
 /** The folders that are the system's scratch space, as a path spells them. */
 const SYSTEM_ROOTS: readonly string[] = ['/tmp', '/var/tmp', '/private/tmp', '/private/var/tmp'];
-/** Where a per-user `TMPDIR` may be: macOS keeps it under `/var/folders`. */
-const TMPDIR_PLACES: readonly string[] = [...SYSTEM_ROOTS, '/var/folders', '/private/var/folders'];
+/**
+ * The per-user temp folder of a Mac, spelled out: `/var/folders/<two characters>/<id>/T`, which is `/private/var/…`
+ * on the disk. The cache folder beside it (`C`) and the others are not scratch space.
+ */
+const USER_TEMP = /^(?:\/private)?\/var\/folders\/[A-Za-z0-9_]{2}\/[A-Za-z0-9_]+\/T(?=\/|$)/;
 /** A word read as a path longer than this is not judged. */
 const MAX_TARGET_CHARS = 4096;
 /** What a name may hold: nothing a shell expands, splits, escapes or reads as a pattern. */
 const NAME = /^[A-Za-z0-9_.@%+,=:-]+$/;
 const ONLY_DOTS = /^\.+$/;
-const VARIABLE_PREFIXES = ['$TMPDIR/', '${TMPDIR}/'] as const;
-/** A read of the variable, as a delete names its folder: what is left of a line without them is a way to set it. */
-const TMPDIR_READ = /\$TMPDIR(?![A-Za-z0-9_])|\$\{TMPDIR\}/g;
 const SUBSTITUTION = /\$\(|`|<\(|>\(/;
 
 export interface TempScope {
-  /** The folders that are scratch space, spelled as a path names them. */
+  /** The folders that are scratch space, spelled as a path names them (the per-user folder of a Mac is known besides). */
   readonly roots: readonly string[];
-  /** The hook's `TMPDIR` when it is a temp directory, else null. */
-  readonly tmpdir: string | null;
 }
 
 /** What the rest of a line is, asked only when a path needs to know. */
 export interface LineFacts {
   /** Every command of the line is one that makes no link and moves nothing. */
   readonly inert: () => boolean;
-  /** The line names `TMPDIR` other than to read it. */
-  readonly setsTempDir: () => boolean;
   /** One more path may be looked up on the disk: a line that names more is not looked at past the budget. */
   readonly probe: () => boolean;
-  /** The scratch space of this machine, read once for the line. */
+  /** The scratch space of this machine. */
   readonly scope: () => TempScope;
 }
 
@@ -69,38 +67,30 @@ function withoutTrailingSlashes(path: string): string {
   return path.slice(0, end);
 }
 
-/** The hook's `TMPDIR`, when it is an absolute path of names inside a temp place. */
-function usableTmpdir(value: string | undefined): string | null {
-  if (value === undefined || value.length > MAX_TARGET_CHARS) return null;
-  const path = withoutTrailingSlashes(value);
-  const inPlace =
-    SYSTEM_ROOTS.includes(path) || TMPDIR_PLACES.some((place) => path.startsWith(`${place}/`));
-  return inPlace && path.slice(1).split('/').every(isName) ? path : null;
-}
+const SYSTEM_SCOPE: TempScope = { roots: SYSTEM_ROOTS };
 
-/** The scratch space this machine has, read from the environment the hook was started with. */
+/** The scratch space this machine has: the same on every machine, since a variable is not read. */
 export function systemTempScope(): TempScope {
-  return { roots: SYSTEM_ROOTS, tmpdir: usableTmpdir(process.env['TMPDIR']) };
+  return SYSTEM_SCOPE;
 }
 
 interface Place {
   /** The folder the target is below, and what comes after it. */
   readonly root: string;
   readonly rest: string;
-  /** The target reaches the folder through `$TMPDIR`. */
-  readonly viaVariable: boolean;
 }
 
 function placeOf(target: string, scope: TempScope): Place | null {
   for (const root of scope.roots)
-    if (target.startsWith(`${root}/`))
-      return { root, rest: target.slice(root.length + 1), viaVariable: false };
-  if (scope.tmpdir === null) return null;
-  for (const prefix of VARIABLE_PREFIXES)
-    if (target.startsWith(prefix))
-      return { root: scope.tmpdir, rest: target.slice(prefix.length), viaVariable: true };
+    if (target.startsWith(`${root}/`)) return { root, rest: target.slice(root.length + 1) };
+  const user = USER_TEMP.exec(target)?.[0];
+  if (user !== undefined && target.startsWith(`${user}/`))
+    return { root: user, rest: target.slice(user.length + 1) };
   return null;
 }
+
+/** The path is the per-user temp folder of a Mac, or inside it. */
+const inUserTemp = (path: string): boolean => USER_TEMP.test(path);
 
 const realRootsOf = new WeakMap<TempScope, readonly string[]>();
 
@@ -108,9 +98,8 @@ const realRootsOf = new WeakMap<TempScope, readonly string[]>();
 function realRoots(scope: TempScope): readonly string[] {
   const known = realRootsOf.get(scope);
   if (known !== undefined) return known;
-  const spelled = scope.tmpdir === null ? scope.roots : [...scope.roots, scope.tmpdir];
   // Resolved as the path under them is, so that a folder the machine does not have is still the same place.
-  const found = spelled.flatMap((root) => {
+  const found = scope.roots.flatMap((root) => {
     const real = resolveThroughLinks(root, '/');
     return real === null ? [root] : [root, real];
   });
@@ -134,7 +123,7 @@ function cwdInScope(cwd: string, scope: TempScope): boolean {
     const real = resolveThroughLinks(cwd, '/');
     const roots = realRoots(scope);
     const within = (path: string): boolean =>
-      roots.some((root) => path === root || path.startsWith(`${root}/`));
+      inUserTemp(path) || roots.some((root) => path === root || path.startsWith(`${root}/`));
     found = within(withoutTrailingSlashes(cwd)) || (real !== null && within(real));
   }
   const cache = inScopeCache.get(scope) ?? new Map<string, boolean>();
@@ -147,7 +136,10 @@ function cwdInScope(cwd: string, scope: TempScope): boolean {
 function staysInside(path: string, cwd: string, scope: TempScope): boolean {
   const real = resolveThroughLinks(path, cwd);
   if (real === null) return true;
-  return realRoots(scope).some((root) => real.startsWith(`${root}/`));
+  return (
+    (inUserTemp(real) && real !== (USER_TEMP.exec(real)?.[0] ?? '')) ||
+    realRoots(scope).some((root) => real.startsWith(`${root}/`))
+  );
 }
 
 /** What a target is below its folder: the names, and whether it ends in `*`, or null when it is neither. */
@@ -179,8 +171,7 @@ export function isNamedTempTarget(
   const found = namesOf(place.rest);
   if (found === null) return false;
   const deep = found.names.length >= 2 || found.glob;
-  if ((deep || place.viaVariable) && !line.inert()) return false;
-  if (place.viaVariable && line.setsTempDir()) return false;
+  if (deep && !line.inert()) return false;
   if (!line.probe()) return false;
   return staysInside(`${place.root}/${found.names.join('/')}`, cwd, scope);
 }
@@ -188,7 +179,7 @@ export function isNamedTempTarget(
 /**
  * The commands that make no link and move nothing: they remove, create, list or print. Every
  * other command of a line (`ln`, `mv`, `cp`, `tar`, `git`, an interpreter, a script) may put a
- * link where a later path goes through it, and `export` or `source` may change `TMPDIR`.
+ * link where a later path goes through it.
  */
 const INERT_COMMANDS: ReadonlySet<string> = new Set([
   'rm',
@@ -222,25 +213,17 @@ function isInertSegment(segment: string): boolean {
   return !SUBSTITUTION.test(text) && INERT_COMMANDS.has(commandWord(text));
 }
 
-/** The text with its quotes and escapes off, and each read of `$TMPDIR` taken out. */
-const withoutReads = (segment: string): string =>
-  segment.replace(/["'\\]/g, '').replace(TMPDIR_READ, '');
-
 /** The most paths of one line that are looked up on the disk: a line that deletes more is asked about. */
 const MAX_PROBES = 32;
 
 /** What the commands of a line are, computed once and only if a path asks. */
 export function lineFacts(segments: readonly string[]): LineFacts {
   let inert: boolean | undefined;
-  let sets: boolean | undefined;
-  let scope: TempScope | undefined;
   let probes = 0;
   return {
     inert: () => (inert ??= segments.every(isInertSegment)),
-    setsTempDir: () =>
-      (sets ??= segments.some((segment) => withoutReads(segment).includes('TMPDIR'))),
     probe: () => (probes += 1) <= MAX_PROBES,
-    scope: () => (scope ??= systemTempScope()),
+    scope: systemTempScope,
   };
 }
 
