@@ -134,15 +134,34 @@ posix('a linked worktree made by git', () => {
     expect(existsSync(lab.marker)).toBe(false);
   });
 
-  it('reads config.worktree when, and only when, the repository turns extensions.worktreeConfig on', () => {
+  // Git takes `extensions.worktreeConfig` as a boolean, and a boolean may be any integer (`2`, `1k`,
+  // `-1`) as well as yes, on and true. Whether git reads config.worktree is not worked out here: it
+  // is read whenever it is there, whatever the flag says, so no spelling of the flag hides it.
+  it.each([
+    ['no flag at all', ''],
+    ['true', 'true'],
+    ['yes', 'yes'],
+    ['1', '1'],
+    ['2', '2'],
+    ['1k', '1k'],
+    ['-1', '-1'],
+    [' true', ' true'],
+    ['"true"', '"true"'],
+    ['false', 'false'],
+  ])('reads config.worktree whatever extensions.worktreeConfig says: %s', (_name, flag) => {
     const { main, wt, admin } = newWorktree(lab, join(lab.work, 'main'), join(lab.work, 'wt'));
     writeFileSync(join(admin, 'config.worktree'), `[core]\n\tsshCommand = touch ${lab.marker}\n`);
-    expect(repoSurface(wt).preTrust).toEqual([]);
-    plant(join(main, '.git', 'config'), '[extensions]\n\tworktreeConfig = true\n');
+    if (flag !== '')
+      plant(join(main, '.git', 'config'), `[extensions]\n\tworktreeConfig = ${flag}\n`);
     expect(repoSurface(wt).preTrust).toEqual([
       { kind: 'git-config-exec', file: join(admin, 'config.worktree'), what: 'core.sshcommand' },
     ]);
     expect(existsSync(lab.marker)).toBe(false);
+  });
+
+  it('reads nothing of a config.worktree that is not there', () => {
+    const { wt } = newWorktree(lab, join(lab.work, 'main'), join(lab.work, 'wt'));
+    expect(repoSurface(wt).preTrust).toEqual([]);
   });
 
   it('is judged by the hooks of its repository too, by their real paths', () => {
@@ -182,6 +201,67 @@ posix('a linked worktree made by git', () => {
     expect(linkedGit(join(main, '.git'), LEGACY_SURFACE_IO)).toBeUndefined();
     writeFileSync(join(wt, 'dotgit'), readFileSync(join(wt, '.git')));
     expect(linkedGit(join(wt, 'dotgit'), LEGACY_SURFACE_IO)).toBeUndefined();
+  });
+});
+
+posix('a repository a worktree leads to, and what the walk judged of it', () => {
+  it('has the hooks of its .git folder judged when that folder lies in the folder', () => {
+    const main = join(lab.work, 'main');
+    newWorktree(lab, main, join(lab.work, 'wt'));
+    const hook = join(main, '.git', 'hooks', 'post-checkout');
+    writeFileSync(hook, `#!/bin/sh\ntouch ${lab.marker}\n`);
+    chmodSync(hook, 0o755);
+    expect(lines(folderSurface(lab.work)).sort()).toEqual([
+      'git-hook-routine main/.git/hooks/post-checkout post-checkout',
+      'nested-bare-repo main/.git HEAD, objects, refs',
+    ]);
+    expect(existsSync(lab.marker)).toBe(false);
+  });
+
+  it('is judged directly when it lies where the walk does not go', () => {
+    // `x` has the shape of a bare repository, so the walk reports it and goes no further: the
+    // repository inside it is not read by the walk, though it lies in the folder.
+    const x = join(lab.work, 'x');
+    for (const name of ['objects', 'refs']) mkdirSync(join(x, name), { recursive: true });
+    writeFileSync(join(x, 'HEAD'), 'ref: refs/heads/main\n');
+    const { main } = newWorktree(lab, join(x, 'main'), join(lab.work, 'wt'));
+    plant(join(main, '.git', 'config'), planted());
+    expect(lines(folderSurface(lab.work)).sort()).toEqual([
+      'git-config-exec x/main/.git/config core.fsmonitor',
+      'nested-bare-repo x HEAD, objects, refs',
+    ]);
+    expect(existsSync(lab.marker)).toBe(false);
+  });
+
+  it('has the config.worktree of each worktree judged, though the repository was judged once', () => {
+    const main = join(lab.work, 'main');
+    const first = newWorktree(lab, main, join(lab.work, 'one'));
+    lab.git(main, 'worktree', 'add', '-q', join('..', 'three'));
+    for (const admin of [first.admin, join(main, '.git', 'worktrees', 'three')])
+      writeFileSync(join(admin, 'config.worktree'), `[core]\n\tsshCommand = touch ${lab.marker}\n`);
+    expect(
+      lines(folderSurface(lab.work))
+        .filter((l) => l.startsWith('git-config-exec'))
+        .sort(),
+    ).toEqual([
+      'git-config-exec main/.git/worktrees/one/config.worktree core.sshcommand',
+      'git-config-exec main/.git/worktrees/three/config.worktree core.sshcommand',
+    ]);
+    expect(existsSync(lab.marker)).toBe(false);
+  });
+});
+
+posix('a repository’s own config.worktree', () => {
+  it('is read at the root of a repository, as it is for a worktree', () => {
+    const repo = join(lab.work, 'plain');
+    newWorktree(lab, repo, join(lab.work, 'wt'));
+    writeFileSync(
+      join(repo, '.git', 'config.worktree'),
+      `[core]\n\tsshCommand = touch ${lab.marker}\n`,
+    );
+    expect(lines(repoSurface(repo))).toEqual([
+      'git-config-exec .git/config.worktree core.sshcommand',
+    ]);
   });
 });
 

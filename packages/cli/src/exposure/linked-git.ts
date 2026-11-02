@@ -213,20 +213,15 @@ export function linkedGit(pointer: string, io: SurfaceReadContext): LinkedGit | 
 }
 
 /**
- * The config files git reads for a checkout whose `.git` is the verified file: the `config` of the
- * folder that holds the repository, and the worktree's own `config.worktree` when that config
- * turns `extensions.worktreeConfig` on. A config that cannot be read turns nothing on here; it is
- * reported as unread by whoever reads it.
+ * Whether `path` is a `.git` folder as git makes it: named exactly `.git`, a real folder this user
+ * owns, with `HEAD`, `objects/` and `refs/` and no `commondir`. Only for a plain read of the disk.
+ * Anything else, and any read that fails, is not one.
  */
-export function linkedConfigs(linked: LinkedGit, io: SurfaceReadContext): string[] {
-  const config = join(linked.common, 'config');
-  let on = false;
+export function ordinaryGitFolder(path: string, io: SurfaceReadContext): boolean {
+  if (io.plainDisk !== true || basename(path) !== '.git') return false;
   try {
-    const parsed = parseGitConfig(smallText(config, MAX_CONFIG_BYTES, io));
-    const value = parsed.entries.filter((e) => e.key === 'extensions.worktreeconfig').at(-1)?.value;
-    on = value !== undefined && /^(true|yes|on|1)$/i.test(value);
+    return isGitFolder(path, io);
   } catch {
-    on = false;
+    return false;
   }
-  return on ? [config, join(linked.gitdir, 'config.worktree')] : [config];
 }

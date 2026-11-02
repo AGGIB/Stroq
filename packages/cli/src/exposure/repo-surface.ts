@@ -8,7 +8,7 @@ import type { Finding } from './findings.js';
 import { plainHookHits } from './plain-hook-folders.js';
 import { FILE_NAMES, foldName, gitDirName, looksLikeGitDir } from './git-dir-names.js';
 import { MAX_CONFIG_BYTES, gitConfigEntries, parseGitConfig } from './git-config.js';
-import { linkedConfigs, linkedGit, type LinkedGit } from './linked-git.js';
+import { linkedGit, ordinaryGitFolder, type LinkedGit } from './linked-git.js';
 
 export { gitConfigEntries, parseGitConfig };
 
@@ -384,20 +384,27 @@ function namesIn(dir: string, io: SurfaceReadContext): Map<string, string[]> {
 
 /** The files and folder git reads from the git folder of a checkout. */
 interface GitHome {
-  readonly configs: readonly string[];
-  readonly hooks: string | null;
+  /** The folder that holds the repository: the same for every worktree of it. */
+  readonly common: string;
+  readonly config: string;
+  /**
+   * The checkout's own `config.worktree`. Git reads it only when `extensions.worktreeConfig` is on,
+   * and what turns that on is any boolean git takes (`true`, `on`, any integer but 0, with a `k`,
+   * `m` or `g` after it). That is not worked out here: a file that is not there reports nothing,
+   * and one that is there is read, so no spelling of the flag hides it.
+   */
+  readonly worktreeConfig: string;
+  readonly hooks: string;
   readonly attributes: readonly string[];
 }
 
 /** Where git reads its configuration, hooks and attributes for `checkout`, given its `.git`. */
-function gitHomeOf(
-  checkout: string,
-  linked: LinkedGit | undefined,
-  io: SurfaceReadContext,
-): GitHome {
+function gitHomeOf(checkout: string, linked: LinkedGit | undefined): GitHome {
   const common = linked?.common ?? join(checkout, '.git');
   return {
-    configs: linked === undefined ? [join(common, 'config')] : linkedConfigs(linked, io),
+    common,
+    config: join(common, 'config'),
+    worktreeConfig: join(linked?.gitdir ?? common, 'config.worktree'),
     hooks: join(common, 'hooks'),
     attributes: [join(checkout, '.gitattributes'), join(common, 'info', 'attributes')],
   };
@@ -413,6 +420,14 @@ function addOnce(hits: RepoExecHit[], seen: Set<string>, more: readonly RepoExec
   }
 }
 
+const isFolderAt = (path: string, io: SurfaceReadContext): boolean => {
+  try {
+    return io.lstat(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
 const tryRealpath = (path: string, io: SurfaceReadContext): string => {
   try {
     return io.realpath(path);
@@ -422,14 +437,46 @@ const tryRealpath = (path: string, io: SurfaceReadContext): string => {
 };
 
 /**
+ * What git would run from the git folder of one checkout: the commands its configs name, the
+ * drivers its attributes route through them, and the hooks git runs on its own. `judged` holds the
+ * real paths of the git folders whose `config` and hooks were read already, in this walk; those are
+ * not read again, and the checkout's own `config.worktree` and attributes are. Coverage is only
+ * what was read, never where a folder lies: a repository in a folder the walk does not enter, or
+ * past its cap, is not in `judged`, and is read here.
+ */
+function homeHits(
+  root: string,
+  home: GitHome,
+  judged: Set<string>,
+  plat: NodeJS.Platform,
+  io: SurfaceReadContext,
+): RepoExecHit[] {
+  const real = tryRealpath(home.common, io);
+  const first = !judged.has(real);
+  judged.add(real);
+  const configHits = (file: string) => gitConfigHits(file, labelOf(root, file, io), io);
+  return [
+    ...(first ? configHits(home.config) : []),
+    ...configHits(home.worktreeConfig),
+    ...gitAttributesHits(root, [home.config, home.worktreeConfig], home.attributes, io),
+    ...(first ? gitHookHits(root, home.hooks, plat, io) : []),
+  ];
+}
+
+/**
  * What a `.git` file in a folder with no `.git` of its own is: a finding, because a cloned
  * repository can commit one that points git at a bare repository it also commits, unless git made
  * it here for a linked worktree or a submodule (see `linked-git.ts`). Such a file is not reported,
- * and what it leads to is judged instead: the walk does that for a `.git` folder inside `root`, and
- * the config, attributes and hooks of one elsewhere (or under a folder the walk skips) are read
- * here, so an archive that carries a `.git` folder of its own is not trusted for being one.
+ * and what it leads to is judged instead (`homeHits`), so an archive that carries a `.git` folder
+ * of its own is not trusted for looking like one.
  */
-function gitFileHits(root: string, pointer: string, io: SurfaceReadContext): RepoExecHit[] {
+function gitFileHits(
+  root: string,
+  pointer: string,
+  judged: Set<string>,
+  plat: NodeJS.Platform,
+  io: SurfaceReadContext,
+): RepoExecHit[] {
   const linked = linkedGit(pointer, io);
   if (linked === undefined)
     return [
@@ -439,21 +486,32 @@ function gitFileHits(root: string, pointer: string, io: SurfaceReadContext): Rep
         what: `a .git file, ${POINTS_ELSEWHERE}`,
       },
     ];
-  // `root` as the disk spells it, which is how `linked.common` is spelled.
-  const top = tryRealpath(root, io);
-  const walked =
-    isWithin(linked.common, top) &&
-    !relative(top, linked.common)
-      .split(sep)
-      .some((part) => SKIP_DIRS.has(part));
-  if (walked) return [];
-  const checkout = dirname(pointer);
-  const home = gitHomeOf(checkout, linked, io);
-  return [
-    ...home.configs.flatMap((config) => gitConfigHits(config, labelOf(root, config, io), io)),
-    ...gitAttributesHits(root, home.configs, home.attributes, io),
-    ...(home.hooks === null ? [] : gitHookHits(root, home.hooks, process.platform, io)),
-  ];
+  return homeHits(root, gitHomeOf(dirname(pointer), linked), judged, plat, io);
+}
+
+/** A name that is not there, to tell a folder that can be entered from one that cannot. */
+const PROBE = '.stroq-probe';
+
+/**
+ * Whether a folder the walk could not list may hold a repository. Git finds one by the names it
+ * looks for, and those need no listing, so a folder that can be entered but not listed (mode 0311)
+ * can hide one. One that cannot be entered is as closed to git as to the check. A capture says
+ * what it could not list as a gap of its own.
+ */
+function mayHideRepository(dir: string, io: SurfaceReadContext): boolean {
+  if (io.plainDisk !== true) return false;
+  try {
+    io.lstat(dir);
+  } catch {
+    return false;
+  }
+  try {
+    io.lstat(join(dir, PROBE));
+    return true;
+  } catch (err) {
+    const code = (err as { code?: unknown }).code;
+    return code !== 'EACCES' && code !== 'EPERM' && code !== 'ENOTDIR';
+  }
 }
 
 /**
@@ -471,10 +529,12 @@ function nestedBareRepos(
   withRoot = false,
   folder = false,
   io: SurfaceReadContext = LEGACY_SURFACE_IO,
+  plat: NodeJS.Platform = process.platform,
 ): { hits: RepoExecHit[]; capped: boolean } {
   const hits: RepoExecHit[] = [];
-  // What `.git` files led to, so a repository with many worktrees is read for each of them once.
+  // The git folders whose config and hooks were read (by `homeHits`), and the hits already added.
   const judged = new Set<string>();
+  const seen = new Set<string>();
   const queue: string[] = [root];
   let visited = 0;
   for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
@@ -488,18 +548,27 @@ function nestedBareRepos(
         .filter((entry) => !io.skipDirectory?.(join(dir, entry.name)))
         .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     } catch {
+      if (mayHideRepository(dir, io))
+        addOnce(hits, seen, [
+          {
+            kind: 'nested-bare-repo',
+            file: labelOf(root, dir, io),
+            what: 'a folder the check could enter but not list, so a repository may be in it',
+          },
+        ]);
       continue;
     }
     // Links and other letter cases too: git opens `Objects` as `objects` on a disk that ignores case.
     const names = namesOf(entries);
     const isBare = looksLikeGitDir(new Set(names.keys()));
     if (isBare && (dir !== root || withRoot)) {
-      hits.push({
-        kind: 'nested-bare-repo',
-        file: labelOf(root, dir, io),
-        what: 'HEAD, objects, refs',
-      });
-      hits.push(...gitDirConfigHits(root, dir, names, io));
+      addOnce(hits, seen, [
+        { kind: 'nested-bare-repo', file: labelOf(root, dir, io), what: 'HEAD, objects, refs' },
+        ...gitDirConfigHits(root, dir, names, io),
+      ]);
+      // A `.git` folder as git makes it is also judged by what git would run from it.
+      if (folder && ordinaryGitFolder(dir, io))
+        addOnce(hits, seen, homeHits(root, gitHomeOf(dirname(dir), undefined), judged, plat, io));
       // The root is walked on: what is under it is all this check reads.
       if (dir !== root) continue;
     }
@@ -521,7 +590,7 @@ function nestedBareRepos(
       }
       if (folder && folded === '.git') {
         if (isDir) queue.push(join(dir, entry.name));
-        else addOnce(hits, judged, gitFileHits(root, join(dir, entry.name), io));
+        else addOnce(hits, seen, gitFileHits(root, join(dir, entry.name), judged, plat, io));
         continue;
       }
       if (!isDir || SKIP_DIRS.has(entry.name)) continue;
@@ -564,13 +633,15 @@ export function repoSurface(
     (io.gitMetadata === undefined && !io.exists(join(cwd, '.git')))
   )
     return { isRepo: false, preTrust: [], onOpen: [], capped: false };
-  const bare = nestedBareRepos(cwd, false, false, io);
+  const bare = nestedBareRepos(cwd, false, false, io, plat);
   // A linked worktree's or a submodule's `.git` is a file: git reads the config of the folder it
   // leads to, so that is what is read, once the file is shown to be git's own. A file that is not
   // stays unread as a config, which is reported.
   const own = io.gitMetadata === undefined ? linkedGit(join(cwd, '.git'), io) : undefined;
-  const home = gitHomeOf(cwd, own, io);
-  const configs = io.gitMetadata?.configs ?? home.configs;
+  const home = gitHomeOf(cwd, own);
+  // A `.git` that is neither a folder nor a verified file is reported once, as an unread `config`.
+  const reads = own !== undefined || isFolderAt(join(cwd, '.git'), io);
+  const configs = io.gitMetadata?.configs ?? [home.config, ...(reads ? [home.worktreeConfig] : [])];
   const hooks = io.gitMetadata?.hooks === undefined ? home.hooks : io.gitMetadata.hooks;
   const attributes = io.gitMetadata?.attributes ?? home.attributes;
   const all = [
