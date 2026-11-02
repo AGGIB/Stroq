@@ -146,6 +146,12 @@ const ADVERSARIAL: ReadonlyArray<readonly [string, Build]> = [
       `python3 -c 'import subprocess, os; env = os.environ.copy(); ${r('subprocess.run(["ls"], env=env); ')}'`,
   ],
   ['python decoders', (r) => `python3 -c 'import base64; ${r('print(base64.b64decode(x)); ')}'`],
+  // Where a decoding program's output goes is read from the stages after it and their redirects.
+  ['python decoder, stages after it', (r) => `python3 -c 'import base64' ${r('| head -1 ')}`],
+  ['python decoder, redirects', (r) => `python3 -c 'import base64' ${r('2>/dev/null ')}`],
+  ['python decoder, descriptor copies', (r) => `python3 -c 'import base64' ${r('2>&1 ')}`],
+  ['python decoder, sort options', (r) => `python3 -c 'import base64' | sort ${r('-r')}`],
+  ['python decoder, many commands', (r) => r(`python3 -c 'import base64'; `)],
   ['http://', (r) => `curl ${r('http://')}`],
   ['x@', (r) => `ssh ${r('x@')}`],
   ['semicolons', (r) => r(';')],

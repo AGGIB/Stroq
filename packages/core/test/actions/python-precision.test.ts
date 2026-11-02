@@ -171,6 +171,52 @@ describe('decoded data that can reach a place that runs it is encoded execution'
   });
 });
 
+describe('decoded data that leaves the program by its output', () => {
+  const printed = `python3 -c "import base64; print(base64.b64decode('ZWNobyBoaQ==').decode())"`;
+
+  it.each([
+    `${printed} | sh`,
+    `${printed} | bash`,
+    `${printed} | python3`,
+    `${printed} | xargs -I{} sh -c {}`,
+    `${printed} | tee x.sh`,
+    `${printed} | head -1 | sh`,
+    `${printed} > x.sh && sh x.sh`,
+    `${printed} >> ~/.bashrc`,
+    `${printed} | sort > out.txt`,
+    `${printed} | sort -o out.sh`,
+    `${printed} | uniq in out.sh`,
+    `${printed} | sponge x.sh`,
+    `${printed} | /tmp/head`,
+    `${printed} 2> err.sh`,
+    `${printed} &> out.sh`,
+    `${printed} >| out.sh`,
+    `sh -c "$(${printed})"`,
+    `eval "$(${printed})"`,
+    `bash <(${printed})`,
+    `v=$(${printed})`,
+    `bash -c '${printed.replaceAll("'", "'\\''")}'`,
+  ])('is encoded execution: %s', (command) => {
+    expect(denied(command), command).toBe(true);
+  });
+
+  it.each([
+    printed,
+    `${printed} 2>&1`,
+    `${printed} > /dev/null`,
+    `${printed} 2>/dev/null`,
+    `${printed} &>/dev/null`,
+    `${printed} | head -5`,
+    `${printed} | grep hi`,
+    `${printed} | wc -l`,
+    `${printed} | sort -rn | head -3`,
+    `${printed}; echo done`,
+    `cd /workspace/project && ${printed}`,
+  ])('is not, where nothing takes it: %s', (command) => {
+    expect(classes(command), command).toEqual([]);
+  });
+});
+
 describe('literal commands beside an import of the project', () => {
   it('is the commands it writes out: the SWE-Hero program', () => {
     expect(classes(SWE_HERO_DVC)).toEqual([]);

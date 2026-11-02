@@ -79,6 +79,11 @@ export interface PythonProcesses {
    * writes). A program that decodes and has nowhere to send the result but its own output is not opaque.
    */
   readonly opaque: boolean;
+  /**
+   * The program decodes data (`base64`, `binascii`) and is not opaque for it, since it has nowhere to send
+   * the result but its own output. Whether the output goes somewhere that runs it is for the caller to say.
+   */
+  readonly decodes: boolean;
   /** A string that is not a command the program starts holds a word that marks code: it may be run. */
   readonly hiddenPayload: boolean;
   /** The program imports a module that is not a known standard one (`KNOWN_MODULES`): what it does is not read. */
@@ -706,6 +711,7 @@ export function readPythonProcesses(program: string): PythonProcesses | null {
       reader.opaque ||
       rebound ||
       (names.decodes && (reader.processes.length > 0 || writes)),
+    decodes: names.decodes,
     hiddenPayload,
   };
 }

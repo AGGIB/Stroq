@@ -38,6 +38,10 @@ const STARTS_A_PROCESS =
   /(?:subprocess|popen|Popen|system|spawn|exec[lv]|fork|check_output|check_call|getoutput|startfile|pty)/;
 /** A redirect that gives a command input: `<`, `<<`, `<<<`, `<&`, `<>`, with or without a descriptor. */
 const INPUT_REDIRECT = /^\d*<(?:<<|<-|<|&|>)?/;
+/** `2>&1`, `>&2`, `1>&-`: output sent to another descriptor, not to a file. */
+const DESCRIPTOR_COPY = /^\d*>&\d*-?$/;
+/** `>x`, `2>>x`, `&>x`, `>|x`, with its target glued on or not. */
+const OUTPUT_REDIRECT = /^(?:\d*|&)>[>|]?(.*)$/;
 /**
  * The words of a stage beside its program that hold nothing to run: a name, a path, an option, an
  * assignment of a plain value, an output redirect. A stage with anything else beside its program
@@ -87,6 +91,75 @@ export function pythonCommandTexts(lexed: Lexed): string[] {
   return out;
 }
 
+/**
+ * A redirect of a stage's output to anything but `/dev/null` or another descriptor (`2>&1`): the file may be
+ * a script that is run next.
+ */
+function redirectsOutput(text: string): boolean {
+  const words = argv(text);
+  return words.some((word, i) => {
+    if (!word.redirect || INPUT_REDIRECT.test(word.value) || DESCRIPTOR_COPY.test(word.value))
+      return false;
+    const glued = OUTPUT_REDIRECT.exec(word.value)?.[1];
+    const target = glued !== undefined && glued !== '' ? glued : words[i + 1]?.value;
+    return target !== '/dev/null';
+  });
+}
+
+/**
+ * Whether what a stage prints may be taken by something that runs it or keeps it: it is read out of a
+ * substitution or a body (where its output goes is not kept), a stage after it is not known to only read,
+ * or the output of any stage from it on is written to a file.
+ */
+function outputLeaves(
+  textIndex: number,
+  pipeline: readonly Stage[],
+  at: number,
+  consumer: (command: string) => PipeConsumer,
+): boolean {
+  if (textIndex > 0) return true;
+  return pipeline
+    .slice(at)
+    .some(
+      (stage, i) =>
+        redirectsOutput(stage.text) ||
+        (i > 0 && !(consumer(stage.text) === 'none' && onlyFilters(stage.text))),
+    );
+}
+
+/**
+ * Programs that print what they filter and write no file of their own: not `tee`, `sponge`, `split`, which
+ * are as much readers as `head` is, nor `uniq`, which takes the file to write as an operand.
+ */
+const FILTERS: ReadonlySet<string> = new Set([
+  'head',
+  'tail',
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'wc',
+  'cut',
+  'tr',
+  'sort',
+  'cat',
+  'nl',
+  'fold',
+  'tac',
+  'rev',
+  'column',
+  'jq',
+]);
+const ASSIGNMENT_WORD = /^[A-Za-z_]\w*=/;
+
+/** The stage is one of `FILTERS`, by that name and with no option that names a file to write (`sort -o`). */
+function onlyFilters(text: string): boolean {
+  const words = argv(text).filter((word) => !word.redirect);
+  const first = words.find((word) => !ASSIGNMENT_WORD.test(word.value));
+  if (first === undefined || !FILTERS.has(first.value)) return false;
+  return !words.some((word) => /^-[A-Za-z]*o|^--output/.test(word.value) && first.value === 'sort');
+}
+
 /** Whether a stage is given input: a pipe into it, a here-document, or an input redirect. */
 function givenInput(stage: Stage): boolean {
   if (stage.piped || stage.heredoc !== null) return true;
@@ -128,7 +201,9 @@ export function readPythonStages(context: PythonStageContext): PythonStages {
     (process.stdin === 'inherit' && !input) ||
     (!MORE_THAN_ONE_COMMAND.test(process.command) && consumer(process.command) === 'none');
   stages.forEach((pipelines, textIndex) => {
-    for (const stage of pipelines.flat()) {
+    for (const [pipeline, at, stage] of pipelines.flatMap((p) =>
+      p.map((s, i) => [p, i, s] as const),
+    )) {
       const program = inlinePython(stage.text);
       if (program === undefined) continue;
       const seen = payload(stage.text);
@@ -156,6 +231,8 @@ export function readPythonStages(context: PythonStageContext): PythonStages {
         // the pattern would stop is the commands, and those are read here and judged as the commands they are.
         (seen && reading.unknownModules && reading.processes.length === 0) ||
         (reading.opaque && (reading.processes.length > 0 || seen)) ||
+        // What it decodes goes to its output; where that goes is known only when nothing takes it.
+        (reading.decodes && seen && outputLeaves(textIndex, pipeline, at, consumer)) ||
         !reading.processes.every((process) => readsOnly(process, input));
       if (notRead) {
         if (seen) signals.push(PAYLOAD);
