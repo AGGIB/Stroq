@@ -97,6 +97,10 @@ function buildKeyFileIndex(finder: KeyFinder, home: string | undefined): KeyFile
 export interface KeyFileUse {
   readonly place: Place;
   readonly keys: readonly number[];
+  /** What in the command linked it to the keys, when that is known: for the evidence. */
+  readonly how?: 'file' | 'folder' | 'pattern' | 'near' | 'environment';
+  /** The word of the command that named the file, folder or pattern. */
+  readonly word?: string;
 }
 
 /** A place cut short by a bound of the check: what it dropped may have sent the key. */
@@ -145,12 +149,17 @@ export function keyFileUses(
   for (const path of paths) {
     const use = fileUse(command, path, NO_KEY, where, LOOKS_ONLY);
     if (use !== null && use.place.tier !== 'seen')
-      uses.push({ place: use.place, keys: index.keysOf.get(path) ?? [] });
+      uses.push({
+        place: use.place,
+        keys: index.keysOf.get(path) ?? [],
+        ...(use.how === undefined ? {} : { how: use.how }),
+        ...(use.word === undefined || use.word === '' ? {} : { word: use.word }),
+      });
   }
   // Placed after what was read, so a key file a command did send is reported as sent.
   uses.push(...cut);
   if (index.environment.length === 0) return uses;
   const sent = environmentUse(command, where);
-  if (sent !== null) uses.push({ place: sent, keys: index.environment });
+  if (sent !== null) uses.push({ place: sent, keys: index.environment, how: 'environment' });
   return uses;
 }

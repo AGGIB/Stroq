@@ -19,6 +19,7 @@ import type {
   TranscriptText,
 } from '../replay/transcript.js';
 import { inBackground, shellCallFacts, toolCallFacts, type CallFacts } from './call-facts.js';
+import { evidenceFor, matchedForm } from './evidence.js';
 import { folderChanges } from './file-paths.js';
 import { createFollower, type CallSeen } from './followed.js';
 import { inputText } from './input-text.js';
@@ -27,7 +28,7 @@ import type { FoundKey, KeyFinder } from './keys.js';
 import { isHostShape, isProgramName, NAME_NOT_SHOWN } from './names.js';
 import { callCouldSend, laterCounter } from './later-commands.js';
 import { keyForms, shellJoined } from './needles.js';
-import type { Place, Push } from './place.js';
+import type { Evidence, Matched, Place, Push } from './place.js';
 import { farther, placeRank } from './place.js';
 import {
   changesRoutes,
@@ -72,6 +73,11 @@ export interface SessionContext extends WhereContext {
   readonly finder: KeyFinder;
   /** The home folder, for key files a report names from it (`~/.aws/credentials`). */
   readonly home?: string;
+  /**
+   * Keep, on each place that says a key was sent or may have been, the call's text with every key taken out
+   * and what linked the call to the key (`evidence.ts`). The card asks for it; `stroq sent` does not.
+   */
+  readonly evidence?: boolean;
 }
 
 export interface SessionAnalyzer {
@@ -206,7 +212,11 @@ function after(
 interface Held extends Sighting {
   readonly seq: number;
   readonly call?: string;
+  readonly evidence?: Evidence;
 }
+
+/** What a place that came of a file the AI wrote has for evidence: no call of its own to show. */
+const WRITTEN_FILE: Evidence = { text: '', matched: 'written-file' };
 
 /**
  * How far one call's derived places reached, farthest first: as one call's places are ranked
@@ -228,6 +238,15 @@ const MAX_FOLDERS = 64;
 /** Words that may make a call one that sends: an earlier call without one is not kept. */
 const SEND_HINT =
   /curl|wget|nc\b|ncat|netcat|socat|ssh|scp|sftp|rsync|ftp|telnet|https?:|\/dev\/|gh\b|git\b|aws|gsutil|rclone|mail|openssl|http|xh\b/i;
+
+/** How a call named a key file, as the evidence says it. */
+const EVIDENCE_OF_USE = {
+  file: 'file',
+  folder: 'folder',
+  pattern: 'pattern',
+  near: 'file',
+  environment: 'environment',
+} as const satisfies Record<string, Matched>;
 
 /** Routes of a key written into a file, whose file a later call may have sent or run. */
 const WRITTEN: ReadonlySet<string> = new Set(['write', 'write-script']);
@@ -268,11 +287,25 @@ export function analyzeSession(ctx: SessionContext): SessionAnalyzer {
     if (recordKeys !== null) for (const one of found) recordKeys.add(one.index);
   };
 
+  /** Whether a place is one the evidence is kept for: it says the key was sent, or may have been. */
+  const wantsEvidence = (place: Place): boolean =>
+    ctx.evidence === true && (place.tier === 'third_party' || place.tier === 'maybe');
+
+  /** The evidence of a call for a place, or none when it is not asked for or the place needs none. */
+  const evidenceOf = (
+    place: Place,
+    text: string,
+    matched: Matched,
+    word = '',
+  ): Evidence | undefined =>
+    wantsEvidence(place) ? evidenceFor(text, ctx.finder, matched, word) : undefined;
+
   const keep = (
     key: number,
     place: Place,
     item: { at: string; subagent?: string },
     call?: string,
+    evidence?: Evidence,
   ): number =>
     held.push({
       key,
@@ -282,6 +315,7 @@ export function analyzeSession(ctx: SessionContext): SessionAnalyzer {
       seq,
       ...(item.subagent === undefined ? {} : { subagent: item.subagent }),
       ...(call === undefined ? {} : { call }),
+      ...(evidence === undefined ? {} : { evidence }),
     }) - 1;
 
   /**
@@ -368,11 +402,15 @@ export function analyzeSession(ctx: SessionContext): SessionAnalyzer {
     /** A request after a call that may have changed where requests go went elsewhere. */
     const routed = (place: Place): Place => (reroute ? rerouted(place) : place);
     const indices = new Map<number, number>();
+    // A shell call's text is its command; any other call's is its fields, named, as they are searched.
+    const own = shell ? command : text;
+    const callText = rest === '' ? own : `${own}\n${rest}`;
     for (const one of found) {
       const place = routed(placeOfArgument(e.tool, e.input, one.key, ctx, rest));
       // A record of a kind no reader knows may be a call that sent it.
       const kept = e.unknownRecord === true ? farther(place, UNKNOWN_RECORD) : place;
-      indices.set(one.index, keep(one.index, kept, e, e.id));
+      const proof = evidenceOf(kept, callText, matchedForm(callText, one));
+      indices.set(one.index, keep(one.index, kept, e, e.id, proof));
     }
     followWrites(e, command, shell, found, indices, call);
     if (shell) {
@@ -530,7 +568,9 @@ export function analyzeSession(ctx: SessionContext): SessionAnalyzer {
       const uses = (t: string): boolean =>
         names.some((n) => t.includes(`$${n}`) || t.includes(`\${${n}`));
       for (const k of reached) {
-        const index = keep(k, place, e, e.id);
+        const name = names.find((n) => keyVariables.get(n)?.has(k)) ?? '';
+        const proof = evidenceOf(place, command, 'variable', name === '' ? '' : `$${name}`);
+        const index = keep(k, place, e, e.id, proof);
         if (place.tier !== 'third_party')
           followShell(index, k, shellWritesBy(command, uses, ctx), call);
       }
@@ -566,7 +606,11 @@ export function analyzeSession(ctx: SessionContext): SessionAnalyzer {
       for (const i of use.keys)
         if (!holding.has(i)) {
           holding.add(i);
-          keep(i, routed(use.place), e, e.id);
+          const place = routed(use.place);
+          const matched = use.how === undefined ? undefined : EVIDENCE_OF_USE[use.how];
+          const proof =
+            matched === undefined ? undefined : evidenceOf(place, command, matched, use.word ?? '');
+          keep(i, place, e, e.id, proof);
         }
   }
 
@@ -602,9 +646,13 @@ export function analyzeSession(ctx: SessionContext): SessionAnalyzer {
       settleRank(next) < settleRank(best) ? next : best,
     );
     const later = couldSend.after(s.seq, s.at);
+    // The call's own evidence goes with the call's own place; a place that came of a file the AI wrote has none.
+    const proof =
+      place === noted ? s.evidence : place === used || place === pushed ? WRITTEN_FILE : undefined;
+    const shown = scrubPlace(place, ctx.finder);
     return {
       key: s.key,
-      place: scrubPlace(place, ctx.finder),
+      place: proof !== undefined && wantsEvidence(place) ? { ...shown, evidence: proof } : shown,
       at: s.at,
       ...(s.subagent === undefined ? {} : { subagent: s.subagent }),
       ...(later > 0 ? { laterNetwork: later } : {}),

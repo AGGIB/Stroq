@@ -70,6 +70,7 @@ async function check(ref: SessionRef, digest: string): Promise<KeyAnswer | null>
     mcp: run.mcp,
     gitRemote: run.gitRemote,
     bytes: run.matcher,
+    evidence: true,
   });
   const found = scan.found[0];
   const searchCut = scan.searchCut - cutsBefore;

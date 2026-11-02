@@ -70,6 +70,41 @@ export type Via = 'variable' | 'environment' | 'folder' | 'pattern' | 'earlier-s
 export type Cut = 'variables' | 'key-files' | 'folders';
 
 /**
+ * What in a call linked it to a key, for the person who checks a place: the spelling of the key's value that
+ * the call holds (`value` as it is written, `value-json` JSON-escaped, `value-url` URL-encoded, `value-joined`
+ * with the quotes and backslashes of the shell taken out), the key's file (`file`), a folder it is in
+ * (`folder`) or a pattern that takes it in (`pattern`) named in the call's words, the environment the call
+ * printed (`environment`), a variable an earlier call put the key in (`variable`), or a file the AI wrote the
+ * key into that a later call used (`written-file`).
+ */
+export const MATCHED = [
+  'value',
+  'value-json',
+  'value-url',
+  'value-joined',
+  'file',
+  'folder',
+  'pattern',
+  'environment',
+  'variable',
+  'written-file',
+] as const;
+export type Matched = (typeof MATCHED)[number];
+
+/**
+ * The evidence for a place that says a key was sent, or may have been: the call's own text with every
+ * value of a traced key taken out (`[NAME]` in its place), cut around the first, and made safe to print;
+ * and what linked the call to the key. Never a value. Made only when a caller asks for it (the card does).
+ */
+export interface Evidence {
+  /** The masked text; empty when the call's text is not kept (a later call that used a written file). */
+  readonly text: string;
+  readonly matched: Matched;
+  /** The word of the call that named the key's file, folder or pattern, or the variable it used. */
+  readonly word?: string;
+}
+
+/**
  * What became of a file the AI wrote with the key: the command in it (`write-script`), the call
  * that later sent it or ran it (`write-sent`), or a push or publish it may have gone out with
  * (`write-push`).
@@ -126,6 +161,8 @@ export interface Place {
   readonly then?: Then;
   /** For `cut`: which bound of the check dropped what may have carried the key. */
   readonly cut?: Cut;
+  /** What the call said and how it was linked to the key, when asked for (`Evidence`). */
+  readonly evidence?: Evidence;
 }
 
 /** IPv4 in dotted form, each part 0-255. */

@@ -30,6 +30,8 @@ export interface ScanDeps {
   readonly spillBudget?: number;
   /** The matcher for these keys (`scanMatcher`), when one is kept between scans; else built here. */
   readonly bytes?: ByteMatcher;
+  /** Keep the evidence of each place that says a key was sent, or may have been (`evidence.ts`). */
+  readonly evidence?: boolean;
 }
 
 export interface ScanResult {
@@ -100,6 +102,7 @@ async function readSession(
     cwd: ref.cwd,
     gitRemote: deps.gitRemote,
     ...(deps.home === undefined ? {} : { home: deps.home }),
+    ...(deps.evidence === true ? { evidence: true } : {}),
   });
   if (ref.cursor !== undefined) {
     // Each row is one record: a key in a part of it no reader read (a prompt, a field) is maybe sent.

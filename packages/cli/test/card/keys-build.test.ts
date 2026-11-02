@@ -42,6 +42,13 @@ import {
  * session, the kept results, and what the card says when the time runs out. Every value is made up.
  */
 
+/** Findings as `stroq sent` makes them: the card's carry the call behind each place, `sent` does not. */
+const withoutEvidence = <F extends { readonly place: object }>(findings: readonly F[]): F[] =>
+  findings.map((f) => {
+    const { evidence: _evidence, ...place } = f.place as { evidence?: unknown };
+    return { ...f, place } as F;
+  });
+
 let m: Machine;
 beforeEach(() => {
   m = machine();
@@ -323,7 +330,13 @@ describe('the key check against the whole-run check of `stroq sent`', () => {
       'third_party',
       'third_party',
     ]);
-    expect(parts.findings).toEqual(whole.findings);
+    expect(withoutEvidence(parts.findings)).toEqual(whole.findings);
+    // The card keeps the call behind each place that says a key was sent; `stroq sent` does not.
+    expect(
+      parts.findings
+        .filter((f) => f.tier === 'third_party')
+        .every((f) => f.place.evidence !== undefined),
+    ).toBe(true);
     expect(parts.checked).toBe(listing.sessions.length);
   });
 });
@@ -383,7 +396,7 @@ describe('a canary found in the sessions, its file gone', () => {
       const done = await handleJob(job);
       keys.accept(index, done.kind === 'keys' ? done.answer : null);
     }
-    expect(keys.finish().findings).toEqual(whole.findings);
+    expect(withoutEvidence(keys.finish().findings)).toEqual(whole.findings);
   });
 
   it('changes what the cache is judged by, and is on disk by no value', async () => {

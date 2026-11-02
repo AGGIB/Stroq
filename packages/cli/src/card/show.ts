@@ -29,7 +29,7 @@ function rows(group: Moment['groups'][number]): string[] {
   const width = Math.min(MAX_LABEL, Math.max(0, ...labels.map((l) => l.length)));
   return group.rows.flatMap(([label, value], i) => {
     const head = `  ${(labels[i] ?? '').padEnd(width)}${width > 0 ? '  ' : ''}`;
-    return wrap(clean(value, 400), WIDTH, head);
+    return wrap(clean(value, 700), WIDTH, head);
   });
 }
 

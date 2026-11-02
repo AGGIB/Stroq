@@ -5,7 +5,7 @@
 // how many times. Nothing in it is a value or a hash of one. The file is read back through these
 // schemas and refused whole when it does not fit: a file somebody else put there is data to check.
 import { z } from 'zod';
-import type { Route, Tier } from '../sent/place.js';
+import { MATCHED, type Route, type Tier } from '../sent/place.js';
 import { MAX_TEXT } from './schema.js';
 
 const text = z.string().max(MAX_TEXT);
@@ -53,6 +53,17 @@ const route = z.enum(ROUTE_NAMES);
 
 const viaSchema = z.enum(['variable', 'environment', 'folder', 'pattern', 'earlier-step']);
 
+const matchedSchema = z.enum(MATCHED);
+
+/** The evidence of a place: the call's text with every key taken out, and what linked it (`sent/evidence.ts`). */
+const evidenceSchema = z
+  .object({
+    text: z.string().max(700),
+    matched: matchedSchema,
+    word: z.string().max(700).optional(),
+  })
+  .strict();
+
 const thenSchema = z
   .object({
     route,
@@ -80,6 +91,7 @@ const placeSchema = z
     service: text.optional(),
     then: thenSchema.optional(),
     cut: z.enum(['variables', 'key-files', 'folders']).optional(),
+    evidence: evidenceSchema.optional(),
   })
   .strict();
 

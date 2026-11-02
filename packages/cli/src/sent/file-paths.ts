@@ -115,17 +115,25 @@ function valueOf(word: Word): string {
   return operator === null ? word.value : word.value.slice(operator[0].length);
 }
 
-/** Whether a word written with quotes still has a wildcard outside them: `/w/"x"*.env`. */
+/**
+ * Whether a word written with quotes still has a wildcard outside them: `/w/"x"*.env`. What is quoted or
+ * escaped is not dropped but kept as a plain character: a `[` the shell reads as a bracket is closed by a
+ * later `]` even when every member between them is quoted (`.en["v"]`), and `[]` with nothing in it is not.
+ */
 const globOutsideQuotes = (raw: string | undefined): boolean => {
   if (raw === undefined) return false;
+  const PLAIN = 'a';
   let quote = '';
   let outside = '';
   for (let i = 0; i < raw.length; i += 1) {
     const c = raw[i] as string;
-    if (quote !== '') {
+    if (c === '\\' && quote !== "'") {
+      outside += PLAIN;
+      i += 1;
+    } else if (quote !== '') {
       if (c === quote) quote = '';
-    } else if (c === '\\') i += 1;
-    else if (c === "'" || c === '"') quote = c;
+      else outside += PLAIN;
+    } else if (c === "'" || c === '"') quote = c;
     else outside += c;
   }
   return SHELL_WILD.test(outside);
@@ -230,6 +238,24 @@ function candidatesOf(word: string): string[] {
   return [...found].filter(
     (c) => c !== '' && !c.includes('://') && (isAbsolutePath(c) || !c.includes(':')),
   );
+}
+
+/**
+ * Options that change the folder one command reads its relative paths in (`tar -C dir`, `--directory`,
+ * `git -C`, `--git-dir`, `--work-tree`, `make -C`, `npm --prefix`, `--cwd`, `zip -b`): the word after one
+ * is read in a folder the session never changed to. `-C` is any short option cluster that holds a `C`
+ * (`-xzC`, `-Cdir`), also where it is a count of lines (`grep -C 3`): then the folders are not all known,
+ * which only returns a word to naming a folder by the end of its path.
+ */
+const FOLDER_OPTION =
+  /^(?:--(?:directory|git-dir|work-tree|prefix|cwd|chdir|workdir|dir|project-dir|project-directory|root|manifest-path)|-chdir)(?:=|$)|^-[A-Za-z]*C|^(?:GIT_DIR|GIT_WORK_TREE)=/;
+const ZIP_TEMP = /^-b/;
+
+/** Whether a command has an option that changes the folder for the program it is given to. */
+export function changesFolderByOption(command: string): boolean {
+  const words = commandPathWords(command).map((w) => w.text);
+  if (words.some((w) => FOLDER_OPTION.test(w))) return true;
+  return words.includes('zip') && words.some((w) => ZIP_TEMP.test(w));
 }
 
 /** The folders a relative path is read against. */
@@ -406,7 +432,10 @@ export function namesFileHow(
       if (!pattern)
         found = better(
           found,
-          take(endNames(c, file, where.exact === true ? basesOf(where) : null)),
+          // A path from the home folder is not under the folders above: the end is all there is to go by.
+          take(
+            endNames(c, file, where.exact === true && !c.startsWith('~') ? basesOf(where) : null),
+          ),
         );
     }
     if (found?.kind === 'file' && found.sure && found.glob !== true) return found;

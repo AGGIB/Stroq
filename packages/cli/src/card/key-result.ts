@@ -17,7 +17,7 @@ import {
   type SessionKeySummary,
 } from '../sent/findings.js';
 import type { Key, KeyFinder } from '../sent/keys.js';
-import { placeRank, type Place } from '../sent/place.js';
+import { placeRank, type Evidence, type Place } from '../sent/place.js';
 import { printableFinding, printableId } from '../sent/run.js';
 import { mayHaveSent, type PlacedFinding } from './key-moments.js';
 import type { Scrub } from './scrub.js';
@@ -118,6 +118,20 @@ export function hitsOf(sightings: readonly Sighting[], idOf: readonly number[]):
 /** Whether a result is small enough to be kept. */
 export const fitsKept = (result: SessionKeys): boolean => result.hits.length <= MAX_HITS;
 
+/**
+ * The evidence of a place with a key taken out of it once more, here in the main thread, where the keys are
+ * known: a text that still holds a value after that is dropped, and the place keeps what linked the call.
+ */
+function sanitizeEvidence(evidence: Evidence, finder: KeyFinder, scrub: Scrub): Evidence {
+  const text = scrub(evidence.text);
+  const word = evidence.word === undefined ? undefined : scrub(evidence.word);
+  return {
+    text: finder.holds(text) ? '' : text,
+    matched: evidence.matched,
+    ...(word === undefined || finder.holds(word) ? {} : { word }),
+  };
+}
+
 /** Takes a key out of every string a result holds, and keeps an id only if it is safe to print. */
 export function sanitizeKeys(result: SessionKeys, finder: KeyFinder, scrub: Scrub): SessionKeys {
   const maybe = (text: string | undefined): string | undefined =>
@@ -133,6 +147,10 @@ export function sanitizeKeys(result: SessionKeys, finder: KeyFinder, scrub: Scru
       const detail = maybe(place.detail);
       const host = maybe(place.host);
       const service = maybe(place.service);
+      const evidence =
+        place.evidence === undefined
+          ? undefined
+          : sanitizeEvidence(place.evidence as Evidence, finder, scrub);
       return {
         ...hit,
         place: {
@@ -141,6 +159,7 @@ export function sanitizeKeys(result: SessionKeys, finder: KeyFinder, scrub: Scru
           ...(detail === undefined ? {} : { detail }),
           ...(host === undefined ? {} : { host }),
           ...(service === undefined ? {} : { service }),
+          ...(evidence === undefined ? {} : { evidence }),
           ...(then === undefined
             ? {}
             : {

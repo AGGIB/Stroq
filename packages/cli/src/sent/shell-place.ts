@@ -15,24 +15,18 @@
 // session's later calls are matched to the file by its name (`analyze.ts`).
 import { commandUrls, REDIRECT, type Word } from '@stroq/core';
 import {
+  changesFolderByOption,
   commandPathWords,
   folderChanges,
   namesFile,
   namesFileHow,
   type Folders,
 } from './file-paths.js';
+import { embedsPrinter, printsEnvironment } from './env-printers.js';
 import { plainText, valueHolds } from './key-text.js';
-import { shellJoined } from './needles.js';
+import { linkedByReach, type Link } from './link-by-reach.js';
 import { baseName, isAbsolutePath, joinPath, normalPath } from './path-form.js';
-import {
-  farther,
-  isThisMachine,
-  linkedPlace,
-  type KeyOf,
-  type Place,
-  type Route,
-  type Via,
-} from './place.js';
+import { farther, isThisMachine, type KeyOf, type Place, type Route } from './place.js';
 import {
   commandReading,
   countCut,
@@ -80,7 +74,7 @@ export interface ShellContext {
 /** The folders a command may run in: the session's, those it changed to, and its own `cd`s. */
 function foldersOf(command: string, ctx: ShellContext): Folders {
   const more = [...(ctx.cwds ?? [])];
-  let read = ctx.cwd !== null && ctx.foldersKnown !== false;
+  let read = ctx.cwd !== null && ctx.foldersKnown !== false && !changesFolderByOption(command);
   for (const base of [ctx.cwd, ...more].slice(0, 8)) {
     const changes = folderChanges(command, base, ctx.home);
     more.push(...changes.folders);
@@ -140,38 +134,6 @@ function wordsWritten(args: readonly Word[], body: string): string {
 }
 
 /**
- * How a text that is not a key's value links a stage to the key: a key file named, the environment
- * printed, a folder or a pattern that takes the file in. A stage that makes a request is a send of the key
- * only if the text reached it as data (`proof`): `named` is the stage naming it in its own words or being
- * piped what a stage that names it printed, `piped` is only the second (a printer that also sends is not
- * the data it sends), `none` is never (a folder or a pattern names no file). Any other request is the
- * key's maybe, linked by `via`.
- */
-export interface Link {
-  readonly via: Via;
-  readonly proof: 'named' | 'piped' | 'none';
-  /**
-   * For `piped`: whether a stage's own words embed the printer (`curl -d "$(env)"`, `--data @<(printenv)`),
-   * so that what it printed is the request's own data though no stage before it printed it.
-   */
-  readonly embeds?: (stageText: string) => boolean;
-}
-
-/** A place a stage gave, as a maybe unless the link is the proof of a send. */
-function linkedByReach(place: Place | null, reach: Reach, link: Link | undefined): Place | null {
-  if (place === null || link === undefined || place.tier !== 'third_party') return place;
-  const flows =
-    link.proof === 'named'
-      ? reach.direct || reach.piped
-      : link.proof === 'piped' &&
-        ((reach.piped && !reach.direct) ||
-          (reach.direct && link.embeds?.(reach.stage.text) === true));
-  if (flows) return place;
-  // Reached only because an earlier step held the text: it is no more than that.
-  return linkedPlace(place, reach.direct || reach.piped ? link.via : 'earlier-step');
-}
-
-/**
  * Every place a command put a text `holds` finds in it: each stage reached in each text the core
  * reads, then the plain cut for what sends. `sendOnly` places only what sends. Every file a stage
  * reached writes is kept with every text written to it.
@@ -216,7 +178,7 @@ function placeIn(
       any = true;
       const facts = reading.facts(reach.stage);
       if (word === '' && reach.direct) word = shownName(facts, holds);
-      add(linkedByReach(stagePlace(reach, reading, key, holds, sendOnly), reach, link));
+      add(linkedByReach(stagePlace(reach, reading, key, holds, sendOnly), reach, link, facts.name));
       // It names more files it may write than are read: one not read may be sent unseen.
       if (facts.writesCut === true) writtenCut = true;
       if (facts.writes.length === 0) continue;
@@ -238,7 +200,14 @@ function placeIn(
   // The plain cut, read for sends: a heredoc the lexer read wrongly can hide no request.
   for (const reach of reached(reading.plain, has, reading.facts)) {
     any = true;
-    add(linkedByReach(stagePlace(reach, reading, key, holds, true), reach, link));
+    add(
+      linkedByReach(
+        stagePlace(reach, reading, key, holds, true),
+        reach,
+        link,
+        reading.facts(reach.stage).name,
+      ),
+    );
   }
   const files = [...written].map(([path, text]) => ({ path, text }));
   return { place, written: files, word, reached: any, sent, writtenCut };
@@ -523,6 +492,10 @@ export interface FileUse {
   readonly place: Place;
   /** The command named a folder the file is in, not the file. */
   readonly folder?: boolean;
+  /** How the command named it: the file, a folder it is in, a pattern; `near` when it only ran beside a request. */
+  readonly how?: 'file' | 'folder' | 'pattern' | 'near';
+  /** The word of the command that named it. */
+  readonly word?: string;
 }
 
 /**
@@ -582,11 +555,13 @@ export function fileUse(
       (out) => namesFile(out, target, folders) === 'file',
     );
   };
+  // The word that named the file in the pass that placed it, for the evidence.
+  let namedBy = '';
   // `glob`: null any naming, false only a naming by the file's own name, true only a pattern.
   const namesAs =
     (kind: 'file' | 'folder', sure: boolean, glob: boolean | null) =>
-    (text: string): boolean =>
-      commandPathWords(text).some((w) => {
+    (text: string): boolean => {
+      const hit = commandPathWords(text).find((w) => {
         const named = namesFileHow(w, target, folders);
         return (
           named !== null &&
@@ -594,7 +569,11 @@ export function fileUse(
           named.sure === sure &&
           (glob === null || (named.glob === true) === glob)
         );
-      }) && !skips(text);
+      });
+      if (hit === undefined || skips(text)) return false;
+      if (namedBy === '') namedBy = hit.text;
+      return true;
+    };
   // Sure namings first, and of those the file by its own name. Whatever was named, a request that names
   // it in its own words, or is piped what a stage that names it printed (an archive of the folder, a
   // `cat` of the pattern), sent it. One that only ran after such a step is a maybe, linked to the key by
@@ -603,16 +582,48 @@ export function fileUse(
     readonly kind: 'file' | 'folder';
     readonly sure: boolean;
     readonly glob: boolean | null;
+    readonly how: 'file' | 'folder' | 'pattern';
     readonly link: Link;
   }[] = [
-    { kind: 'file', sure: true, glob: false, link: { via: 'pattern', proof: 'named' } },
-    { kind: 'file', sure: true, glob: true, link: { via: 'pattern', proof: 'named' } },
-    { kind: 'folder', sure: true, glob: null, link: { via: 'folder', proof: 'named' } },
-    { kind: 'file', sure: false, glob: null, link: { via: 'pattern', proof: 'named' } },
-    { kind: 'folder', sure: false, glob: null, link: { via: 'folder', proof: 'named' } },
+    {
+      kind: 'file',
+      sure: true,
+      glob: false,
+      how: 'file',
+      link: { via: 'pattern', proof: 'named' },
+    },
+    {
+      kind: 'file',
+      sure: true,
+      glob: true,
+      how: 'pattern',
+      link: { via: 'pattern', proof: 'named' },
+    },
+    {
+      kind: 'folder',
+      sure: true,
+      glob: null,
+      how: 'folder',
+      link: { via: 'folder', proof: 'named' },
+    },
+    {
+      kind: 'file',
+      sure: false,
+      glob: null,
+      how: 'pattern',
+      link: { via: 'pattern', proof: 'named' },
+    },
+    {
+      kind: 'folder',
+      sure: false,
+      glob: null,
+      how: 'folder',
+      link: { via: 'folder', proof: 'named' },
+    },
   ];
-  for (const { kind, sure, glob, link } of passes) {
+  for (const { kind, sure, glob, how, link } of passes) {
     if (!kinds.has(sure ? kind : `${kind}?`)) continue;
+    namedBy = '';
     const { place } = placeIn(
       reading,
       namesAs(kind, sure, glob),
@@ -622,13 +633,22 @@ export function fileUse(
       link,
     );
     if (place !== null && place.tier !== 'seen')
-      return { place: sure ? place : atMostMaybe(place), folder: kind === 'folder' };
+      return {
+        place: sure ? place : atMostMaybe(place),
+        folder: kind === 'folder',
+        how,
+        word: namedBy,
+      };
   }
   // A command that names the file and makes a request the file was not seen to reach (`find dir
   // -exec curl -T {} …`, `xargs`) may have sent it: as a key beside a request is.
   const near = wholeCommand(reading, '', false);
   return near !== null && near.route === 'command-near'
-    ? { place: atMostMaybe(near), folder: !kinds.has('file') && !kinds.has('file?') }
+    ? {
+        place: atMostMaybe(near),
+        folder: !kinds.has('file') && !kinds.has('file?'),
+        how: 'near',
+      }
     : null;
 }
 
@@ -636,88 +656,6 @@ const NONE: ReadonlySet<string> = new Set();
 
 /** No key: a use of a key file is placed for every key in it, whichever service issued it. */
 export const NO_KEY: KeyOf = { name: '', source: '', value: '' };
-
-/** Words that print the environment when given nothing else: `env`, `printenv`, `export -p`. */
-const ENV_PRINTERS: ReadonlySet<string> = new Set([
-  'env',
-  'printenv',
-  'set',
-  'export',
-  'declare',
-  'typeset',
-]);
-
-/**
- * `environ` and `environb` in the spellings a script has them (`os.environ`, `os.environb`, `__environ`,
- * `/proc/self/environ`): not `environment`, which is a part of many addresses and sentences.
- */
-const ENVIRON = /environb?(?![a-z])/i;
-
-/** Whether a stage prints the environment, or reads a process's (`/proc/self/environ`, `os.environ`). */
-function printsEnvironment(text: string): boolean {
-  if (ENVIRON.test(text)) return true;
-  const words = joinedWords(text);
-  const program = (words[0] ?? '').replace(/^.*\//, '');
-  return ENV_PRINTERS.has(program) && words.slice(1).every((w) => /^-[pxi0u]*$/.test(w));
-}
-
-/**
- * The inner texts of the substitutions in a stage: `$(…)`, `<(…)`, `>(…)` and backticks. None in single
- * quotes. In double quotes a single quote is a plain character, `$(` and backticks still run, and `<(` and
- * `>(` do not.
- */
-function substitutions(text: string): string[] {
-  const out: string[] = [];
-  let quote: '' | "'" | '"' = '';
-  for (let i = 0; i < text.length; i += 1) {
-    const c = text[i] as string;
-    if (quote === "'") {
-      if (c === "'") quote = '';
-      continue;
-    }
-    if (c === '\\') {
-      i += 1;
-      continue;
-    }
-    if (c === '"') {
-      quote = quote === '"' ? '' : '"';
-      continue;
-    }
-    if (c === "'") {
-      if (quote === '') quote = "'";
-      continue;
-    }
-    if (c === '`') {
-      const end = text.indexOf('`', i + 1);
-      if (end < 0) break;
-      out.push(text.slice(i + 1, end));
-      i = end;
-    } else if ((c === '$' || (quote === '' && (c === '<' || c === '>'))) && text[i + 1] === '(') {
-      let depth = 1;
-      let j = i + 2;
-      for (; j < text.length && depth > 0; j += 1) {
-        if (text[j] === '(') depth += 1;
-        else if (text[j] === ')') depth -= 1;
-      }
-      out.push(text.slice(i + 2, depth === 0 ? j - 1 : j));
-      i += 1;
-    }
-  }
-  return out;
-}
-
-/**
- * Whether a stage's own words embed a printer of the environment (`curl -d "$(env)"`, `--data
- * @<(printenv)`, `wget --post-data="$(set)"`, a here-string of `$(env)`): what it printed is the
- * request's own data, though no stage before it printed it.
- */
-const embedsPrinter = (text: string): boolean => substitutions(text).some(printsEnvironment);
-
-const joinedWords = (text: string): string[] =>
-  shellJoined(text)
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w !== '');
 
 /**
  * Where a command sent the environment it printed (`env | curl -d @- …`, `printenv | nc …`): a

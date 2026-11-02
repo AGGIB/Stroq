@@ -6,28 +6,12 @@
 // string any value it holds (in any of the spellings the key check looks for), and whatever has the
 // shape of a provider's token. What is kept never holds a key's value.
 import type { KeyFinder } from '../sent/keys.js';
+import { redactTokens } from '../sent/token-shapes.js';
 import type { SessionSummary, ToldMoment } from './schema.js';
 
 export type Scrub = (text: string) => string;
 
 const MARK = '[key]';
-
-/**
- * The shapes of well-known tokens. Each is a literal prefix and a run of its characters, so each is read
- * in one pass over the text, however the text is built.
- */
-const TOKEN_SHAPES: readonly RegExp[] = [
-  /\bsk-[A-Za-z0-9_-]{16,}/g,
-  /\bsk_(?:live|test)_[A-Za-z0-9]{12,}/g,
-  /\bAKIA[0-9A-Z]{16}\b/g,
-  /\b(?:ghp|gho|ghu|ghs|ghr)_[A-Za-z0-9]{20,}/g,
-  /\bgithub_pat_[A-Za-z0-9_]{20,}/g,
-  /\bxox[abprs]-[A-Za-z0-9-]{10,}/g,
-  /\bglpat-[A-Za-z0-9_-]{15,}/g,
-  /\bAIza[0-9A-Za-z_-]{30,}/g,
-  /\bstroq_attack_[0-9a-f]{6,}/g,
-  /-----BEGIN [A-Z ]{0,30}PRIVATE KEY-----/g,
-];
 
 /**
  * A function that takes out of a text every key `finder` holds, in every spelling it has there, and
@@ -45,8 +29,7 @@ export function scrubber(finder: KeyFinder): Scrub {
       );
       for (const form of forms) out = out.split(form).join(MARK);
     }
-    for (const shape of TOKEN_SHAPES) out = out.replace(shape, MARK);
-    return out;
+    return redactTokens(out, MARK);
   };
 }
 

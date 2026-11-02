@@ -11,6 +11,7 @@
 import { compareFindings, type Finding } from '../sent/findings.js';
 import { describePlace, doLine, when } from '../sent/phrases.js';
 import type { Place } from '../sent/place.js';
+import { evidenceGroups } from './key-evidence.js';
 import { isAgent, sessionRows, withTranscript, type SessionPlace } from './moment-parts.js';
 import type { Moment } from './schema.js';
 import { clean, plural, shortPath } from './text.js';
@@ -124,6 +125,7 @@ function moment(
     ...(session === null ? {} : { session }),
     groups: [
       ...what,
+      ...evidenceGroups(group, home),
       ...(session === null
         ? []
         : [{ title: 'Where to find it', rows: sessionRows(session, home) }]),
