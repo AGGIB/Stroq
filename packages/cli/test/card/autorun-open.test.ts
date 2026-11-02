@@ -17,6 +17,9 @@ describe('runsOnOpen: what the card counts as running when an agent opens a fold
     for (const what of [
       'post-checkout',
       'post-merge',
+      'pre-auto-gc',
+      'push-to-checkout',
+      'a-hook-git-does-not-have',
       'reference-transaction',
       'fsmonitor-watchman',
       '3 more hook files, which were not read',

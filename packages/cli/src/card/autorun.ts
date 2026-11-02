@@ -27,7 +27,8 @@ export interface AutorunRepo {
 const MAX_ITEMS = 5;
 
 /**
- * Hooks git runs only when someone commits, pushes, rebases or applies a patch. `inspect` still
+ * Hooks git runs only when someone commits, pushes, rebases or applies a patch. `pre-auto-gc` is not
+ * one of them: `git gc --auto` runs after fetches, merges and other routine commands. `inspect` still
  * reports them (in a downloaded archive they run on the next such command), but the card's line is
  * "runs code as soon as an agent opens it", which they do not.
  */
@@ -43,8 +44,6 @@ const LATER_HOOKS: ReadonlySet<string> = new Set([
   'pre-rebase',
   'post-rewrite',
   'pre-push',
-  'push-to-checkout',
-  'pre-auto-gc',
   'sendemail-validate',
 ]);
 
