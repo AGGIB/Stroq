@@ -19,10 +19,9 @@ interface Request {
   readonly id: number;
   readonly job: CardJob;
 }
-interface Reply {
-  readonly id: number;
-  readonly result: CardResult;
-}
+type Reply =
+  | { readonly id: number; readonly result: CardResult }
+  | { readonly id: number; readonly started: true };
 
 /** Whether threads can be started from this file: only the built bundle can. */
 export const canUseThreads = (): boolean =>
@@ -36,6 +35,7 @@ export function threadChannel(): Channel<CardJob, CardResult> {
     resourceLimits: { maxOldGenerationSizeMb: WORKER_HEAP_MB },
   });
   let failure: (reason: string) => void = () => undefined;
+  let began: (id: number) => void = () => undefined;
   let dead = false;
   const lose = (reason: string): void => {
     if (dead) return;
@@ -47,10 +47,16 @@ export function threadChannel(): Channel<CardJob, CardResult> {
   return {
     send: (id, job) => worker.postMessage({ id, job } satisfies Request),
     onMessage: (callback) => {
-      worker.on('message', (reply: Reply) => callback(reply.id, reply.result));
+      worker.on('message', (reply: Reply) => {
+        if ('started' in reply) began(reply.id);
+        else callback(reply.id, reply.result);
+      });
     },
     onFailure: (callback) => {
       failure = callback;
+    },
+    onStart: (callback) => {
+      began = callback;
     },
     close: async () => {
       dead = true;
@@ -66,18 +72,23 @@ export function threadChannel(): Channel<CardJob, CardResult> {
  */
 export function inProcessChannel(): Channel<CardJob, CardResult> {
   let message: (id: number, result: CardResult) => void = () => undefined;
+  let began: (id: number) => void = () => undefined;
   let closed = false;
   let chain: Promise<void> = Promise.resolve();
   return {
     send: (id, job) => {
       chain = chain.then(async () => {
         if (closed) return;
+        began(id);
         const result = await handleJob(job);
         if (!closed) message(id, result);
       });
     },
     onMessage: (callback) => {
       message = callback;
+    },
+    onStart: (callback) => {
+      began = callback;
     },
     onFailure: () => undefined,
     close: () => {
@@ -102,8 +113,13 @@ const isWorkerStart = (): boolean =>
 if (isWorkerStart() && parentPort !== null) {
   const port = parentPort;
   registerKeyIndex((workerData as { index?: RegisteredIndex | null }).index ?? null);
+  // One job at a time, in the order sent, and each says when it begins: a job that is only waiting
+  // behind a slow one is not the slow one, and the pool can tell them apart when the time is up.
+  let chain: Promise<void> = Promise.resolve();
   port.on('message', (request: Request) => {
-    void handleJob(request.job).then((result) => {
+    chain = chain.then(async () => {
+      port.postMessage({ id: request.id, started: true } satisfies Reply);
+      const result = await handleJob(request.job);
       port.postMessage({ id: request.id, result } satisfies Reply);
     });
   });

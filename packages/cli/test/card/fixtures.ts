@@ -23,6 +23,7 @@ export function card(over: Partial<CardData> = {}): CardData {
       checked: 1_756,
       fromCache: 0,
       notChecked: 0,
+      tooSlow: 0,
       tooLarge: 0,
       unreadable: 0,
       older: 12,

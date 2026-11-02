@@ -37,6 +37,37 @@ function inProcess<J, R>(
   };
 }
 
+/** A worker that does one job at a time and says when it begins each, as the card's worker does. */
+function serial<J, R>(run: (job: J) => Promise<R>): () => Channel<J, R> {
+  return () => {
+    let message: (id: number, result: R) => void = () => undefined;
+    let began: (id: number) => void = () => undefined;
+    let closed = false;
+    let chain: Promise<void> = Promise.resolve();
+    return {
+      send(id, job) {
+        chain = chain.then(async () => {
+          if (closed) return;
+          began(id);
+          const result = await run(job);
+          if (!closed) message(id, result);
+        });
+      },
+      onMessage: (callback) => {
+        message = callback;
+      },
+      onStart: (callback) => {
+        began = callback;
+      },
+      onFailure: () => undefined,
+      close: () => {
+        closed = true;
+        return Promise.resolve();
+      },
+    };
+  };
+}
+
 describe('runPool', () => {
   it('gives the results in the order of the jobs, whatever finishes first', async () => {
     const jobs = [30, 1, 20, 2, 10, 3, 5];
@@ -138,5 +169,43 @@ describe('runPool', () => {
     expect(lost.length).toBeGreaterThan(1);
     expect(outcome.results.every((r) => r === undefined)).toBe(true);
     expect(outcome.failed.length + outcome.notStarted.length).toBe(8);
+  });
+
+  it('says which of the jobs in flight had begun when the time was up, and which only waited', async () => {
+    // One worker holding two: the first never ends, the second waits behind it.
+    const outcome = await runPool<number, number>([0, 1, 2, 3], {
+      size: 1,
+      depth: 2,
+      stopStartingAfterMs: 30,
+      graceMs: 30,
+      open: serial((n: number) =>
+        n === 0 ? new Promise<number>(() => undefined) : Promise.resolve(n),
+      ),
+    });
+    expect(outcome.unfinished).toEqual([0, 1]);
+    expect(outcome.ran).toEqual([0]);
+    expect(outcome.notStarted).toEqual([2, 3]);
+  });
+
+  it('blames no job when the worker does not say what it began', async () => {
+    const outcome = await runPool<number, number>([0, 1], {
+      size: 1,
+      depth: 2,
+      stopStartingAfterMs: 30,
+      graceMs: 30,
+      open: inProcess((n: number) => new Promise<number>(() => void n)),
+    });
+    expect(outcome.unfinished).toEqual([0, 1]);
+    expect(outcome.ran).toEqual([]);
+  });
+
+  it('does not count a job that finished as one that ran out of time', async () => {
+    const outcome = await runPool<number, number>([0, 1, 2], {
+      size: 1,
+      depth: 2,
+      open: serial((n: number) => Promise.resolve(n)),
+    });
+    expect(outcome.ran).toEqual([]);
+    expect(outcome.unfinished).toEqual([]);
   });
 });

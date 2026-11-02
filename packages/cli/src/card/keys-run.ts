@@ -101,7 +101,9 @@ export function startKeys(env: KeysEnv, sessions: readonly WindowSession[]): Key
   const digest = indexDigest(index, salt);
   const kept = entriesUnder(cache, digest);
   registerKeyIndex({ digest, data: index.data });
-  const stale = cache.digest !== null && cache.digest !== digest;
+  // No file yet, or one made under other keys: write it, if only to keep the salt (the digest is a
+  // stamp other files are kept under, and a new salt each run would be a new digest each run).
+  const rewrite = cache.salt === null || cache.digest !== digest;
   return new Run({
     env,
     sessions,
@@ -112,7 +114,7 @@ export function startKeys(env: KeysEnv, sessions: readonly WindowSession[]): Key
     salt,
     digest,
     kept,
-    stale,
+    rewrite,
     checkable,
     notes,
   });
@@ -164,8 +166,8 @@ interface RunParts {
   readonly salt: string;
   readonly digest: string;
   readonly kept: ReadonlyMap<string, KeyCacheEntry>;
-  /** What was kept was made under other keys: it is dropped, and the file is rewritten without it. */
-  readonly stale: boolean;
+  /** There is no kept file, or it was made under other keys: it is written (without what was stale). */
+  readonly rewrite: boolean;
   readonly checkable: readonly boolean[];
   readonly notes: CanaryNotes;
 }
@@ -256,7 +258,7 @@ class Run implements KeysRun {
 
   /** Keeps what was kept and what was just made complete; false when it could not be written. */
   private save(): boolean {
-    if (this.fresh.size === 0 && !this.p.notes.changed() && !this.p.stale) return true;
+    if (this.fresh.size === 0 && !this.p.notes.changed() && !this.p.rewrite) return true;
     const entries = new Map(this.p.kept);
     for (const [i, result] of this.fresh) {
       const s = this.p.sessions[i] as WindowSession;

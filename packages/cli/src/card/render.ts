@@ -84,6 +84,8 @@ function notes(data: CardData): string[] {
     out.push(
       `Checked ${num(k.checked)} of ${num(k.found)} sessions, newest first; run again to check the rest.`,
     );
+  if (k.tooSlow > 0)
+    out.push(`${plural(k.tooSlow, 'session', 'sessions')} could not be checked in time.`);
   if (k.tooLarge > 0)
     out.push(`${plural(k.tooLarge, 'session was', 'sessions were')} too large to check.`);
   if (k.unreadable > 0)

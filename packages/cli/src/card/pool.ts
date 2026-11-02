@@ -13,6 +13,11 @@ export interface Channel<J, R> {
   onMessage(callback: (id: number, result: R) => void): void;
   /** The worker died (an error, an exit): every job it held is lost. */
   onFailure(callback: (reason: string) => void): void;
+  /**
+   * The worker began a job it was sent (not merely holds it). A channel that does not say has no job
+   * known to be running, so none is blamed when the time runs out.
+   */
+  onStart?(callback: (id: number) => void): void;
   close(): Promise<void>;
 }
 
@@ -38,6 +43,8 @@ export interface PoolOutcome<R> {
   readonly notStarted: readonly number[];
   /** Jobs a worker had when the time was up and did not finish. */
   readonly unfinished: readonly number[];
+  /** Of those, the ones the worker had begun: the others were only waiting behind them. */
+  readonly ran: readonly number[];
 }
 
 const DEFAULT_DEPTH = 2;
@@ -47,6 +54,8 @@ const MAX_REPLACEMENTS = 3;
 interface Slot<J, R> {
   readonly channel: Channel<J, R>;
   readonly held: Set<number>;
+  /** Held jobs the worker has begun. */
+  readonly running: Set<number>;
   alive: boolean;
 }
 
@@ -71,9 +80,10 @@ export function runPool<J, R>(
       finished = true;
       for (const timer of timers) clearTimeout(timer);
       const unfinished = slots.flatMap((s) => [...s.held]).sort((a, b) => a - b);
+      const ran = slots.flatMap((s) => [...s.running]).sort((a, b) => a - b);
       const notStarted = [...queue];
       void Promise.all(slots.map((s) => s.channel.close().catch(() => 0))).then(() =>
-        resolve({ results, failed: failed.sort((a, b) => a - b), notStarted, unfinished }),
+        resolve({ results, failed: failed.sort((a, b) => a - b), notStarted, unfinished, ran }),
       );
     };
 
@@ -91,10 +101,14 @@ export function runPool<J, R>(
 
     const add = (): void => {
       const channel = options.open();
-      const slot: Slot<J, R> = { channel, held: new Set(), alive: true };
+      const slot: Slot<J, R> = { channel, held: new Set(), running: new Set(), alive: true };
       slots.push(slot);
+      channel.onStart?.((id) => {
+        if (!finished && slot.held.has(id)) slot.running.add(id);
+      });
       channel.onMessage((id, result) => {
         if (finished || !slot.held.delete(id)) return;
+        slot.running.delete(id);
         results[id] = result;
         options.onResult?.(id, result);
         feed(slot);
@@ -104,6 +118,7 @@ export function runPool<J, R>(
         slot.alive = false;
         failed.push(...slot.held);
         slot.held.clear();
+        slot.running.clear();
         options.onWorkerLost?.(reason);
         if (replacements < MAX_REPLACEMENTS && !stopped) {
           replacements += 1;

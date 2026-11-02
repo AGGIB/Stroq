@@ -29,6 +29,11 @@ export interface CardCoverage {
   readonly fromCache: number;
   /** Not checked because the time ran out, newest first. */
   readonly notChecked: number;
+  /**
+   * Whose replay was cut off by the time limit, now or in an earlier run on the same file, and is not
+   * waited for again until the file changes (or a run is given more time).
+   */
+  readonly tooSlow: number;
   /** Past the size the card replays. */
   readonly tooLarge: number;
   /** Could not be read, or the worker that held them died. */

@@ -18,7 +18,12 @@ import { runPool, type Channel } from './pool.js';
 import type { AutorunResult } from './autorun.js';
 import { startKeys, type KeyOutcome } from './keys-run.js';
 import { scrubSummary } from './scrub.js';
-import { lookupSummary, saveReplays, type ReplayCacheKeys } from './replay-cache.js';
+import {
+  lookupSummary,
+  lookupUnfinished,
+  saveReplays,
+  type ReplayCacheKeys,
+} from './replay-cache.js';
 import type { SessionSummary } from './schema.js';
 import { readSessionCache } from './store.js';
 import { isTooLarge, listWindow, windowStart, type WindowSession } from './window.js';
@@ -27,6 +32,25 @@ import { openChannel } from './worker.js';
 
 /** After this long no job is started (the card should answer in about this time on a cold machine). */
 export const BUDGET_MS = 25_000;
+const MIN_BUDGET_MS = 200;
+const MAX_BUDGET_MS = 600_000;
+
+/** `named` as whole milliseconds from `MIN_BUDGET_MS` to `MAX_BUDGET_MS`, or null when it is not. */
+function millisFrom(named: string | undefined): number | null {
+  if (named === undefined || !/^\d{1,7}$/.test(named)) return null;
+  const ms = Number(named);
+  return ms >= MIN_BUDGET_MS && ms <= MAX_BUDGET_MS ? ms : null;
+}
+
+/** How long jobs may start: `STROQ_CARD_BUDGET_MS` (200 to 600000) when it is set, for measuring. */
+export const defaultBudgetMs = (
+  named: string | undefined = process.env['STROQ_CARD_BUDGET_MS'],
+): number => millisFrom(named) ?? BUDGET_MS;
+
+/** How long a job already started may go on after that: `STROQ_CARD_GRACE_MS`, else the pool's own. */
+export const defaultGraceMs = (
+  named: string | undefined = process.env['STROQ_CARD_GRACE_MS'],
+): number | undefined => millisFrom(named) ?? undefined;
 /** The most session folders looked at for code that runs on open. */
 export const MAX_FOLDERS = 150;
 /** Left for the folder check after the budget: it stops starting folders a little before the end. */
@@ -96,6 +120,7 @@ interface Gathered {
   readonly fromCache: number;
   readonly replayed: number;
   readonly notChecked: number;
+  readonly tooSlow: number;
   readonly unreadable: number;
   readonly keys: KeyOutcome;
   readonly folders: AutorunResult;
@@ -104,7 +129,8 @@ interface Gathered {
 
 export async function buildCard(days: number, run: BuildEnv): Promise<CardData> {
   const started = Date.now();
-  const budget = run.budgetMs ?? BUDGET_MS;
+  const budget = run.budgetMs ?? defaultBudgetMs();
+  const grace = run.graceMs ?? defaultGraceMs();
   const listing = await listWindow(run.home, run.env, days, run.now);
   const since = windowStart(days, run.now);
   const sessions = listing.sessions;
@@ -138,6 +164,12 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
   );
   const fromCache = summaries.filter((s) => s !== undefined).length;
   const tooLarge = sessions.filter((s, i) => summaries[i] === undefined && isTooLarge(s)).length;
+  // Replays an earlier run gave up on for want of time, for these exact files: not waited for again.
+  const tooSlow = new Set<number>();
+  sessions.forEach((s, i) => {
+    if (summaries[i] === undefined && !isTooLarge(s) && lookupUnfinished(cache, s, kept, budget))
+      tooSlow.add(i);
+  });
 
   const { dirs, total: folderTotal } = sessionFolders(sessions, run.home);
   const jobs: CardJob[] = [];
@@ -149,7 +181,7 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
   // Newest first, a session's replay and then its key check: when the time is up, both halves of the
   // card stop at about the same session.
   sessions.forEach((session, index) => {
-    if (summaries[index] === undefined && !isTooLarge(session)) {
+    if (summaries[index] === undefined && !isTooLarge(session) && !tooSlow.has(index)) {
       jobs.push({ kind: 'session', agent: session.agent, path: session.path });
       kinds.push({ session: index });
     }
@@ -172,7 +204,7 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
     size: workers,
     open: run.open ?? openChannel,
     stopStartingAfterMs: budget,
-    ...(run.graceMs === undefined ? {} : { graceMs: run.graceMs }),
+    ...(grace === undefined ? {} : { graceMs: grace }),
     onResult: (job, result) => {
       const kind = kinds[job];
       if (result.kind === 'repos') folders = result.result;
@@ -201,7 +233,13 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
   };
   const replays = (list: readonly number[]): number[] =>
     list.map(replayJob).filter((at): at is number => at !== null);
-  const notChecked = replays([...outcome.notStarted, ...outcome.unfinished]).length;
+  // A replay a worker had begun and did not finish is the one that ran out the time; those held behind
+  // it were only waiting, and are tried again next run. The first is kept as unfinished for this file.
+  const cutOff = new Map<number, number>();
+  for (const at of replays(outcome.ran)) cutOff.set(at, budget);
+  for (const at of cutOff.keys()) tooSlow.add(at);
+  const waiting = outcome.unfinished.filter((job) => !outcome.ran.includes(job));
+  const notChecked = replays([...outcome.notStarted, ...waiting]).length;
   for (const at of replays(outcome.failed)) unreadable.add(at);
   for (const job of outcome.failed) {
     const at = keyJob(job);
@@ -213,8 +251,7 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
     (lastKeyAt === 0 ? keysReadyAt : lastKeyAt) - started + (Date.now() - mergeStarted);
   for (const at of keyOutcome.unreadable) unreadable.add(at);
   const cacheSaved =
-    saveReplays(run.stroqHome, cache, kept, { sessions, fresh, cutOff: new Map() }) &&
-    keyOutcome.saved;
+    saveReplays(run.stroqHome, cache, kept, { sessions, fresh, cutOff }) && keyOutcome.saved;
   return assemble(
     days,
     run,
@@ -223,6 +260,7 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
       fromCache,
       replayed: fresh.size,
       notChecked,
+      tooSlow: tooSlow.size,
       unreadable: unreadable.size,
       keys: keyOutcome,
       folders,
@@ -303,6 +341,7 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
       checked: counted.length,
       fromCache: got.fromCache,
       notChecked: got.notChecked,
+      tooSlow: got.tooSlow,
       tooLarge: ctx.tooLarge,
       unreadable: got.unreadable,
       older: ctx.listing.older,
