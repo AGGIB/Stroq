@@ -122,6 +122,9 @@ const notOwnHook =
 
 /** Whether a finding runs when an agent opens the folder, rather than when it later commits or pushes. */
 export function runsOnOpen(hit: Pick<RepoExecHit, 'kind' | 'what' | 'hooksJudged'>): boolean {
+  // A bare repository on its own runs nothing: what its config or hooks would make git run is judged and
+  // counted as findings of their own. `inspect` still reports it for being there.
+  if (hit.kind === 'nested-bare-repo') return false;
   if (hit.kind === 'git-hook-routine') {
     const name = hit.what.split(',')[0]?.trim() ?? '';
     return !LATER_HOOKS.has(name);

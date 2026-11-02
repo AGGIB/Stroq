@@ -36,6 +36,7 @@ describe('runsOnOpen: what the card counts as running when an agent opens a fold
     expect(runsOnOpen({ kind: 'git-config-exec', what: 'core.hookspath' })).toBe(true);
     expect(runsOnOpen({ kind: 'git-config-exec', what: 'core.fsmonitor' })).toBe(true);
     expect(runsOnOpen({ kind: 'git-config-exec', what: 'lfs.customtransfer.x.path' })).toBe(true);
-    expect(runsOnOpen({ kind: 'nested-bare-repo', what: 'x.git' })).toBe(true);
+    // A bare repository on its own runs nothing; its config and hooks are judged as findings of their own.
+    expect(runsOnOpen({ kind: 'nested-bare-repo', what: 'x.git' })).toBe(false);
   });
 });
