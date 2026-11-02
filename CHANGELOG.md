@@ -26,6 +26,10 @@ Nine commands left the CLI. Typing one prints a single line that says it was rem
 
 Older versions of Stroq stay gated: an agent still cannot run `npx @stroq/cli@<older version> add`, `harden apply`, `task` or `permit` through a shell, because the state gate keeps every name above.
 
+### Fixed
+
+- **`stroq inspect` no longer reports a git worktree or submodule made on this machine as a planted repository, and reads a worktree's real config.** A `.git` file that points into a real `.git` folder which points back at it is left alone, and the config of that repository is read in its place; any other `.git` file is still a finding.
+
 ## [0.29.0] - 2026-10-29
 
 ### Added

@@ -1,12 +1,16 @@
 import type { Dirent } from 'node:fs';
 import { LEGACY_SURFACE_IO, type SurfaceReadContext } from './surface-io.js';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isGitExecKey } from '@stroq/core';
 import { INSTALL_SCRIPT_NAMES } from './agent-editor.js';
 import { hookOutcome } from './hook-outcome.js';
 import type { Finding } from './findings.js';
 import { plainHookHits } from './plain-hook-folders.js';
 import { FILE_NAMES, foldName, gitDirName, looksLikeGitDir } from './git-dir-names.js';
+import { MAX_CONFIG_BYTES, gitConfigEntries, parseGitConfig } from './git-config.js';
+import { linkedConfigs, linkedGit, type LinkedGit } from './linked-git.js';
+
+export { gitConfigEntries, parseGitConfig };
 
 /**
  * What a repository can make run on the machine that opens it.
@@ -64,7 +68,6 @@ export interface RepoSurface {
 
 /** A repository is a working tree, not a corpus; this is generous for one. */
 const MAX_DIRS = 4_000;
-const MAX_CONFIG_BYTES = 256 * 1024;
 /** Only `node_modules` is skipped: a bare repository under `vendor` or `build` runs as well. */
 const SKIP_DIRS = new Set(['node_modules']);
 
@@ -80,176 +83,6 @@ const readTextOr = (
     return fallback;
   }
 };
-
-/**
- * Parses git's INI into dotted keys, the way git reads it (see `parseGitConfig`): no tool's view of
- * the file but git's, and no shelling out to `git config`, which would read the repository's
- * configuration to read it.
- */
-export function gitConfigEntries(text: string): readonly { key: string; value: string }[] {
-  return parseGitConfig(text).entries;
-}
-
-const isSpace = (c: string): boolean => c === ' ' || c === '\t' || c === '\n' || c === '\r';
-const isAlpha = (c: string): boolean => /^[A-Za-z]$/.test(c);
-/** A character of a key or a section name as git takes it: a letter, a digit or `-`. */
-const isKeyChar = (c: string): boolean => /^[A-Za-z0-9-]$/.test(c);
-
-/** The escapes git takes in a value; any other one makes the file one git refuses. */
-const VALUE_ESCAPES: Readonly<Record<string, string>> = {
-  t: '\t',
-  b: '\b',
-  n: '\n',
-  '\\': '\\',
-  '"': '"',
-};
-
-/** A git config read one character at a time, with the line each one is on. */
-class ConfigReader {
-  private at: number;
-  private line = 1;
-  /** The line of the last character read. */
-  lineOfLast = 1;
-  constructor(private readonly text: string) {
-    this.at = text.startsWith('\uFEFF') ? 1 : 0;
-  }
-
-  get done(): boolean {
-    return this.at >= this.text.length;
-  }
-
-  /** The next character; `\r\n` and the end of the file read as a newline, as git reads them. */
-  next(): string {
-    this.lineOfLast = this.line;
-    if (this.done) return '\n';
-    let c = this.text[this.at] as string;
-    this.at += 1;
-    if (c === '\r' && this.text[this.at] === '\n') {
-      c = '\n';
-      this.at += 1;
-    }
-    if (c === '\n') this.line += 1;
-    return c;
-  }
-}
-
-/** A section header after its `[`: `[core]`, `[remote "a\"b"]`, `[a.b]`; undefined when git refuses it. */
-function readSection(r: ConfigReader): string | undefined {
-  let name = '';
-  for (;;) {
-    if (r.done) return undefined;
-    let c = r.next();
-    if (c === ']') return name === '' ? undefined : name;
-    if (isSpace(c)) {
-      // `[name "subsection"]`: blanks, a quoted name whose `\` takes the next character, then `]`.
-      for (; isSpace(c); c = r.next()) if (c === '\n' || r.done) return undefined;
-      if (c !== '"' || name === '') return undefined;
-      let sub = '';
-      for (;;) {
-        c = r.next();
-        if (c === '\n') return undefined;
-        if (c === '"') break;
-        if (c === '\\') {
-          c = r.next();
-          if (c === '\n') return undefined;
-        }
-        sub += c;
-      }
-      return r.next() === ']' ? `${name}.${sub}` : undefined;
-    }
-    if (!isKeyChar(c) && c !== '.') return undefined;
-    name += c.toLowerCase();
-  }
-}
-
-/** A value after its `=`, to the end of its line, as git reads it; undefined when git refuses it. */
-function readValue(r: ConfigReader): string | undefined {
-  let value = '';
-  let quote = false;
-  let comment = false;
-  let blanks = 0;
-  for (;;) {
-    let c = r.next();
-    if (c === '\n') return quote ? undefined : value;
-    if (comment) continue;
-    if (isSpace(c) && !quote) {
-      if (value !== '') blanks += 1;
-      continue;
-    }
-    if (!quote && (c === ';' || c === '#')) {
-      comment = true;
-      continue;
-    }
-    value += ' '.repeat(blanks);
-    blanks = 0;
-    if (c === '\\') {
-      c = r.next();
-      // A value goes on past the end of its line only here, never from a comment.
-      if (c === '\n') continue;
-      const escaped = VALUE_ESCAPES[c];
-      if (escaped === undefined) return undefined;
-      value += escaped;
-      continue;
-    }
-    if (c === '"') {
-      quote = !quote;
-      continue;
-    }
-    value += c;
-  }
-}
-
-/**
- * The entries of a git config, read as git reads them: comments and blanks between entries, a
- * section header with a quoted subsection whose `\` takes the next character, a key on the line of
- * its section, a value with quotes, comments and escapes, continued past the end of its line only
- * by a `\` inside the value. Keys and plain section names are in lower case, as git takes them.
- *
- * Git refuses a whole file it cannot read, and runs none of it; a reader that is wrong about a line
- * would skip a key git runs. So the first line git would refuse ends the reading and is reported in
- * `unplaced`, with what was read before it.
- */
-export function parseGitConfig(text: string): {
-  readonly entries: readonly { key: string; value: string }[];
-  readonly unplaced: readonly number[];
-} {
-  const entries: { key: string; value: string }[] = [];
-  const r = new ConfigReader(text);
-  const refused = () => ({ entries, unplaced: [r.lineOfLast] });
-  let section: string | undefined;
-  let comment = false;
-  while (!r.done) {
-    const c = r.next();
-    if (c === '\n') {
-      comment = false;
-      continue;
-    }
-    if (comment || isSpace(c)) continue;
-    if (c === '#' || c === ';') {
-      comment = true;
-      continue;
-    }
-    if (c === '[') {
-      section = readSection(r);
-      if (section === undefined) return refused();
-      continue;
-    }
-    if (!isAlpha(c) || section === undefined) return refused();
-    let name = c.toLowerCase();
-    let d = r.next();
-    for (; isKeyChar(d); d = r.next()) name += d.toLowerCase();
-    while (d === ' ' || d === '\t') d = r.next();
-    if (d === '\n') {
-      entries.push({ key: `${section}.${name}`, value: 'true' });
-      continue;
-    }
-    if (d !== '=') return refused();
-    const value = readValue(r);
-    if (value === undefined) return refused();
-    entries.push({ key: `${section}.${name}`, value });
-  }
-  return { entries, unplaced: [] };
-}
 
 /** What a hit names for a line of a git config that could not be read. */
 export const UNREAD_CONFIG_LINE = 'a line the check could not read';
@@ -363,8 +196,8 @@ const UNREAD_HOOK = '\u0000';
  * A hook is ordinary only when it is one of the commit hooks, by its name as a forgiving disk
  * opens it, and its text was read and does not download and run code.
  */
-function gitHookHit(dir: string, name: string, io: SurfaceReadContext): RepoExecHit {
-  const file = io.label?.(join(dir, name)) ?? `.git/hooks/${name}`;
+function gitHookHit(root: string, dir: string, name: string, io: SurfaceReadContext): RepoExecHit {
+  const file = labelOf(root, join(dir, name), io);
   const text = readTextOr(join(dir, name), UNREAD_HOOK, io);
   const outcome = hookOutcome(name, text === UNREAD_HOOK ? undefined : text);
   if (outcome === 'routine') return { kind: 'git-hook-routine', file, what: name };
@@ -377,7 +210,12 @@ function gitHookHit(dir: string, name: string, io: SurfaceReadContext): RepoExec
   return { kind: 'git-hook', file, what: name };
 }
 
-function gitHookHits(dir: string, plat: NodeJS.Platform, io: SurfaceReadContext): RepoExecHit[] {
+function gitHookHits(
+  root: string,
+  dir: string,
+  plat: NodeJS.Platform,
+  io: SurfaceReadContext,
+): RepoExecHit[] {
   if (!io.exists(dir)) return [];
   try {
     return io
@@ -385,7 +223,7 @@ function gitHookHits(dir: string, plat: NodeJS.Platform, io: SurfaceReadContext)
       .map((entry) => entry.name)
       .filter((name) => !name.endsWith('.sample'))
       .filter((name) => runsAsGitHook(join(dir, name), plat, io))
-      .map((name) => gitHookHit(dir, name, io));
+      .map((name) => gitHookHit(root, dir, name, io));
   } catch {
     return [];
   }
@@ -464,9 +302,12 @@ function envrcHits(root: string, io: SurfaceReadContext): RepoExecHit[] {
 /** Why a file that only points git elsewhere is reported. */
 const POINTS_ELSEWHERE = 'which points git at the folder of another repository';
 
-/** A path under `root`, with `/` between its parts, for a report: `.` for `root` itself. */
+/**
+ * A path under `root`, with `/` between its parts, for a report: `.` for `root` itself. One outside
+ * it (the config of the repository a linked worktree belongs to) is named by its real path.
+ */
 const labelOf = (root: string, abs: string, io: SurfaceReadContext): string =>
-  io.label?.(abs) ?? (relative(root, abs).split(sep).join('/') || '.');
+  io.label?.(abs) ?? (isWithin(abs, root) ? relative(root, abs).split(sep).join('/') || '.' : abs);
 
 /**
  * The commands of a folder git takes for a repository: its `config` and `config.worktree`, and,
@@ -541,6 +382,80 @@ function namesIn(dir: string, io: SurfaceReadContext): Map<string, string[]> {
   }
 }
 
+/** The files and folder git reads from the git folder of a checkout. */
+interface GitHome {
+  readonly configs: readonly string[];
+  readonly hooks: string | null;
+  readonly attributes: readonly string[];
+}
+
+/** Where git reads its configuration, hooks and attributes for `checkout`, given its `.git`. */
+function gitHomeOf(
+  checkout: string,
+  linked: LinkedGit | undefined,
+  io: SurfaceReadContext,
+): GitHome {
+  const common = linked?.common ?? join(checkout, '.git');
+  return {
+    configs: linked === undefined ? [join(common, 'config')] : linkedConfigs(linked, io),
+    hooks: join(common, 'hooks'),
+    attributes: [join(checkout, '.gitattributes'), join(common, 'info', 'attributes')],
+  };
+}
+
+/** Adds the hits not added before, by what they say and where. */
+function addOnce(hits: RepoExecHit[], seen: Set<string>, more: readonly RepoExecHit[]): void {
+  for (const hit of more) {
+    const key = `${hit.kind}\0${hit.file}\0${hit.what}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hits.push(hit);
+  }
+}
+
+const tryRealpath = (path: string, io: SurfaceReadContext): string => {
+  try {
+    return io.realpath(path);
+  } catch {
+    return path;
+  }
+};
+
+/**
+ * What a `.git` file in a folder with no `.git` of its own is: a finding, because a cloned
+ * repository can commit one that points git at a bare repository it also commits, unless git made
+ * it here for a linked worktree or a submodule (see `linked-git.ts`). Such a file is not reported,
+ * and what it leads to is judged instead: the walk does that for a `.git` folder inside `root`, and
+ * the config, attributes and hooks of one elsewhere (or under a folder the walk skips) are read
+ * here, so an archive that carries a `.git` folder of its own is not trusted for being one.
+ */
+function gitFileHits(root: string, pointer: string, io: SurfaceReadContext): RepoExecHit[] {
+  const linked = linkedGit(pointer, io);
+  if (linked === undefined)
+    return [
+      {
+        kind: 'nested-bare-repo',
+        file: labelOf(root, pointer, io),
+        what: `a .git file, ${POINTS_ELSEWHERE}`,
+      },
+    ];
+  // `root` as the disk spells it, which is how `linked.common` is spelled.
+  const top = tryRealpath(root, io);
+  const walked =
+    isWithin(linked.common, top) &&
+    !relative(top, linked.common)
+      .split(sep)
+      .some((part) => SKIP_DIRS.has(part));
+  if (walked) return [];
+  const checkout = dirname(pointer);
+  const home = gitHomeOf(checkout, linked, io);
+  return [
+    ...home.configs.flatMap((config) => gitConfigHits(config, labelOf(root, config, io), io)),
+    ...gitAttributesHits(root, home.configs, home.attributes, io),
+    ...(home.hooks === null ? [] : gitHookHits(root, home.hooks, process.platform, io)),
+  ];
+}
+
 /**
  * A bare repository committed into an ordinary one as plain files. Git refuses to check out a path
  * named `.git`, but a bare repository needs only `HEAD`, `objects/` and `refs/`, or `HEAD` and a
@@ -548,7 +463,8 @@ function namesIn(dir: string, io: SurfaceReadContext): Map<string, string[]> {
  * makes this class of attack deliverable by pull request rather than by zip. Each one is reported
  * with the commands its config runs, and so is a lone `commondir` or `gitdir` file, which only
  * points git elsewhere. In a folder with no `.git` (`folder`), a `.git` folder or file deeper in
- * came with the folder too, and is read and reported the same way.
+ * came with the folder too, and is read and reported the same way, except a `.git` file git made
+ * here for a linked worktree or a submodule (`gitFileHits`).
  */
 function nestedBareRepos(
   root: string,
@@ -557,6 +473,8 @@ function nestedBareRepos(
   io: SurfaceReadContext = LEGACY_SURFACE_IO,
 ): { hits: RepoExecHit[]; capped: boolean } {
   const hits: RepoExecHit[] = [];
+  // What `.git` files led to, so a repository with many worktrees is read for each of them once.
+  const judged = new Set<string>();
   const queue: string[] = [root];
   let visited = 0;
   for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
@@ -602,13 +520,8 @@ function nestedBareRepos(
         continue;
       }
       if (folder && folded === '.git') {
-        if (!isDir)
-          hits.push({
-            kind: 'nested-bare-repo',
-            file: labelOf(root, join(dir, entry.name), io),
-            what: `a .git file, ${POINTS_ELSEWHERE}`,
-          });
-        else queue.push(join(dir, entry.name));
+        if (isDir) queue.push(join(dir, entry.name));
+        else addOnce(hits, judged, gitFileHits(root, join(dir, entry.name), io));
         continue;
       }
       if (!isDir || SKIP_DIRS.has(entry.name)) continue;
@@ -652,18 +565,19 @@ export function repoSurface(
   )
     return { isRepo: false, preTrust: [], onOpen: [], capped: false };
   const bare = nestedBareRepos(cwd, false, false, io);
-  const configs = io.gitMetadata?.configs ?? [join(cwd, '.git', 'config')];
-  const hooks =
-    io.gitMetadata?.hooks === undefined ? join(cwd, '.git', 'hooks') : io.gitMetadata.hooks;
-  const attributes = io.gitMetadata?.attributes ?? [
-    join(cwd, '.gitattributes'),
-    join(cwd, '.git', 'info', 'attributes'),
-  ];
+  // A linked worktree's or a submodule's `.git` is a file: git reads the config of the folder it
+  // leads to, so that is what is read, once the file is shown to be git's own. A file that is not
+  // stays unread as a config, which is reported.
+  const own = io.gitMetadata === undefined ? linkedGit(join(cwd, '.git'), io) : undefined;
+  const home = gitHomeOf(cwd, own, io);
+  const configs = io.gitMetadata?.configs ?? home.configs;
+  const hooks = io.gitMetadata?.hooks === undefined ? home.hooks : io.gitMetadata.hooks;
+  const attributes = io.gitMetadata?.attributes ?? home.attributes;
   const all = [
     ...configs.flatMap((config) => gitConfigHits(config, labelOf(cwd, config, io), io)),
     ...gitAttributesHits(cwd, configs, attributes, io),
     ...bare.hits,
-    ...(hooks === null ? [] : gitHookHits(hooks, plat, io)),
+    ...(hooks === null ? [] : gitHookHits(cwd, hooks, plat, io)),
     ...workingTreeHits(
       cwd,
       configs.flatMap((config) =>

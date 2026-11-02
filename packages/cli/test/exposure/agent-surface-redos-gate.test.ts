@@ -31,6 +31,7 @@ import {
 import { lineHits } from '../../src/exposure/agent-lines.js';
 import { foldName, windowsAlias } from '../../src/exposure/git-dir-names.js';
 import { parseGitConfig } from '../../src/exposure/repo-surface.js';
+import { onePath, pointerPath, walkPlan } from '../../src/exposure/linked-git.js';
 import { annotations, githubSummary } from '../../src/exposure/github-format.js';
 import { linkTarget } from '../../src/exposure/git-tree.js';
 import { lineOf, stripJsonc } from '../../src/exposure/jsonc.js';
@@ -219,6 +220,17 @@ const hostile = (text: string): TaggedHit => ({
   ...hit('agent-hook', text.slice(0, 4096), 1, text, text),
   status: 'new',
 });
+
+/** The text of a `.git` file, and of the files beside it that hold a path, read as they are read. */
+const GIT_FILE_PATH: EntryPoint = (text) => [
+  pointerPath(text),
+  pointerPath(`gitdir: ${text}`),
+  pointerPath(`gitdir: ${text}\n`),
+  onePath(text),
+  onePath(`${text}\r\n`),
+  walkPlan(text, '/x'),
+  walkPlan(`/${text}`, '/x'),
+];
 
 const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
   ['stripJsonc', (text) => stripJsonc(text)],
@@ -458,6 +470,7 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
     ],
   ],
   ['a git config', (text) => parseGitConfig(text)],
+  ['the path in a .git file', GIT_FILE_PATH],
   [
     'a name a disk may fold',
     (text) => [foldName(text), windowsAlias(text), foldPath(text), agentOnlyWhenFolded(text)],
@@ -474,6 +487,30 @@ const ENTRY_POINTS: readonly (readonly [name: string, run: EntryPoint])[] = [
   ['GitHub annotations', (text) => annotations([hostile(text)], 'new')],
   ['a GitHub summary', (text) => githubSummary([hostile(text)], { failOn: 'new' })],
 ];
+
+// Shapes made for the path in a `.git` file: the parts of a path and the breaks that end it.
+describe('the path in a .git file stays linear on paths built to be slow', () => {
+  it.each([
+    'gitdir: ',
+    '../',
+    '/..',
+    '/./',
+    './',
+    'a/',
+    '/',
+    '.git/modules/',
+    '.git/worktrees/',
+    '\r\n',
+    ' \n',
+    ' ',
+    '\0',
+  ])('%j', (unit) => {
+    expectLinear(
+      SIZES.map((size) => repeat(unit)(size)),
+      GIT_FILE_PATH,
+    );
+  });
+});
 
 describe('the readers of stroq inspect stay linear on text built to be slow', () => {
   describe.each(ENTRY_POINTS)('%s', (_name, run) => {
