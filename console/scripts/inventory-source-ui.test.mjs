@@ -240,8 +240,6 @@ function harness() {
           InventoryMonitor: () =>
             React.createElement('section', { 'data-inventory-watch': 'enabled-control' }),
         };
-      if (name === './codex-skill-sources')
-        return { CodexSkillSources: () => React.createElement('button', null, 'Codex sources') };
       if (name === './inventory-signal-controls')
         return {
           InventorySignalControls: () => null,
@@ -332,9 +330,9 @@ function harness() {
   };
 }
 
-test('inventory heading exposes one manual Codex sources entry without starting review or watch', () => {
+test('inventory heading renders without starting review or watch and offers no Codex sources entry', () => {
   const h = harness();
-  assert.equal((h.render().match(/Codex sources/g) ?? []).length, 1);
+  assert.equal((h.render().match(/Codex sources/g) ?? []).length, 0);
   assert.deepEqual(h.calls, []);
 });
 test('same skill names retain six distinct fixed roots and a neutral shared source', () => {

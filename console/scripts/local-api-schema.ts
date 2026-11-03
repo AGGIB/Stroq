@@ -180,38 +180,5 @@ export {
   validateInventorySignalPreview,
   validateInventorySignalReceipt,
 } from '../lib/inventory-signal-decision';
-export { validateCodexSkillSourcesReport } from '../lib/codex-skill-sources';
-export {
-  CODEX_SKILL_CONTROL_ERRORS,
-  validateCodexSkillControlState,
-  validateCodexSkillControlPreview,
-  validateCodexSkillControlReceipt,
-  validateCodexSkillControlRecord,
-  validateCodexSkillControlSelection,
-  validateCodexSkillControlRestoreSelection,
-  validateCodexSkillControlRecheckSelection,
-} from '../lib/codex-skill-controls';
-export {
-  validateCodexSkillControlPrivatePlan,
-  codexSkillControlPrivatePlanBytes,
-} from '../lib/codex-skill-controls-private';
-export * from '../lib/codex-network-guard';
-export * from '../lib/codex-path-guard';
-export {
-  validateCodexPathGuardPrivatePlan,
-  codexPathGuardPrivatePlanBytes,
-} from '../lib/codex-path-guard-private';
-export { createCodexPathGuardService } from './codex-path-service';
-export {
-  validateCodexNetworkGuardPrivatePlan,
-  codexNetworkGuardPrivatePlanBytes,
-} from '../lib/codex-network-guard-private';
-export {
-  validateCodexNetworkGuardCheckPreparation,
-  codexNetworkGuardCheckPreparationBytes,
-} from '../lib/codex-network-guard-check-private';
-export * from '../lib/codex-network-check';
-export { createCodexNetworkGuardService } from './codex-network-service';
-export { createCodexNetworkCheckService } from './codex-network-check-service';
 export * from '../lib/mcp-governance';
 export { createMcpGovernanceService } from './mcp-governance-service';

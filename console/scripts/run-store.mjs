@@ -252,7 +252,7 @@ export async function createRunStore({
   if (root !== null) {
     try {
       if (
-        !['runs', 'hook-checks', 'workspace-review', 'codex-network-checks'].includes(namespace) ||
+        !['runs', 'hook-checks', 'workspace-review'].includes(namespace) ||
         typeof workspaceId !== 'string' ||
         !/^[a-f0-9]{64}$/.test(workspaceId)
       )

@@ -34,7 +34,6 @@ import {
 } from './inventory-source';
 import { InventorySignalBadge } from './inventory-signal-controls';
 import { InventoryMonitor } from './inventory-monitor';
-import { CodexSkillSources } from './codex-skill-sources';
 import { McpGovernanceControls } from './mcp-governance';
 
 export function SkillsTabs({ active }: { active: 'inventory' | 'scan' | 'quarantine' | 'mcp' }) {
@@ -122,10 +121,6 @@ export function InventoryPage() {
         actions={
           <>
             <McpGovernanceControls />
-            <CodexSkillSources
-              disabled={!localAccess || loading || reviewing || !!selected || needsRecheck}
-              controlsReady={!loading && (!!data || !!error)}
-            />
             <button
               className="button"
               ref={refreshButton}

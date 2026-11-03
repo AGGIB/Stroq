@@ -197,28 +197,9 @@ export async function writeManifest(root, path, manifest, expected = null) {
 export async function prepareApplyLock(userHome) {
   return prepareUserApplyLock(userHome, '.mcp-containment.apply.lock');
 }
-/** Shared Codex configuration needs a lock independent of project and STROQ_HOME. */
-export async function prepareCodexSkillApplyLock(userHome, expectedUser) {
-  try {
-    return await prepareUserApplyLock(userHome, '.codex-skill-controls.apply.lock', expectedUser);
-  } catch {
-    throw new Error('codex-control-unavailable');
-  }
-}
-async function prepareUserApplyLock(userHome, name, expectedUser) {
+async function prepareUserApplyLock(userHome, name) {
   const root = await canonicalRoot(userHome),
     directory = join(root.path, '.stroq');
-  if (expectedUser) {
-    const s = await lstat(root.path);
-    if (
-      expectedUser.path !== root.path ||
-      !same(expectedUser, root) ||
-      !same(root, s) ||
-      expectedUser.uid !== s.uid ||
-      expectedUser.mode !== s.mode
-    )
-      throw new Error('mcp-containment-unavailable');
-  }
   await inspect(root, directory);
   try {
     await mkdir(directory, { mode: 0o700 });

@@ -14,13 +14,10 @@ const OPERATION = new RegExp(
     'mcp-tool-contracts(?:/(?:preview|apply))?|' +
     'mcp-call-controls(?:/(?:inspect|preview|apply|recheck))?|' +
     'mcp-governance(?:/(?:capture|preview|apply|recheck))?|' +
-    'codex-network-guard(?:/(?:capture|preview|apply|recheck))?|' +
-    'codex-network-checks(?:/(?:preview|start|cancel))?|' +
-    'codex-path-guard(?:/(?:capture|preview|apply|recheck))?|' +
     `hook-checks(?:/(?:preview|start|cancel|jobs/${JOB}))?|` +
     `task-locks(?:/(?:page|preview|apply|access/(?:preview|issue|${TASK}/${SHA})))?|` +
     `(?:live|secrets)(?:/(?:preview|start|cancel|jobs/${JOB}))?|runs(?:/(?:cancel|${JOB}))?|` +
-    'inventory(?:/(?:review|inspect|compare|codex-sources|codex-controls|codex-control-(?:preview|apply|recheck)|signals/(?:state|preview|apply)))?|agent-(?:setup|disconnect)(?:/(?:preview|apply))?|policy(?:/(?:preview|apply|try|history|restore/(?:preview|apply)|cases(?:/(?:save|remove))?))?)$',
+    'inventory(?:/(?:review|inspect|compare|signals/(?:state|preview|apply)))?|agent-(?:setup|disconnect)(?:/(?:preview|apply))?|policy(?:/(?:preview|apply|try|history|restore/(?:preview|apply)|cases(?:/(?:save|remove))?))?)$',
 );
 /** Tokens are sent only to these exact same-origin local operations. */
 export function isLocalOperation(path: unknown): path is string {

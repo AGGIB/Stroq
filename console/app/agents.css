@@ -89,9 +89,6 @@
 .agent-row-controls:empty {
   display: none;
 }
-.agent-row-controls .codex-network-entry,
-.agent-row-controls .codex-path-entry,
-.agent-row-controls .codex-source-entry,
 .agent-row-controls .credential-filter-row {
   display: inline-flex;
   flex-wrap: wrap;
@@ -105,12 +102,6 @@
   min-width: 0;
   font-size: var(--text-ui);
 }
-.agent-row-controls .codex-network-entry .control-meta,
-.agent-row-controls .codex-path-entry .control-meta {
-  display: none;
-}
-.agent-row-controls .codex-network-entry > div,
-.agent-row-controls .codex-path-entry > div,
 .agent-row-controls .credential-filter-row > div {
   display: flex;
   flex-wrap: wrap;
@@ -249,9 +240,6 @@
     display: grid;
     gap: 4px;
   }
-  .agent-row-controls .codex-network-entry,
-  .agent-row-controls .codex-path-entry,
-  .agent-row-controls .codex-source-entry,
   .agent-row-controls .credential-filter-row {
     justify-content: space-between;
   }

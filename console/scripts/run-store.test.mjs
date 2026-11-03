@@ -99,27 +99,12 @@ test('fixed hook-check history namespace is isolated from diagnostic history', a
 
 test('arbitrary history namespaces cannot choose a filesystem path', async (t) => {
   const files = await fixture(t);
-  for (const namespace of ['../outside', '', 'other']) {
+  for (const namespace of ['../outside', '', 'other', 'codex-network-checks']) {
     const store = await createRunStore({ home: files.home, namespace });
     assert.deepEqual(store.state(), { status: 'error', error: 'unavailable' });
     assert.equal(await store.write([failed]), false);
   }
   await assert.rejects(lstat(files.home), { code: 'ENOENT' });
-});
-
-test('fixed network-check namespace has independent bounded private history', async (t) => {
-  const files = await fixture(t);
-  const options = { home: files.home, namespace: 'codex-network-checks' };
-  const store = await createRunStore(options);
-  assert.deepEqual(store.state(), { status: 'ready' });
-  await assert.rejects(lstat(files.home), { code: 'ENOENT' });
-  assert.equal(await store.write([failed]), true);
-  assert.deepEqual((await createRunStore(options)).runs, [failed]);
-  assert.deepEqual((await createRunStore({ home: files.home })).runs, []);
-  assert.equal(
-    (await lstat(join(files.directory, `codex-network-checks-${workspaceId}.json`))).mode & 0o777,
-    0o600,
-  );
 });
 
 test('passive refresh observes another writer without creating, repairing or changing history', async (t) => {

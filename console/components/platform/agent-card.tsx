@@ -14,9 +14,6 @@ import { LiveProofDialog } from './live-proof';
 import { HookCheckDialog } from './hook-check-dialog';
 import { CredentialFilters } from './credential-filters';
 import type { useCredentialFilters } from './use-credential-filters';
-import { CodexSkillSources } from './codex-skill-sources';
-import { CodexNetworkGuard } from './codex-network-guard';
-import { CodexPathGuard } from './codex-path-guard';
 export function AgentCard({
   agent,
   scope,
@@ -105,13 +102,6 @@ export function AgentCard({
         </div>
       </div>
       <div className="agent-row-controls">
-        {agent.id === 'codex' && (
-          <>
-            <CodexNetworkGuard />
-            <CodexPathGuard />
-            <CodexSkillSources compact />
-          </>
-        )}
         {(agent.id === 'claude-code' || agent.id === 'cursor') && (
           <CredentialFilters
             agent={agent.id}

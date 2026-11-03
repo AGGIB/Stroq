@@ -149,24 +149,6 @@ test('the actual client refuses unbounded paths without sending the private toke
   assert.equal(f.calls.length, 0);
 });
 
-test('Codex skill control refusals use finite scoped messages without exposing arbitrary server text', async (t) => {
-  const f = await client(t);
-  f.fail('codex-control-write-unconfirmed', 503);
-  await assert.rejects(f.request('/api/inventory/codex-control-apply', {}), {
-    message: 'Completion is unknown. Recheck this exact change.',
-  });
-  f.fail('codex-control-conflict', 409);
-  await assert.rejects(f.request('/api/inventory/codex-control-preview', {}), {
-    message: 'The owned declaration changed. Review the current configuration.',
-  });
-  f.fail('/private/config/SECRET_SENTINEL', 503);
-  await assert.rejects(
-    f.request('/api/inventory/codex-controls'),
-    (error) =>
-      !error.message.includes('SECRET_SENTINEL') && !error.message.includes('/private/config'),
-  );
-});
-
 test('task page gaps use finite recovery messages without exposing private cursor details', async (t) => {
   const f = await client(t);
   for (const [code, expected] of [

@@ -6,8 +6,6 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import { tsImport } from 'tsx/esm/api';
-import * as network from './codex-network-client-fixtures.mjs';
-import * as paths from './codex-path-guard-client-fixtures.mjs';
 const { callPreview, callOverview } = await tsImport('../lib/mcp-call-control-fixtures.ts', {
   parentURL: import.meta.url,
 });
@@ -23,8 +21,6 @@ const workspace = `workspace-${'a'.repeat(24)}`,
 function fixture() {
   return {
     inventoryFreshness: 'current',
-    codexPathGuard: { ...paths.state(), history: 'missing' },
-    unconfirmedCodexPaths: [],
     unconfirmedMcpCallControls: [],
     inventory: {
       schema: 'stroq-inventory/1',
@@ -322,89 +318,4 @@ test('actual Protection retains a pending Pause beside confirmed paused authorit
     ),
   );
   assert.equal(state.unconfirmedMcpCallControls[0].preview.contextId, preview.contextId);
-});
-test('actual Protection keeps exact network unknowns actionable beside changed settings and historical copy evidence', () => {
-  const state = fixture(),
-    pending = network.preview();
-  pending.id = pending.operationId = network.id(9);
-  state.codexNetworkGuard = network.state([network.record({ standing: 'changed' })]);
-  const job = network.job('completed');
-  job.binding.workspaceId = workspace;
-  state.codexNetworkChecks = { ...network.checkState([job]), workspaceId: workspace };
-  state.unconfirmedNetworkGuard = [{ preview: pending, startedAt: pending.createdAt }];
-  state.unconfirmedNetworkChecks = [];
-  const html = render(state);
-  for (const text of [
-    'Codex network change is unconfirmed',
-    'Codex network setting changed',
-    'Latest Codex copy check recorded',
-    'Historical isolated permission copy',
-    'native client adoption remain unverified',
-    'Matched signals: release-notes',
-  ])
-    assert.ok(html.includes(text), text);
-  assert.ok(
-    html.includes(
-      `/agents/?codexNetwork=history&context=${network.context}&record=${network.id(1)}`,
-    ),
-  );
-  assert.ok(html.includes(`check=${job.id}&networkWorkspace=${workspace}`));
-  assert.doesNotMatch(html, /Restore network|Network protected|Current chat protected/);
-});
-test('loading never invents network history failure while an exact unknown remains visible', () => {
-  const state = fixture(),
-    pending = network.preview();
-  state.loading = true;
-  state.unconfirmedNetworkGuard = [{ preview: pending, startedAt: pending.createdAt }];
-  const html = render(state);
-  assert.match(html, /Codex network change is unconfirmed/);
-  assert.doesNotMatch(
-    html,
-    /Codex network settings unavailable|Codex copied-policy history unavailable/,
-  );
-});
-test('recorded unowned running copy is not presented as a live owned check on home', () => {
-  const state = fixture(),
-    job = network.job();
-  job.binding.workspaceId = workspace;
-  state.codexNetworkGuard = network.state();
-  state.codexNetworkChecks = { ...network.checkState([job], false), workspaceId: workspace };
-  const html = render(state);
-  assert.match(html, /recorded running; ownership unverified/);
-  assert.match(html, /Liveness is unverified/);
-  assert.ok(html.includes(`check=${job.id}&networkWorkspace=${workspace}`));
-  assert.doesNotMatch(html, /Cancel check/);
-});
-test('actual Protection renders exact pending path operation beside independent drift, without Restore or native check authority', () => {
-  const state = fixture(),
-    p = paths.preview();
-  p.operationId = paths.id(9);
-  state.codexPathGuard = paths.state([paths.record({ standing: 'changed' })]);
-  state.unconfirmedCodexPaths = [{ preview: p, startedAt: p.createdAt }];
-  const html = render(state);
-  assert.match(html, /Codex AWS credentials change is unconfirmed/);
-  assert.match(html, /Codex AWS credentials rule changed/);
-  assert(
-    html.includes(
-      `href="/agents/?codexPaths=history&pathContext=${paths.context}&pathRecord=${paths.id(1)}"`,
-    ),
-  );
-  assert.doesNotMatch(html, /Restore path rule|Apply deny|Preview native path check/);
-});
-test('actual Protection keeps matching deny a declaration and missing recovery distinct from optional empty history', () => {
-  const state = fixture();
-  state.codexPathGuard = paths.state([paths.record()]);
-  let html = render(state);
-  assert.match(html, /Codex AWS credentials deny declaration matches/);
-  assert.match(html, /Native adoption remains unverified/);
-  state.codexPathGuard = {
-    ...paths.state(),
-    history: 'missing',
-    available: false,
-    error: 'codex-path-guard-recovery-required',
-  };
-  html = render(state);
-  assert.match(html, /Codex credential path history unavailable/);
-  state.codexPathGuard = { ...paths.state(), history: 'missing' };
-  assert.doesNotMatch(render(state), /Codex credential path history unavailable/);
 });

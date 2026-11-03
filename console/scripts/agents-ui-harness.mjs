@@ -4,7 +4,6 @@ import { fileURLToPath } from 'node:url';
 import { createRequire } from 'node:module';
 import vm from 'node:vm';
 import assert from 'node:assert/strict';
-import { controlState } from './codex-skill-controls-client-fixtures.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url)),
   require = createRequire(resolve(root, 'package.json'));
 const ts = require('typescript'),
@@ -32,38 +31,6 @@ export function harness(props = {}, agent = null, query = '') {
       calls.push(['requestLocal', ...args]);
       throw Error('Unexpected local request in render-only harness');
     },
-  };
-  const action = {
-    available: true,
-    report: null,
-    busy: false,
-    error: null,
-    historical: false,
-    inspect: () => calls.push('inspect'),
-    cancel: () => calls.push('cancel'),
-    markHistorical: () => calls.push('historical'),
-  };
-  const controls = {
-    connected: true,
-    state: controlState(),
-    preview: null,
-    ack: { shared: false, retention: false, weakening: false },
-    available: true,
-    busy: null,
-    error: null,
-    completion: null,
-    canApply: false,
-    pending: [],
-    foreignPending: [],
-    unscopedPending: [],
-    refresh: () => calls.push('controls:refresh'),
-    prepareDisable: (...args) => calls.push(['controls:disable', ...args]),
-    prepareRestore: (record) => calls.push(['controls:restore', record]),
-    acknowledge: (...args) => calls.push(['controls:ack', ...args]),
-    apply: () => calls.push('controls:apply'),
-    recheck: (record) => calls.push(['controls:recheck', record]),
-    cancel: () => calls.push('controls:cancel'),
-    clearPreview: () => calls.push('controls:clear'),
   };
   const wrapper =
     (tag) =>
@@ -181,16 +148,6 @@ export function harness(props = {}, agent = null, query = '') {
             EmptyState: ({ title, description }) =>
               React.createElement('div', null, title, description),
           };
-        if (name === './use-codex-skill-sources') return { useCodexSkillSources: () => action };
-        if (name === './codex-network-guard')
-          return { CodexNetworkGuard: () => React.createElement('div', null, 'Network guard') };
-        if (name === './use-codex-skill-controls')
-          return {
-            useCodexSkillControls: (enabled) => {
-              controls.enabled = enabled;
-              return controls;
-            },
-          };
         if (name.startsWith('@/')) return load(resolve(root, name.slice(2)));
         if (name.startsWith('.')) return load(resolve(dirname(file), name));
         return require(name);
@@ -201,11 +158,7 @@ export function harness(props = {}, agent = null, query = '') {
   const component = load(
     resolve(
       root,
-      props.page
-        ? 'components/platform/agents.tsx'
-        : agent
-          ? 'components/platform/agent-card.tsx'
-          : 'components/platform/codex-skill-sources.tsx',
+      props.page ? 'components/platform/agents.tsx' : 'components/platform/agent-card.tsx',
     ),
   );
   function render() {
@@ -214,15 +167,13 @@ export function harness(props = {}, agent = null, query = '') {
     return renderToStaticMarkup(
       props.page
         ? React.createElement(component.AgentsPage)
-        : agent
-          ? React.createElement(component.AgentCard, {
-              agent,
-              scope: 'project',
-              hookEvidence: { label: 'Not established' },
-              filters: {},
-              generation: 0,
-            })
-          : component.CodexSkillSources(props),
+        : React.createElement(component.AgentCard, {
+            agent,
+            scope: 'project',
+            hookEvidence: { label: 'Not established' },
+            filters: {},
+            generation: 0,
+          }),
     );
   }
   function button(label) {
@@ -235,20 +186,5 @@ export function harness(props = {}, agent = null, query = '') {
         ) === label,
     );
   }
-  return {
-    action,
-    controls,
-    calls,
-    elements,
-    Dialog,
-    render,
-    button,
-    open() {
-      render();
-      button(props.compact ? 'Inspect' : 'Codex sources').props.onClick({
-        currentTarget: { isConnected: true, focus() {} },
-      });
-      return render();
-    },
-  };
+  return { calls, elements, Dialog, render, button };
 }

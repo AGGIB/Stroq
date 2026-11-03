@@ -15,9 +15,6 @@ import { workspaceMonitorRows } from '@/lib/workspace-monitor-queue';
 import { hookCheckRows } from '@/lib/hook-check-queue';
 import { inventoryAttentionRows } from '@/lib/inventory-attention-queue';
 import { incidentAssessmentRows } from '@/lib/incident-assessment-queue';
-import { codexSkillControlRows } from '@/lib/codex-skill-control-queue';
-import { codexNetworkRows } from '@/lib/codex-network-queue';
-import { codexPathGuardRows } from '@/lib/codex-path-guard-queue';
 import {
   mcpGovernanceAttentionRows,
   sortProtectionAttention,
@@ -57,14 +54,6 @@ export function ProtectionQueue({ refreshKey }: { refreshKey?: string }) {
     mcpGovernance,
     mcpGovernanceUnresolved,
     unconfirmedMcpGovernance,
-    codexSkillControls,
-    unconfirmedCodexSkillControls,
-    codexNetworkGuard,
-    codexNetworkChecks,
-    unconfirmedNetworkGuard,
-    unconfirmedNetworkChecks,
-    codexPathGuard,
-    unconfirmedCodexPaths,
     filters,
     policyCases,
     taskLocks,
@@ -106,25 +95,6 @@ export function ProtectionQueue({ refreshKey }: { refreshKey?: string }) {
   if (!loading || mcp) rows.push(...mcpContainmentRows(mcp, workspaceId));
   rows.push(...mcpCallControlPendingRows(unconfirmedMcpCallControls, mcpCallControls, workspaceId));
   if (!loading || mcpCallControls) rows.push(...mcpCallControlRows(mcpCallControls, workspaceId));
-  if (!loading || codexSkillControls || unconfirmedCodexSkillControls?.length)
-    rows.push(...codexSkillControlRows(codexSkillControls, unconfirmedCodexSkillControls));
-  rows.push(
-    ...codexNetworkRows({
-      workspaceId,
-      guard: codexNetworkGuard,
-      checks: codexNetworkChecks,
-      guardPending: unconfirmedNetworkGuard,
-      checkPending: unconfirmedNetworkChecks,
-      loading,
-    }),
-  );
-  rows.push(
-    ...codexPathGuardRows({
-      state: codexPathGuard,
-      pending: unconfirmedCodexPaths,
-      loading,
-    }),
-  );
   if (!loading || filters) rows.push(...credentialFilterRows(filters, workspaceId));
   if (!loading || policyCases) rows.push(...policyCaseRows(policyCases, workspaceId));
   if (!loading || taskLocks) rows.push(...taskLockRows(taskLocks, workspaceId));

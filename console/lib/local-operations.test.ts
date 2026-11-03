@@ -102,15 +102,18 @@ describe('local API operation allowlist', () => {
     ])
       expect(isLocalOperation(path)).toBe(false);
   });
-  it('permits only the fixed manual Codex source inspection without selectors in its URL', () => {
-    expect(isLocalOperation('/api/inventory/codex-sources')).toBe(true);
+  it('no longer admits the removed Codex guard and source routes', () => {
     for (const path of [
-      '/api/inventory/codex-sources?path=private',
-      '/api/inventory/codex-sources/extra',
-      '/api/inventory/codex-sources/apply',
-      '/api/inventory/codex-sources-evil',
-      '/api/inventory/../codex-sources',
-      'https://foreign.invalid/api/inventory/codex-sources',
+      '/api/inventory/codex-sources',
+      '/api/inventory/codex-controls',
+      '/api/inventory/codex-control-preview',
+      '/api/inventory/codex-control-apply',
+      '/api/inventory/codex-control-recheck',
+      '/api/codex-network-guard',
+      '/api/codex-network-guard/preview',
+      '/api/codex-network-checks/start',
+      '/api/codex-path-guard',
+      '/api/codex-path-guard/apply',
     ])
       expect(isLocalOperation(path), path).toBe(false);
   });

@@ -12,8 +12,6 @@ import {
   type Throwaway,
 } from '../../packages/cli/src/live/throwaway.js';
 import { parseJsonDocument } from '../../packages/cli/src/harden/json-doc.js';
-import { runCodexNetworkCheckEngine } from './codex-network-check-engine';
-import type { CodexNetworkGuardCheckPreparation } from '../lib/codex-network-guard-check-private';
 import {
   AGENTS,
   HOOK_CHECK_SUITE,
@@ -375,10 +373,7 @@ export async function runHookCheckEngine(input: Input, options: Options) {
 }
 
 // The private worker protocol never forwards raw policy, audit or process output to the browser.
-if (
-  process.argv.includes('--stroq-hook-check-engine') &&
-  !process.argv.includes('--stroq-codex-network-check-engine')
-) {
+if (process.argv.includes('--stroq-hook-check-engine')) {
   const controller = new AbortController();
   const pending = new Map<number, { resolve: () => void; reject: (error: Error) => void }>();
   let serial = 0,
@@ -432,52 +427,6 @@ if (
           ].includes(error.message)
             ? error.message
             : 'hook-check-failed';
-        process.send?.({ type: 'error', error: code }, () => process.exit(1));
-      },
-    );
-  });
-}
-
-// A distinct fixed dispatch shares the packaged adapter, never a model/provider entry point.
-if (
-  process.argv.includes('--stroq-codex-network-check-engine') &&
-  !process.argv.includes('--stroq-hook-check-engine')
-) {
-  const controller = new AbortController();
-  let started = false;
-  const send = (message: unknown) => process.send?.(message);
-  const abort = () => controller.abort();
-  process.on('SIGTERM', abort);
-  process.on('disconnect', abort);
-  process.on('message', (message: unknown) => {
-    if (!object(message)) return;
-    if (message.type === 'cancel') return abort();
-    if (message.type !== 'start' || started) return;
-    started = true;
-    void runCodexNetworkCheckEngine(message.input as CodexNetworkGuardCheckPreparation, {
-      signal: controller.signal,
-      onProgress: (id) => send({ type: 'progress', id }),
-      onChild: (pid) => send({ type: 'child', pid }),
-      onChildClosed: (pid) => send({ type: 'child-closed', pid }),
-      onScratch: (root) => send({ type: 'scratch', root }),
-    }).then(
-      (result) => process.send?.({ type: 'result', result }, () => process.exit(0)),
-      (error: unknown) => {
-        const code =
-          error instanceof Error &&
-          [
-            'invalid-input',
-            'unsupported',
-            'native-changed',
-            'cancelled',
-            'deadline-exceeded',
-            'output-limit',
-            'cleanup-failed',
-            'listener-failed',
-            'invalid-report',
-          ].includes(error.message)
-            ? error.message
-            : 'engine-unavailable';
         process.send?.({ type: 'error', error: code }, () => process.exit(1));
       },
     );

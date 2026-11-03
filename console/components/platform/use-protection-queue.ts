@@ -25,33 +25,7 @@ import {
 } from '@/lib/incident-assessments';
 import { incidentAssessmentPendingWrites } from '@/lib/incident-assessment-client-state';
 import { callControlPending } from '@/lib/mcp-call-control-binding';
-import {
-  validateCodexSkillControlState,
-  type CodexSkillControlState,
-} from '@/lib/codex-skill-controls';
-import {
-  codexSkillControlPendingWrites,
-  subscribeCodexSkillControlPending,
-} from '@/lib/codex-skill-controls-client';
 import type { InventoryFreshness } from '@/lib/inventory-attention-queue';
-import {
-  validateCodexNetworkGuardState,
-  type CodexNetworkGuardState,
-} from '@/lib/codex-network-guard';
-import {
-  validateCodexNetworkCheckState,
-  type CodexNetworkCheckState,
-} from '@/lib/codex-network-check';
-import {
-  codexNetworkGuardPending,
-  codexNetworkCheckPending,
-  subscribeCodexNetworkPending,
-} from '@/lib/codex-network-client';
-import { validateCodexPathGuardState, type CodexPathGuardState } from '@/lib/codex-path-guard';
-import {
-  codexPathGuardPending,
-  subscribeCodexPathGuardPending,
-} from '@/lib/codex-path-guard-client';
 import { validateMcpGovernanceState, type McpGovernanceState } from '@/lib/mcp-governance';
 import { mcpGovernancePending, subscribeMcpGovernancePending } from '@/lib/mcp-governance-client';
 import {
@@ -74,10 +48,6 @@ interface QueueSnapshot {
   mcpCallControls: McpCallControlOverview | null;
   mcpGovernance: McpGovernanceState | null;
   mcpGovernanceUnresolved: McpGovernanceUnknownLedger;
-  codexSkillControls: CodexSkillControlState | null;
-  codexNetworkGuard: CodexNetworkGuardState | null;
-  codexNetworkChecks: CodexNetworkCheckState | null;
-  codexPathGuard: CodexPathGuardState | null;
   filters: CredentialFiltersState | null;
   policyCases: PolicyCasesState | null;
   taskLocks: TaskLockState | null;
@@ -114,10 +84,6 @@ const emptySnapshot = (key: string, workspaceId: string): QueueSnapshot => ({
   mcpCallControls: null,
   mcpGovernance: null,
   mcpGovernanceUnresolved: { records: [], limited: false },
-  codexSkillControls: null,
-  codexNetworkGuard: null,
-  codexNetworkChecks: null,
-  codexPathGuard: null,
   filters: null,
   policyCases: null,
   taskLocks: null,
@@ -152,18 +118,6 @@ export function useProtectionQueue(refreshKey?: string) {
   const [snapshot, setSnapshot] = useState<QueueSnapshot | null>(null);
   const [progress, setProgress] = useState<QueueProgress | null>(null);
   const [, setPendingRevision] = useState(0);
-  useEffect(
-    () => subscribeCodexSkillControlPending(requestLocal, () => setPendingRevision((n) => n + 1)),
-    [requestLocal],
-  );
-  useEffect(
-    () => subscribeCodexNetworkPending(requestLocal, () => setPendingRevision((n) => n + 1)),
-    [requestLocal],
-  );
-  useEffect(
-    () => subscribeCodexPathGuardPending(requestLocal, () => setPendingRevision((n) => n + 1)),
-    [requestLocal],
-  );
   useEffect(
     () => subscribeMcpGovernancePending(requestLocal, () => setPendingRevision((n) => n + 1)),
     [requestLocal],
@@ -228,10 +182,6 @@ export function useProtectionQueue(refreshKey?: string) {
             mcp: null,
             mcpCallControls: null,
             mcpGovernance: null,
-            codexSkillControls: null,
-            codexNetworkGuard: null,
-            codexNetworkChecks: null,
-            codexPathGuard: null,
             filters: null,
             policyCases: null,
             taskLocks: null,
@@ -264,70 +214,6 @@ export function useProtectionQueue(refreshKey?: string) {
       ]);
       if (!mounted.current || currentKey.current !== key || active.current !== controller) return;
       if (controller.signal.aborted) throw new Error('deadline-exceeded');
-      // Inventory and Codex history share a bounded worker slot; finish the first read before the second.
-      const codexValue = await requestLocal(
-        '/api/inventory/codex-controls',
-        undefined,
-        controller.signal,
-      ).catch(() => null);
-      if (
-        !mounted.current ||
-        currentKey.current !== key ||
-        active.current !== controller ||
-        controller.signal.aborted
-      )
-        return;
-      const codexSkillControls = validateCodexSkillControlState(codexValue) ? codexValue : null;
-      const guardValue = await requestLocal(
-        '/api/codex-network-guard',
-        undefined,
-        controller.signal,
-      ).catch(() => null);
-      if (
-        !mounted.current ||
-        currentKey.current !== key ||
-        active.current !== controller ||
-        controller.signal.aborted
-      )
-        return;
-      const codexNetworkGuard = validateCodexNetworkGuardState(guardValue) ? guardValue : null;
-      const checkValue = await requestLocal(
-        '/api/codex-network-checks',
-        undefined,
-        controller.signal,
-      ).catch(() => null);
-      if (
-        !mounted.current ||
-        currentKey.current !== key ||
-        active.current !== controller ||
-        controller.signal.aborted
-      )
-        return;
-      const codexNetworkChecks =
-        validateCodexNetworkCheckState(checkValue) &&
-        checkValue.workspaceId === workspaceId &&
-        (!codexNetworkGuard?.controlContextId ||
-          checkValue.controlContextId === codexNetworkGuard.controlContextId)
-          ? checkValue
-          : null;
-      const pathValue = await requestLocal(
-        '/api/codex-path-guard',
-        undefined,
-        controller.signal,
-      ).catch(() => null);
-      if (
-        !mounted.current ||
-        currentKey.current !== key ||
-        active.current !== controller ||
-        controller.signal.aborted
-      )
-        return;
-      const codexPathGuard =
-        validateCodexPathGuardState(pathValue) &&
-        (!codexNetworkGuard?.controlContextId ||
-          pathValue.controlContextId === codexNetworkGuard.controlContextId)
-          ? pathValue
-          : null;
       const [
         inv,
         inc,
@@ -409,10 +295,6 @@ export function useProtectionQueue(refreshKey?: string) {
           : null;
       const messages = [
         !mcpGovernance && 'MCP governance could not be refreshed.',
-        !codexNetworkGuard && 'Codex network settings could not be refreshed.',
-        !codexNetworkChecks && 'Codex copied-policy history could not be refreshed.',
-        !codexPathGuard && 'Codex credential path history could not be refreshed.',
-        !codexSkillControls && 'Codex skill settings could not be refreshed.',
         !mcpCallControls && 'MCP call-control authority could not be refreshed.',
         !(
           assessmentResult.status === 'fulfilled' &&
@@ -470,10 +352,6 @@ export function useProtectionQueue(refreshKey?: string) {
           mcpGovernance,
           workspaceId,
         ),
-        codexSkillControls,
-        codexNetworkGuard,
-        codexNetworkChecks,
-        codexPathGuard,
         quarantine,
         live,
         secrets,
@@ -817,14 +695,6 @@ export function useProtectionQueue(refreshKey?: string) {
     unconfirmedMcpGovernance: [...mcpGovernancePending(requestLocal).values()].filter(
       (write) => write.preview.binding.workspaceId === workspaceId,
     ),
-    codexSkillControls: evidence?.codexSkillControls ?? null,
-    codexNetworkGuard: evidence?.codexNetworkGuard ?? null,
-    codexNetworkChecks: evidence?.codexNetworkChecks ?? null,
-    codexPathGuard: evidence?.codexPathGuard ?? null,
-    unconfirmedCodexPaths: [...codexPathGuardPending(requestLocal).values()],
-    unconfirmedNetworkGuard: [...codexNetworkGuardPending(requestLocal).values()],
-    unconfirmedNetworkChecks: [...codexNetworkCheckPending(requestLocal).values()],
-    unconfirmedCodexSkillControls: [...codexSkillControlPendingWrites(requestLocal).values()],
     unconfirmedMcpCallControls: [...callControlPending(requestLocal).values()].filter(
       (write) => write.preview.workspaceId === workspaceId,
     ),

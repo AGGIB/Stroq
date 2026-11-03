@@ -1,7 +1,3 @@
-import { runCodexNetworkGuardOperation } from './codex-network-guard-operations.ts';
-import { CODEX_NETWORK_GUARD_ERRORS } from '../lib/codex-network-guard.ts';
-import { runCodexPathGuardOperation } from './codex-path-guard-operations.ts';
-import { CODEX_PATH_GUARD_ERRORS } from '../lib/codex-path-guard.ts';
 import { skillLocation, type SkillLocation } from '../lib/skill-location.ts';
 import type { InventoryQuarantineReason } from '../lib/inventory.ts';
 import { quarantineEligibility } from './skill-quarantine-source.ts';
@@ -61,10 +57,6 @@ import {
   mcpEntryMetadata,
   readMcpSource,
 } from './mcp-sources.ts';
-import { runCodexSkillControlOperation } from './codex-skill-control-operations.ts';
-import { CODEX_SKILL_CONTROL_ERRORS } from '../lib/codex-skill-controls.ts';
-import { captureCodexSkillSources } from './codex-skill-source-capture.ts';
-import { assertCodexSkillRootBinding } from './codex-skill-source-binding.ts';
 
 type Scope = 'project' | 'user';
 type Agent = 'claude-code' | 'claude-desktop' | 'cursor' | 'windsurf' | 'codex' | 'shared';
@@ -483,105 +475,10 @@ function snapshot(
 }
 
 async function run() {
-  if (
-    workerData.operation === 'codex-sources' ||
-    String(workerData.operation).startsWith('codex-control-') ||
-    String(workerData.operation).startsWith('codex-network-') ||
-    String(workerData.operation).startsWith('codex-path-')
-  )
-    await assertCodexSkillRootBinding(
-      workerData.project,
-      workerData.userHome,
-      workerData.codexExpectedRoots,
-    );
   const project = await realpath(workerData.project);
   const userHome = await realpath(workerData.userHome);
   const home = resolve(workerData.home);
   const mcpEnvironment = workerData.mcpEnvironment ?? {};
-  if (
-    [
-      'codex-path-state',
-      'codex-path-capture',
-      'codex-path-preview',
-      'codex-path-apply',
-      'codex-path-recheck',
-    ].includes(workerData.operation)
-  ) {
-    const result = await runCodexPathGuardOperation(
-      workerData.operation,
-      {
-        project,
-        userHome,
-        codexEnvironment: workerData.codexEnvironment ?? {},
-        deadline: workerData.deadline,
-        runtimeSha256: workerData.runtimeSha256,
-        runtimePaths: workerData.runtimePaths,
-      },
-      workerData.pathGuardData ?? {},
-    );
-    await assertCodexSkillRootBinding(project, userHome, workerData.codexExpectedRoots);
-    return result;
-  }
-  if (
-    [
-      'codex-network-state',
-      'codex-network-capture',
-      'codex-network-preview',
-      'codex-network-apply',
-      'codex-network-recheck',
-      'codex-network-check-prepare',
-    ].includes(workerData.operation)
-  ) {
-    const result = await runCodexNetworkGuardOperation(
-      workerData.operation,
-      {
-        project,
-        userHome,
-        codexEnvironment: workerData.codexEnvironment ?? {},
-        deadline: workerData.deadline,
-        runtimeSha256: workerData.runtimeSha256,
-        runtimePaths: workerData.runtimePaths,
-        nativeBinaryPath: workerData.nativeBinaryPath,
-      },
-      workerData.networkGuardData ?? {},
-    );
-    await assertCodexSkillRootBinding(project, userHome, workerData.codexExpectedRoots);
-    return result;
-  }
-  if (
-    [
-      'codex-control-state',
-      'codex-control-preview',
-      'codex-control-apply',
-      'codex-control-recheck',
-    ].includes(workerData.operation)
-  ) {
-    const result = await runCodexSkillControlOperation(
-      workerData.operation,
-      {
-        project,
-        userHome,
-        codexEnvironment: workerData.codexEnvironment ?? {},
-        deadline: workerData.deadline,
-        runtimeSha256: workerData.runtimeSha256,
-        runtimePaths: workerData.runtimePaths,
-      },
-      workerData.controlData ?? {},
-    );
-    await assertCodexSkillRootBinding(project, userHome, workerData.codexExpectedRoots);
-    return result;
-  }
-  if (workerData.operation === 'codex-sources') {
-    const report = await captureCodexSkillSources({
-      project,
-      userHome,
-      codexEnvironment: workerData.codexEnvironment ?? {},
-      deadline: workerData.deadline,
-      runtimeSha256: workerData.runtimeSha256,
-    });
-    await assertCodexSkillRootBinding(project, userHome, workerData.codexExpectedRoots);
-    return report;
-  }
   if (['signal-state', 'signal-preview', 'signal-apply'].includes(workerData.operation))
     return runInventorySignalOperation(
       workerData.operation,
@@ -728,9 +625,6 @@ run()
   .then((result) => parentPort?.postMessage(result))
   .catch((error: Error) => {
     const code = [
-      ...CODEX_SKILL_CONTROL_ERRORS,
-      ...CODEX_NETWORK_GUARD_ERRORS,
-      ...CODEX_PATH_GUARD_ERRORS,
       'baseline-invalid',
       'review-conflict',
       'review-incomplete',

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { harness } from './codex-skill-sources-ui-harness.mjs';
+import { harness } from './agents-ui-harness.mjs';
 const ids = ['claude-code', 'cursor', 'codex', 'windsurf'];
 const agent = (id, patch = {}) => ({
   id,
@@ -30,17 +30,6 @@ test('Agents presents all four branded rows without the three large inspection m
     /stat-grid|Agents inspected|Hooks configured|Approval unverified<\/span><strong/,
   );
   for (const id of ids) assert(html.includes(`id="${id}"`));
-  assert.deepEqual(h.calls, []);
-});
-test('Codex controls remain outside Details with real component state and no capture on render', () => {
-  const h = harness({}, agent('codex')),
-    html = h.render();
-  const details = html.indexOf('<details class="agent-row-details"'),
-    actions = html.indexOf('class="agent-row-controls"');
-  assert(actions >= 0 && details > actions);
-  for (const text of ['Network guard', 'Credential paths', 'Skill sources'])
-    assert(html.indexOf(text) < details);
-  assert.equal(h.button('Manage').props.disabled, false);
   assert.deepEqual(h.calls, []);
 });
 test('each agent offers its scoped offline hook check before the separate in-agent subscription test', () => {
@@ -110,7 +99,6 @@ test('agent anchor and selected scope remain exact while presentation compacts',
     html = h.render();
   assert.match(html, /<article id="cursor"[^>]*tabindex="-1"/);
   assert.match(html, /Workspace/);
-  assert.equal((html.match(/Credential paths/g) ?? []).length, 0);
   assert.deepEqual(h.calls, []);
 });
 test('scoped row layout keeps a single desktop list and 44px controls without shrinking body type', async () => {

@@ -26,6 +26,10 @@ Nine commands left the CLI. Typing one prints a single line that says it was rem
 
 Older versions of Stroq stay gated: an agent still cannot run `npx @stroq/cli@<older version> add`, `harden apply`, `task` or `permit` through a shell, because the state gate keeps every name above.
 
+The console is being cut down to five screens (Check, Live, Agents, Rules, Skills & MCP). Taken out so far:
+
+- **The Codex Network, Path and Skill guards of the console** (Agents & coverage → Codex → Manage, Credential paths and Codex sources, and their rows on Protection). Their own documents said the protection there was not verified. Codex is still an agent: its hooks are set up and checked on the Agents page, its settings are read by the settings check, and its `.codex/skills` folder is still inventoried and can still be quarantined. To restrict what Codex reaches, use Codex's own `config.toml` settings.
+
 ### Fixed
 
 - **The card no longer counts Stroq's own Copilot and Windsurf hooks as code that runs by itself.** `stroq init` writes a second command field for them, `powershell`, as `& ` and the same line, and only the bare line was known as Stroq's. Each command field is judged on its own with the checks as before, so a handler with any other line or field still counts.

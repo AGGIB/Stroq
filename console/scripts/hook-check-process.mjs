@@ -108,7 +108,7 @@ function kill(pid, child, signal = 'SIGKILL') {
 }
 
 /** Only roots created by this worker and pinned over private IPC are eligible for cleanup. */
-async function cleanup(root, network = false) {
+async function cleanup(root) {
   try {
     const info = await lstat(root.root);
     if (
@@ -118,9 +118,7 @@ async function cleanup(root, network = false) {
       (info.mode & 0o077) !== 0 ||
       (typeof process.getuid === 'function' && info.uid !== process.getuid()) ||
       dirname(await realpath(root.root)) !== (await realpath(tmpdir())) ||
-      !(network ? /^stroq-console-net-[A-Za-z0-9]+$/ : /^stroq-console-hook-[A-Za-z0-9]+$/).test(
-        basename(root.root),
-      )
+      !/^stroq-console-hook-[A-Za-z0-9]+$/.test(basename(root.root))
     )
       throw new Error('cleanup-failed');
     const marker = join(root.root, '.stroq-live-throwaway');
@@ -165,21 +163,12 @@ async function cleanup(root, network = false) {
 
 /** A strict supervisor for the own-CLI offline check. It never starts a vendor host or a shell. */
 export async function executeHookCheck(input, options) {
-  return execute(input, options, false);
-}
-
-/** Fixed native-canary variant. The caller supplies the bundled closed public result validator. */
-export async function executeCodexNetworkCheck(input, options) {
-  if (typeof options?.validateResult !== 'function') throw Error('invalid-input');
-  return execute(input, options, true);
-}
-
-async function execute(input, options, network) {
   if (
     !options ||
     typeof options.adapterPath !== 'string' ||
     !isAbsolute(options.adapterPath) ||
-    (!network && (typeof options.cliPath !== 'string' || !isAbsolute(options.cliPath)))
+    typeof options.cliPath !== 'string' ||
+    !isAbsolute(options.cliPath)
   )
     throw new Error('invalid-input');
   if (options.signal?.aborted) throw new Error('cancelled');
@@ -190,11 +179,7 @@ async function execute(input, options, network) {
     return await new Promise((resolve, reject) => {
       child = spawn(
         process.execPath,
-        [
-          '--max-old-space-size=256',
-          options.adapterPath,
-          network ? '--stroq-codex-network-check-engine' : '--stroq-hook-check-engine',
-        ],
+        ['--max-old-space-size=256', options.adapterPath, '--stroq-hook-check-engine'],
         {
           cwd: dirname(options.adapterPath),
           // Keep the worker's temp namespace identical to the supervisor's. No login env.
@@ -257,7 +242,7 @@ async function execute(input, options, network) {
         send({
           type: 'start',
           input,
-          ...(!network ? { cliPath: options.cliPath } : {}),
+          cliPath: options.cliPath,
           faults: typeof options.fault === 'function',
         }),
       );
@@ -292,12 +277,7 @@ async function execute(input, options, network) {
           roots.set(message.root.root, message.root);
           return;
         }
-        if (
-          message.type === 'progress' &&
-          (network ? ['positive', 'native', 'cleanup'] : ['ordinary', 'encoded-fetch']).includes(
-            message.id,
-          )
-        ) {
+        if (message.type === 'progress' && ['ordinary', 'encoded-fetch'].includes(message.id)) {
           try {
             options.onProgress?.(message.id);
           } catch {
@@ -326,20 +306,12 @@ async function execute(input, options, network) {
         if (
           message.type === 'result' &&
           answer === undefined &&
-          (network
-            ? options.validateResult(message.result)
-            : validHookCheckEngineResult(message.result))
+          validHookCheckEngineResult(message.result)
         ) {
-          if (network && (roots.size !== 1 || children.size !== 0)) return stop('invalid-report');
           answer = message.result;
           return;
         }
-        if (
-          message.type === 'error' &&
-          (ERRORS.has(message.error) ||
-            (network &&
-              ['unsupported', 'native-changed', 'listener-failed'].includes(message.error)))
-        ) {
+        if (message.type === 'error' && ERRORS.has(message.error)) {
           if (message.error === 'cleanup-failed') problem = 'cleanup-failed';
           else problem ??= message.error;
           return;
@@ -362,7 +334,7 @@ async function execute(input, options, network) {
     let failed = false;
     for (const root of roots.values()) {
       try {
-        await cleanup(root, network);
+        await cleanup(root);
       } catch {
         failed = true;
       }

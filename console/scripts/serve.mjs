@@ -49,7 +49,6 @@ import {
   routeWorkspaceTasks,
   createSessionTaintControl,
   routeSessionTaint,
-  acquireProtectionCheckLease,
   createJournalViewService,
   createPostureService,
   createThreatFeedService,
@@ -61,8 +60,6 @@ import { createSecretScanService } from './secret-scan-service.mjs';
 import { createIncidentRecheckService } from './incident-recheck.mjs';
 import { routeOperational } from './operational-http.mjs';
 import { runtimeLayout } from './runtime-layout.mjs';
-import { createRunStore } from './run-store.mjs';
-import { executeCodexNetworkCheck } from './hook-check-process.mjs';
 
 const DEFAULT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../out');
 const MIME = {
@@ -185,9 +182,6 @@ export async function startServer({
   mcpCallControls: suppliedMcpCallControls,
   mcpEnvironment: suppliedMcpEnvironment,
   codexEnvironment: suppliedCodexEnvironment,
-  codexNetworkGuard: suppliedCodexNetworkGuard,
-  codexPathGuard: suppliedCodexPathGuard,
-  codexNetworkChecks: suppliedCodexNetworkChecks,
   agents: suppliedAgents,
   incidents: suppliedIncidents,
   incidentAssessments: suppliedIncidentAssessments,
@@ -243,16 +237,14 @@ export async function startServer({
     suppliedPolicyHistory ??
     createPolicyHistoryService({ home: selectedHome, caseStore: policyCaseStore });
   const inventory = suppliedInventory ?? createInventory(context);
-  let networkSchema;
+  let apiSchema;
   try {
-    networkSchema = await import(
-      pathToFileURL(runtimeLayout().adapter('local-api-schema.js')).href
-    );
+    apiSchema = await import(pathToFileURL(runtimeLayout().adapter('local-api-schema.js')).href);
   } catch {
     /* Finite feature refusal when the local runtime is unavailable. */
   }
   const mcpGovernance = suppliedMcpGovernance ??
-    networkSchema?.createMcpGovernanceService?.({
+    apiSchema?.createMcpGovernanceService?.({
       ...context,
       workspaceId,
       platform: process.platform,
@@ -269,90 +261,6 @@ export async function startServer({
       ),
       close: async () => {},
     };
-  const unavailableNetwork = {
-    read: async () => ({ status: 503, body: { error: 'codex-network-unavailable' } }),
-    capture: async () => ({ status: 503, body: { error: 'codex-network-unavailable' } }),
-    preview: async () => ({ status: 503, body: { error: 'codex-network-unavailable' } }),
-    apply: async () => ({ status: 503, body: { error: 'codex-network-unavailable' } }),
-    recheck: async () => ({ status: 503, body: { error: 'codex-network-unavailable' } }),
-    start: async () => ({ status: 503, body: { error: 'codex-network-check-unavailable' } }),
-    cancel: async () => ({ status: 503, body: { error: 'codex-network-check-unavailable' } }),
-    close: async () => {},
-  };
-  const codexNetworkGuard =
-    suppliedCodexNetworkGuard ??
-    networkSchema?.createCodexNetworkGuardService?.({ inventory }) ??
-    unavailableNetwork;
-  const codexPathGuard = suppliedCodexPathGuard ??
-    networkSchema?.createCodexPathGuardService?.({ inventory }) ?? {
-      ...Object.fromEntries(
-        ['read', 'capture', 'preview', 'apply', 'recheck'].map((name) => [
-          name,
-          async () => ({ status: 503, body: { error: 'codex-path-guard-unavailable' } }),
-        ]),
-      ),
-      close: async () => {},
-    };
-  let codexNetworkChecks = suppliedCodexNetworkChecks;
-  if (!codexNetworkChecks && typeof networkSchema?.createCodexNetworkCheckService === 'function') {
-    const [p, u] = await Promise.all([lstat(selectedProject), lstat(selectedUserHome)]);
-    const storeId = createHash('sha256')
-      .update(
-        JSON.stringify([
-          'stroq-codex-network-checks/1',
-          selectedProject,
-          p.dev,
-          p.ino,
-          selectedUserHome,
-          u.dev,
-          u.ino,
-          selectedHome,
-          codexEnvironment.CODEX_HOME ?? null,
-        ]),
-      )
-      .digest('hex');
-    const store = await createRunStore({
-      home: selectedHome,
-      workspaceId: storeId,
-      namespace: 'codex-network-checks',
-      loadValidator: async () => ({
-        validateRun: (job) =>
-          networkSchema.validateCodexNetworkCheckJob(job) &&
-          job.binding.workspaceId === workspaceId,
-      }),
-    });
-    codexNetworkChecks = await networkSchema.createCodexNetworkCheckService({
-      inventory,
-      workspaceId,
-      store,
-      acquireLease: () =>
-        acquireProtectionCheckLease({
-          home: selectedHome,
-          storeId: createHash('sha256')
-            .update(
-              JSON.stringify([
-                'stroq-codex-network-check-lease/1',
-                selectedProject,
-                p.dev,
-                p.ino,
-                selectedUserHome,
-                u.dev,
-                u.ino,
-                selectedHome,
-              ]),
-            )
-            .digest('hex'),
-        }),
-      run: (input, extra) =>
-        executeCodexNetworkCheck(input, {
-          ...extra,
-          adapterPath: runtimeLayout().adapter('hook-check-engine.js'),
-          validateResult: networkSchema.validateCodexNetworkCheckResult,
-          timeoutMs: 30000,
-        }),
-    });
-  }
-  codexNetworkChecks ??= unavailableNetwork;
   const quarantine = suppliedQuarantine ?? createSkillQuarantine(context);
   const credentialFilters =
     suppliedCredentialFilters ??
@@ -487,48 +395,6 @@ export async function startServer({
             secrets,
             comparisons,
           });
-        } else if (parsed.path.startsWith('/api/codex-path-guard') && req.url.includes('?')) {
-          response = { status: 404, body: { error: 'not-found' } };
-        } else if (parsed.path === '/api/codex-path-guard') {
-          response =
-            req.method === 'GET'
-              ? await codexPathGuard.read()
-              : { status: 405, body: { error: 'method-not-allowed' } };
-        } else if (
-          /^\/api\/codex-path-guard\/(?:capture|preview|apply|recheck)$/.test(parsed.path)
-        ) {
-          response = await jsonAction(
-            req,
-            origin,
-            (input) => codexPathGuard[parsed.parts.at(-1)](input),
-            4096,
-          );
-        } else if (
-          parsed.path === '/api/codex-network-guard' ||
-          parsed.path === '/api/codex-network-checks'
-        ) {
-          response =
-            req.method === 'GET'
-              ? await (
-                  parsed.path.endsWith('-guard') ? codexNetworkGuard : codexNetworkChecks
-                ).read()
-              : { status: 405, body: { error: 'method-not-allowed' } };
-        } else if (
-          /^\/api\/codex-network-guard\/(?:capture|preview|apply|recheck)$/.test(parsed.path)
-        ) {
-          response = await jsonAction(
-            req,
-            origin,
-            (input) => codexNetworkGuard[parsed.parts.at(-1)](input),
-            4096,
-          );
-        } else if (/^\/api\/codex-network-checks\/(?:preview|start|cancel)$/.test(parsed.path)) {
-          response = await jsonAction(
-            req,
-            origin,
-            (input) => codexNetworkChecks[parsed.parts.at(-1)](input),
-            4096,
-          );
         } else if (parsed.path.startsWith('/api/incident-assessments')) {
           response = await routeIncidentAssessments(req, parsed.path, origin, incidentAssessments);
         } else if (parsed.path.startsWith('/api/session-taint')) {
@@ -577,34 +443,6 @@ export async function startServer({
               : { status: 405, body: { error: 'method-not-allowed' } };
         } else if (parsed.path === '/api/inventory/review') {
           response = await jsonAction(req, origin, (input) => inventory.review(input), 4096);
-        } else if (parsed.path === '/api/inventory/codex-sources') {
-          response = await jsonAction(req, origin, (input) => inventory.codexSources(input), 4096);
-        } else if (parsed.path === '/api/inventory/codex-controls') {
-          response =
-            req.method === 'GET'
-              ? await inventory.codexControlState({})
-              : { status: 405, body: { error: 'method-not-allowed' } };
-        } else if (parsed.path === '/api/inventory/codex-control-preview') {
-          response = await jsonAction(
-            req,
-            origin,
-            (input) => inventory.codexControlPreview(input),
-            4096,
-          );
-        } else if (parsed.path === '/api/inventory/codex-control-apply') {
-          response = await jsonAction(
-            req,
-            origin,
-            (input) => inventory.codexControlApply(input),
-            4096,
-          );
-        } else if (parsed.path === '/api/inventory/codex-control-recheck') {
-          response = await jsonAction(
-            req,
-            origin,
-            (input) => inventory.codexControlRecheck(input),
-            4096,
-          );
         } else if (parsed.path === '/api/inventory/inspect') {
           response = await jsonAction(req, origin, (input) => inventory.inspect(input), 4096);
         } else if (parsed.path === '/api/inventory/compare') {
@@ -645,7 +483,7 @@ export async function startServer({
                 (input) => mcpGovernance[parsed.path.split('/').at(-1)](input),
                 16 * 1024,
                 (text) => {
-                  const parsed = networkSchema?.parsePolicyHistoryJson?.(text);
+                  const parsed = apiSchema?.parsePolicyHistoryJson?.(text);
                   if (!parsed?.ok) throw Error('invalid-request');
                   const pending = [parsed.value];
                   while (pending.length) {
@@ -766,9 +604,6 @@ export async function startServer({
           policyHistory,
           mcpGovernance,
           inventory,
-          codexNetworkGuard,
-          codexPathGuard,
-          codexNetworkChecks,
           quarantine,
           credentialFilters,
           mcp,

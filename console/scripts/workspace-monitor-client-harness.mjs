@@ -185,36 +185,6 @@ export function monitorHarness(fixtures) {
         platform.requestLocal,
       );
     },
-    get codexSkillWrites() {
-      return load(
-        resolve(root, 'lib/codex-skill-controls-client.ts'),
-      ).codexSkillControlPendingWrites(platform.requestLocal);
-    },
-    get networkGuardWrites() {
-      return load(resolve(root, 'lib/codex-network-client.ts')).codexNetworkGuardPending(
-        platform.requestLocal,
-      );
-    },
-    get networkCheckWrites() {
-      return load(resolve(root, 'lib/codex-network-client.ts')).codexNetworkCheckPending(
-        platform.requestLocal,
-      );
-    },
-    notifyNetworkWrites() {
-      load(resolve(root, 'lib/codex-network-client.ts')).notifyCodexNetworkPending(
-        platform.requestLocal,
-      );
-    },
-    get pathGuardWrites() {
-      return load(resolve(root, 'lib/codex-path-guard-client.ts')).codexPathGuardPending(
-        platform.requestLocal,
-      );
-    },
-    notifyPathGuardWrites() {
-      load(resolve(root, 'lib/codex-path-guard-client.ts')).notifyCodexPathGuardPending(
-        platform.requestLocal,
-      );
-    },
     get governanceWrites() {
       return load(resolve(root, 'lib/mcp-governance-client.ts')).mcpGovernancePending(
         platform.requestLocal,

@@ -26,12 +26,6 @@ import { POSTURE_ERROR_MESSAGES } from '@/lib/posture';
 import { TASK_LOCK_PAGE_ERROR_MESSAGES } from '@/lib/task-lock-page';
 import { MCP_TOOL_CONTRACT_ERROR_MESSAGES } from '@/lib/mcp-tool-contracts';
 import { MCP_CALL_CONTROL_ERROR_MESSAGES } from '@/lib/mcp-call-controls';
-import { CODEX_SKILL_CONTROL_ERROR_MESSAGES } from '@/lib/codex-skill-controls-client';
-import {
-  CODEX_NETWORK_ERROR_MESSAGES,
-  createCodexNetworkCheckStartRefusal,
-} from '@/lib/codex-network-client';
-import { CODEX_PATH_GUARD_MESSAGES } from '@/lib/codex-path-guard-client';
 import { MCP_GOVERNANCE_ERROR_MESSAGES } from '@/lib/mcp-governance-client';
 
 interface Platform extends Snapshot {
@@ -244,18 +238,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
           const refusal = createSessionTaintRefusal(code, res.status);
           if (refusal) throw refusal;
         }
-        if (
-          path === '/api/codex-network-checks/start' &&
-          res.status === 409 &&
-          report !== null &&
-          typeof report === 'object' &&
-          !Array.isArray(report) &&
-          Object.keys(report).length === 1 &&
-          Object.hasOwn(report, 'error')
-        ) {
-          const refusal = createCodexNetworkCheckStartRefusal(code, res.status);
-          if (refusal) throw refusal;
-        }
         throw new Error(
           (path === '/api/policy/try' ? TRY_ERROR_MESSAGES[code] : undefined) ??
             (path.startsWith('/api/journal/') ? JOURNAL_ERROR_MESSAGES[code] : undefined) ??
@@ -277,18 +259,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
               : undefined) ??
             (path === '/api/mcp-governance' || path.startsWith('/api/mcp-governance/')
               ? MCP_GOVERNANCE_ERROR_MESSAGES[code as keyof typeof MCP_GOVERNANCE_ERROR_MESSAGES]
-              : undefined) ??
-            (path === '/api/inventory/codex-controls' ||
-            /^\/api\/inventory\/codex-control-(?:preview|apply|recheck)$/.test(path)
-              ? CODEX_SKILL_CONTROL_ERROR_MESSAGES[
-                  code as keyof typeof CODEX_SKILL_CONTROL_ERROR_MESSAGES
-                ]
-              : undefined) ??
-            (/^\/api\/codex-network-(?:guard|checks)(?:\/|$)/.test(path)
-              ? CODEX_NETWORK_ERROR_MESSAGES[code]
-              : undefined) ??
-            (/^\/api\/codex-path-guard(?:\/|$)/.test(path)
-              ? CODEX_PATH_GUARD_MESSAGES[code as keyof typeof CODEX_PATH_GUARD_MESSAGES]
               : undefined) ??
             (path === '/api/task-locks/page' ? TASK_LOCK_PAGE_ERROR_MESSAGES[code] : undefined) ??
             (path === '/api/policy/history' || path.startsWith('/api/policy/restore/')
