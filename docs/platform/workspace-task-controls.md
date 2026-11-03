@@ -1,5 +1,7 @@
 # Workspace task controls
 
+> **No screen of the console shows this any more.** The console has five screens (Check, Live, Agents, Rules, Skills & MCP: see `check.md`, `live-view.md`, `skills-mcp.md`). The service described here is still in `console/scripts/` with its tests and is not reached from any screen; it is to be removed.
+
 The workspace report offers **Make tasks manual** for a captured, regular
 `.vscode/tasks.json` in the selected workspace. This action changes the explicit
 `folderOpen` and `worktreeCreated` triggers to `default`. Commands and manually

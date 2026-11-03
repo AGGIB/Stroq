@@ -1,5 +1,7 @@
 # Local operator assessments
 
+> **No screen of the console shows this any more.** The console has five screens (Check, Live, Agents, Rules, Skills & MCP: see `check.md`, `live-view.md`, `skills-mcp.md`). The service described here is still in `console/scripts/` with its tests and is not reached from any screen; it is to be removed.
+
 An investigation can retain an operator's assessment and finite reason for one exact recorded finding. **Reviewed** remains an independent acknowledgement. An assessment does not change the journal, policy, trust, session taint, learned provenance, permits, native settings or host outcome. A marked issue is an operator judgement, not proof of an attack; accepting risk does not remediate it.
 
 ## Workflow

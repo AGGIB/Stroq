@@ -1,5 +1,7 @@
 # Report queue and exact history
 
+> **No screen of the console shows this any more.** The console has five screens (Check, Live, Agents, Rules, Skills & MCP: see `check.md`, `live-view.md`, `skills-mcp.md`). The service described here is still in `console/scripts/` with its tests and is not reached from any screen; it is to be removed.
+
 The Protection queue reads existing inventory, incidents, agent configuration,
 quarantine, MCP recovery, saved policy checks and credential reports. Opening it never starts a hook
 check or credential scan. Attention items sort before ordinary history; evidence
@@ -12,14 +14,13 @@ Recorded routes do not establish delivery, a live block or absence of exposure.
 
 ## Selection and retention
 
-- `/keys/` selects a credential report through the same workspace-bound `job=`
-  contract. The server retains up to **eight jobs in memory**. Without an explicit
-  selection the newest job is chosen and the URL is made canonical; an explicit
-  missing selection never falls back to it.
+- Credential comparisons no longer have a screen: the card on Check says which keys left this
+  machine, and `stroq sent` shows where each went. The server's job store for them (up to eight jobs
+  in memory, no UI) is left over from the page that showed them and is not read by the console.
 - Restarting the server clears the in-memory job history. Export a report to
   retain it. Canonical local links omit authentication and arbitrary search
   text; opening one still requires a connection to the original local server.
-- `/skills/mcp/` rechecks durable private recovery records. Reappeared registrations,
+- The part **Undo: MCP changes** of Skills & MCP (`/skills/?part=registrations`) rechecks durable private recovery records. Reappeared registrations,
   changed recovery files and incomplete operations return to the queue; successful
   configuration changes are not counted as host protection. Project records from
   another workspace are not treated as current-workspace configuration findings.

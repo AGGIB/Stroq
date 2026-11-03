@@ -1,7 +1,9 @@
 # Live
 
 **Live** (`/live/`) shows what your agents are doing as it happens: a status line, four counts and a
-feed that grows from the top. It is the screen to leave open next to an agent, and the one that
+feed that grows from the top. It is also where the older Activity, event, Sessions, Overview and
+Investigations pages went; their addresses lead here (`/activity/event/?id=…&evidence=<sha>` opens
+that event). It is the screen to leave open next to an agent, and the one that
 shows Stroq working: a denied action appears within about two seconds of the hook recording it.
 
 Everything on it comes from the audit journal, `<Stroq home>/audit.jsonl`. It reads; it never starts,
@@ -18,8 +20,19 @@ changes or stops anything.
 - **Feed.** One row per recorded action: time, the decision (`Allowed`, `Asked you`, `Denied`, or
   `Flagged` for a result that looked like an instruction to the agent), a plain title such as
   _Run a command_ or _Write a file_, and what Stroq noticed (for example _Outbound shell command,
-  Credential in outbound input. Rule deny-secret-egress._). **Needs a look** filters to denied, asked
-  and flagged rows.
+  Credential in outbound input. Rule deny-secret-egress._). The filters **All / Denied / Asked /
+  Flagged** (each says how many rows it keeps), a session, a day and a search over the rows on screen
+  narrow it; all of them are in the address (`?show=`, `session=`, `date=`, `q=`, `event=`), so a view
+  can be linked. The filter is called Denied and not Stopped because the journal records the decision,
+  not what the host then did.
+- **The chain of a row.** A row opens in place into four steps: what the agent read (the flagged
+  results the same session had before it, said as order and not as cause), what it did (the coarse tool
+  kind and the action classes; the command, path or address stays in the journal), the decision, and
+  the rule (linked to the rules reference on Rules). A denied, asked or flagged row also loads the
+  recorded evidence of the finding (historical classes, origin matches and gaps, scan and trust
+  evidence; `recorded-evidence.md`), a comparison with the current policy and its **Save regression
+  check**. `stroq why --seq N` and `stroq untaint --session <id>` are offered to copy; clearing a
+  session stays a command, and `stroq why` prints the real session id.
 - **Notify me.** An opt-in button in the status line. When on, a desktop notification appears while
   the page is open in a background tab and an action is denied or a result is flagged (not for an
   allowed or asked action; whether a host also asked you is not something the journal records). The text is built from
@@ -95,7 +108,7 @@ journal records no agent or project, so the page does not say which agent acted.
 
 ## Where it lives
 
-- Page: `console/components/platform/live-view.tsx`, hook `use-journal-live.ts`; wording, schemas
+- Page: `console/components/platform/live-view.tsx` and `live-chain.tsx`, filters in `console/lib/live-feed.ts`, address in `live-navigation.ts`, hook `use-journal-live.ts`; wording, schemas
   and the row merge in `console/lib/journal-view.ts`.
 - Server: `console/scripts/journal-view-reader.ts` (safe bounded read and projection),
   `journal-view-service.ts`, `journal-view-http.ts`, loaded through `workspace-monitor-bridge.mjs`

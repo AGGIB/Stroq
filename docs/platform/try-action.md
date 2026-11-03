@@ -1,6 +1,6 @@
 # Try an action
 
-**Try an action** (`/try/`) answers one question without touching anything: _what would my policy do
+**Try an action** (the top of Rules, `/policies/#try`) answers one question without touching anything: _what would my policy do
 with this?_ Type a command, a file to read or write, or a page to fetch, and the real Stroq engine
 judges it twice: in a clean session, and in the same session after the agent has read a file that
 hides an instruction. The two answers side by side show what no list of rules can: the same action
