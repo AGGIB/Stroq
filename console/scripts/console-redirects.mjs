@@ -6,11 +6,11 @@
 // Plain data and one function, with no imports: the server uses it before it looks for a file, and a
 // test reads it to check that every address leads to a screen that exists.
 
-const STOPPED = 'stopped';
+const DENIED = 'denied';
 const ASKED = 'asked';
 const FLAGGED = 'flagged';
 const DECISION_TO_SHOW = new Map([
-  ['block', STOPPED],
+  ['block', DENIED],
   ['ask', ASKED],
   ['flag', FLAGGED],
 ]);

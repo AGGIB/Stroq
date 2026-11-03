@@ -33,7 +33,7 @@ test('an address with no closing slash is treated as the one with it', () => {
 test('Activity and Sessions keep a session, a decision filter and words', () => {
   assert.equal(
     redirectFor('/activity/', `decision=block&session=${SESSION}&q=curl&agent=Cursor&days=7`),
-    `/live/?show=stopped&session=${SESSION}&q=curl`,
+    `/live/?show=denied&session=${SESSION}&q=curl`,
   );
   assert.equal(redirectFor('/activity/', 'decision=ask'), '/live/?show=asked');
   assert.equal(redirectFor('/activity/', 'decision=flag'), '/live/?show=flagged');

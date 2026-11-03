@@ -8,10 +8,10 @@ describe('the Live address', () => {
   it('reads a selection and leaves out what it does not understand', () => {
     expect(
       liveSelection(
-        query(`show=stopped&session=session-0123456789abcdef&date=2026-11-02&event=${SHA}`),
+        query(`show=denied&session=session-0123456789abcdef&date=2026-11-02&event=${SHA}`),
       ),
     ).toEqual({
-      show: 'stopped',
+      show: 'denied',
       session: 'session-0123456789abcdef',
       date: '2026-11-02',
       text: '',

@@ -5,7 +5,7 @@ import type { ToolCall } from './platform-types';
  * event whose chain is open. Everything is read back through these guards, so a hand-made address
  * can only select; it never reaches anything the page does not already show.
  */
-export const LIVE_SHOWS = ['all', 'stopped', 'asked', 'flagged'] as const;
+export const LIVE_SHOWS = ['all', 'denied', 'asked', 'flagged'] as const;
 export type LiveShow = (typeof LIVE_SHOWS)[number];
 
 export interface LiveSelection {
