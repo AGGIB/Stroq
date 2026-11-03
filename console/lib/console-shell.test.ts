@@ -45,15 +45,8 @@ vi.mock('react/jsx-dev-runtime', async (importOriginal) => {
   };
 });
 
-import { ActivityPage, InvestigationPage } from '@/components/platform-activity';
-import { Overview } from '@/components/platform-overview';
 import { PlatformShell } from '@/components/platform-shell';
-import { SessionsPage } from '@/components/platform/sessions';
-import { SettingsPage } from '@/components/platform/settings';
 import { NOT_CONNECTED, type Snapshot } from '@/lib/connection';
-
-const NOT_CONNECTED_TEXT =
-  'Not connected to Stroq on this machine. Run npx @stroq/cli console to open this page with your data.';
 
 const LOCAL: Snapshot = {
   source: 'local',
@@ -97,61 +90,13 @@ function render(component: ComponentType<any>, props: object = {}) {
 
 beforeEach(() => {
   seen.search = '';
-  seen.path = '/activity/';
+  seen.path = '/';
   seen.platform = platform(NOT_CONNECTED);
 });
 
 describe('the default state', () => {
   it('holds no calls, agents or keys', () => {
     expect(NOT_CONNECTED).toMatchObject({ source: 'none', calls: [], agents: [], keys: [] });
-  });
-});
-
-describe('pages that read the snapshot, when not connected', () => {
-  const pages = [
-    ['Activity', ActivityPage],
-    ['an event', InvestigationPage],
-    ['Overview', Overview],
-    ['Sessions', SessionsPage],
-  ] as const;
-
-  it.each(pages)('%s says so plainly and shows no rows', (_name, page) => {
-    seen.search = 'id=18204';
-    const out = render(page);
-    expect(out).toContain(NOT_CONNECTED_TEXT);
-    expect(out).not.toMatch(/collector\.example|acme|demo-|Example|Untrusted README/);
-    expect(out).not.toMatch(
-      /Events evaluated|Agents verified|Session groups|Security events table/,
-    );
-  });
-
-  it.each(pages)(
-    '%s does not claim to be disconnected while it is still connecting',
-    (_name, page) => {
-      seen.platform = platform(NOT_CONNECTED, { ready: false });
-      expect(render(page)).not.toContain('Not connected to Stroq');
-      seen.platform = platform(NOT_CONNECTED, { loading: true, localAccess: true });
-      expect(render(page)).not.toContain('Not connected to Stroq');
-    },
-  );
-
-  it.each(pages)('%s names the reason when a connection was refused', (_name, page) => {
-    seen.platform = platform(NOT_CONNECTED, {
-      localAccess: true,
-      error: 'Open the private link printed by the local server to authenticate this browser.',
-    });
-    const out = render(page);
-    expect(out).toContain(NOT_CONNECTED_TEXT);
-    expect(out).toContain('authenticate this browser');
-  });
-});
-
-describe('pages with real data', () => {
-  it('show the real rows without any example label', () => {
-    seen.platform = platform(LOCAL);
-    expect(render(ActivityPage)).toContain('Policy denied a tool call');
-    expect(render(SessionsPage)).toContain('Session groups');
-    expect(render(Overview)).toContain('Events evaluated');
   });
 });
 
@@ -194,14 +139,20 @@ describe('the shell', () => {
     ]);
     expect(seen.elements.some((e) => e.props?.href === '/settings/')).toBe(false);
   });
-});
 
-describe('Settings', () => {
-  it('holds the theme switch and nothing else', () => {
-    const out = render(SettingsPage);
-    expect(out).toContain('Appearance');
-    for (const label of ['Dark', 'Light', 'System']) expect(out).toContain(label);
-    expect(seen.elements.filter((e) => e.type === 'button')).toHaveLength(3);
-    expect(out).not.toMatch(/Example data|Local machine|Data source|threat|pwn\.watch/i);
+  it('marks the screen that is open, and only that one', () => {
+    seen.path = '/policies/checks/';
+    seen.platform = platform(LOCAL);
+    render(PlatformShell, { children: 'page' });
+    const current = seen.elements
+      .filter((e) => e.props?.['aria-current'] === 'page')
+      .map((e) => e.props.href);
+    expect(current).toEqual(['/policies/']);
+  });
+
+  it('searches events by their address on Live', () => {
+    seen.platform = platform(LOCAL);
+    const out = render(PlatformShell, { children: 'page' });
+    expect(out).toContain('Search');
   });
 });

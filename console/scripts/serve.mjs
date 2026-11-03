@@ -36,10 +36,6 @@ import { createIncidentAssessmentService, routeIncidentAssessments } from './inc
 import { createHookCheckService } from './hook-check-service.mjs';
 import { createWorkspaceReviewService } from './workspace-review-service.mjs';
 import {
-  createWorkspaceMonitorControl,
-  routeWorkspaceMonitor,
-  createInventoryMonitorControl,
-  routeInventoryMonitor,
   createWorkspaceTaskControl,
   routeWorkspaceTasks,
   createSessionTaintControl,
@@ -182,8 +178,6 @@ export async function startServer({
   workspaceReview: suppliedWorkspaceReview,
   workspaceTasks: suppliedWorkspaceTasks,
   sessionTaint: suppliedSessionTaint,
-  workspaceMonitor: suppliedWorkspaceMonitor,
-  inventoryMonitor: suppliedInventoryMonitor,
   journalView: suppliedJournalView,
   posture: suppliedPosture,
   secrets: suppliedSecrets,
@@ -266,21 +260,6 @@ export async function startServer({
   const workspaceTasks =
     suppliedWorkspaceTasks ??
     (await createWorkspaceTaskControl({ ...context, workspaceId, workspaceReview }));
-  const workspaceMonitor =
-    suppliedWorkspaceMonitor ??
-    (await createWorkspaceMonitorControl({ ...context, workspaceId, workspaceReview }));
-  const inventoryMonitor =
-    suppliedInventoryMonitor ??
-    (await createInventoryMonitorControl({
-      ...context,
-      workspaceId,
-      inventory: {
-        read: () =>
-          typeof inventory.observe === 'function'
-            ? inventory.observe()
-            : Promise.resolve({ status: 503, body: { error: 'inventory-unavailable' } }),
-      },
-    }));
   const sessionTaint =
     suppliedSessionTaint ??
     (await createSessionTaintControl({
@@ -393,10 +372,6 @@ export async function startServer({
           response = await routeJournalView(req, parsed.path, origin, journalView);
         } else if (parsed.path.startsWith('/api/posture')) {
           response = await routePosture(req, parsed.path, origin, posture);
-        } else if (parsed.path.startsWith('/api/inventory-monitor')) {
-          response = await routeInventoryMonitor(req, parsed.path, origin, inventoryMonitor);
-        } else if (parsed.path.startsWith('/api/workspace-monitor')) {
-          response = await routeWorkspaceMonitor(req, parsed.path, origin, workspaceMonitor);
         } else if (parsed.path.startsWith('/api/agent-setup')) {
           response = await routeAgentSetup(req, parsed.path, origin, setup);
         } else if (parsed.path.startsWith('/api/mcp-call-controls')) {
@@ -560,8 +535,6 @@ export async function startServer({
       resolveListen();
     });
   });
-  await workspaceMonitor.start();
-  await inventoryMonitor.start();
   const journalView =
     suppliedJournalView ?? (await createJournalViewService({ home: selectedHome }));
   const posture =
@@ -576,8 +549,6 @@ export async function startServer({
     token,
     url: `${origin}/#token=${token}`,
     close: async () => {
-      await workspaceMonitor.close();
-      await inventoryMonitor.close();
       await Promise.allSettled(
         [
           control,

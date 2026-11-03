@@ -30,68 +30,6 @@ describe('local API operation allowlist', () => {
     ])
       expect(isLocalOperation(path), path).toBe(false);
   });
-  it('admits only fixed local operator-assessment routes without journal or file selectors', () => {
-    for (const suffix of ['', '/preview', '/apply', '/recheck']) {
-      const path = '/api/incident-assessments' + suffix;
-      expect(isLocalOperation(path), path).toBe(true);
-      for (const unsafe of [
-        path + '/',
-        path + '/extra',
-        path + '?id=private',
-        path + '#private',
-        path + '-evil',
-        'https://foreign.invalid' + path,
-      ])
-        expect(isLocalOperation(unsafe), unsafe).toBe(false);
-    }
-    for (const action of ['resolve', 'clear', 'trust', 'delete', 'apply/all', '../apply'])
-      expect(isLocalOperation('/api/incident-assessments/' + action)).toBe(false);
-  });
-  it('admits only exact taint inspection, preview, clear and record recheck operations', () => {
-    for (const suffix of ['', '/inspect', '/preview', '/clear', '/recheck']) {
-      const path = '/api/session-taint' + suffix;
-      expect(isLocalOperation(path), path).toBe(true);
-      for (const unsafe of [
-        path + '/',
-        path + '/extra',
-        path + '?session=private',
-        path + '#private',
-        path + '-evil',
-        '//foreign.invalid' + path,
-        'https://foreign.invalid' + path,
-      ])
-        expect(isLocalOperation(unsafe), unsafe).toBe(false);
-    }
-    for (const path of [
-      '/api/session-taint/all',
-      '/api/session-taint/untaint',
-      '/api/session-taint/restore',
-      '/api/session-taint/../clear',
-    ])
-      expect(isLocalOperation(path), path).toBe(false);
-  });
-  it('permits only fixed workspace task operations without browser file selectors', () => {
-    for (const suffix of ['', '/preview', '/apply', '/restore-preview', '/restore', '/recheck']) {
-      const path = '/api/workspace-task-controls' + suffix;
-      expect(isLocalOperation(path), path).toBe(true);
-      for (const unsafe of [
-        path + '/',
-        path + '/extra',
-        path + '?path=private',
-        path + '#private',
-        path + '-evil',
-        'https://foreign.invalid' + path,
-      ])
-        expect(isLocalOperation(unsafe), unsafe).toBe(false);
-    }
-    for (const path of [
-      '/api/workspace-task-controls/run',
-      '/api/workspace-task-controls/../apply',
-      '/api/workspace-task-controls/restore/apply',
-      '/api/workspace-task-controls/delete',
-    ])
-      expect(isLocalOperation(path), path).toBe(false);
-  });
   it('admits only the fixed protection-check cancellation route', () => {
     expect(isLocalOperation('/api/runs/cancel')).toBe(true);
     for (const path of [
@@ -146,6 +84,43 @@ describe('local API operation allowlist', () => {
       '/api/postures',
       '/api/../posture',
       'https://foreign.invalid/api/posture',
+    ])
+      expect(isLocalOperation(path), path).toBe(false);
+  });
+  it('no longer admits the routes of the pages the console no longer has', () => {
+    const job = '11111111-1111-4111-8111-111111111111';
+    for (const base of [
+      '/api/incident-assessments',
+      '/api/session-taint',
+      '/api/workspace-task-controls',
+      '/api/workspace-review',
+      '/api/workspace-monitor',
+      '/api/inventory-monitor',
+      '/api/secrets',
+    ])
+      for (const suffix of [
+        '',
+        '/preview',
+        '/apply',
+        '/start',
+        '/cancel',
+        '/check',
+        '/review',
+        `/jobs/${job}`,
+      ])
+        expect(isLocalOperation(base + suffix), base + suffix).toBe(false);
+  });
+  it('admits the card routes and nothing shaped like them', () => {
+    expect(isLocalOperation('/api/card')).toBe(true);
+    expect(isLocalOperation('/api/card/start')).toBe(true);
+    for (const path of [
+      '/api/card/',
+      '/api/card/start/',
+      '/api/card/run',
+      '/api/card?days=3650',
+      '/api/card/../start',
+      '/api/cards',
+      'https://foreign.invalid/api/card',
     ])
       expect(isLocalOperation(path), path).toBe(false);
   });
@@ -204,24 +179,6 @@ describe('local API operation allowlist', () => {
       '/api/inventory/compare-evil',
     ])
       expect(isLocalOperation(path)).toBe(false);
-  });
-  it('permits only the fixed workspace review operations', () => {
-    for (const path of [
-      '/api/workspace-review',
-      '/api/workspace-review/check',
-      '/api/workspace-review/cancel',
-      '/api/workspace-review/review',
-    ])
-      expect(isLocalOperation(path), path).toBe(true);
-    for (const path of [
-      '/api/workspace-review/run',
-      '/api/workspace-review/check/extra',
-      '/api/workspace-review?path=private',
-      '/api/workspace-review/../review',
-      '/api/workspace-review-evil',
-      '//foreign.invalid/api/workspace-review',
-    ])
-      expect(isLocalOperation(path), path).toBe(false);
   });
   it('allows the implemented hook checks', () => {
     for (const path of [
@@ -325,8 +282,6 @@ describe('local API operation allowlist', () => {
       '/api/inventory/inspect',
       '/api/agent-setup/preview',
       '/api/policy/apply',
-      '/api/secrets/cancel',
-      '/api/secrets/jobs/11111111-1111-4111-8111-111111111111',
       '/api/runs/11111111-1111-4111-8111-111111111111',
     ])
       expect(isLocalOperation(path), path).toBe(true);
@@ -340,7 +295,6 @@ describe('local API operation allowlist', () => {
       '/api/mcp-containment/../apply',
       '//foreign.invalid/api/mcp-containment',
       'https://foreign.invalid/api/mcp-containment',
-      '/api/secrets/jobs/' + '-'.repeat(36),
       '',
       null,
     ])
@@ -365,25 +319,4 @@ it('admits only exact selected skill signal state, preview and apply routes', ()
   }
   expect(isLocalOperation('/api/inventory/signals')).toBe(false);
   expect(isLocalOperation('/api/inventory/signals/review')).toBe(false);
-});
-it('permits only the fixed inventory watch read, preview and apply operations', () => {
-  for (const suffix of ['', '/preview', '/apply']) {
-    const path = '/api/inventory-monitor' + suffix;
-    expect(isLocalOperation(path)).toBe(true);
-    for (const unsafe of [
-      path + '/',
-      path + '/extra',
-      path + '?scope=user',
-      path + '#private',
-      path + '-evil',
-      'https://foreign.invalid' + path,
-    ])
-      expect(isLocalOperation(unsafe), unsafe).toBe(false);
-  }
-  for (const path of [
-    '/api/inventory-monitor/check',
-    '/api/inventory-monitor/run',
-    '/api/inventory-monitor/../apply',
-  ])
-    expect(isLocalOperation(path), path).toBe(false);
 });

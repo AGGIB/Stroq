@@ -12,12 +12,6 @@ import { NOT_CONNECTED, type Snapshot } from '@/lib/connection';
 import { validateSnapshot } from '@/lib/snapshot';
 import { validateLocalContext, type LocalContext } from '@/lib/local-context';
 import { isLocalOperation } from '@/lib/local-operations';
-import { WORKSPACE_REVIEW_ERROR_MESSAGES } from '@/lib/workspace-review-errors';
-import { WORKSPACE_MONITOR_ERROR_MESSAGES } from '@/lib/workspace-monitor-errors';
-import { WORKSPACE_TASK_ERROR_MESSAGES } from '@/lib/workspace-task-controls';
-import { SESSION_TAINT_ERROR_MESSAGES } from '@/lib/session-taint';
-import { INCIDENT_ASSESSMENT_ERROR_MESSAGES } from '@/lib/incident-assessments';
-import { createSessionTaintRefusal } from '@/lib/session-taint-error';
 import { POLICY_HISTORY_ERROR_MESSAGES } from '@/lib/policy-history-errors';
 import { TRY_ERROR_MESSAGES } from '@/lib/try-action';
 import { JOURNAL_ERROR_MESSAGES } from '@/lib/journal-view';
@@ -205,32 +199,11 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
           'write-failed':
             'The configuration could not be written. Recheck its state before retrying.',
         };
-        const workspaceErrors: Readonly<Record<string, string>> = WORKSPACE_REVIEW_ERROR_MESSAGES;
-        const workspaceTaskErrors: Readonly<Record<string, string>> = WORKSPACE_TASK_ERROR_MESSAGES;
         const policyHistoryErrors: Readonly<Record<string, string>> = POLICY_HISTORY_ERROR_MESSAGES;
-        if (
-          path.startsWith('/api/session-taint/') &&
-          report !== null &&
-          typeof report === 'object' &&
-          !Array.isArray(report) &&
-          Object.keys(report).length === 1 &&
-          Object.hasOwn(report, 'error')
-        ) {
-          const refusal = createSessionTaintRefusal(code, res.status);
-          if (refusal) throw refusal;
-        }
         throw new Error(
           (path === '/api/policy/try' ? TRY_ERROR_MESSAGES[code] : undefined) ??
             (path.startsWith('/api/journal/') ? JOURNAL_ERROR_MESSAGES[code] : undefined) ??
             (path === '/api/posture' ? POSTURE_ERROR_MESSAGES[code] : undefined) ??
-            (path === '/api/incident-assessments' || path.startsWith('/api/incident-assessments/')
-              ? INCIDENT_ASSESSMENT_ERROR_MESSAGES[
-                  code as keyof typeof INCIDENT_ASSESSMENT_ERROR_MESSAGES
-                ]
-              : undefined) ??
-            (path === '/api/session-taint' || path.startsWith('/api/session-taint/')
-              ? SESSION_TAINT_ERROR_MESSAGES[code as keyof typeof SESSION_TAINT_ERROR_MESSAGES]
-              : undefined) ??
             (path.startsWith('/api/mcp-tool-contracts')
               ? MCP_TOOL_CONTRACT_ERROR_MESSAGES[code]
               : undefined) ??
@@ -242,16 +215,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
               : undefined) ??
             (path === '/api/policy/history' || path.startsWith('/api/policy/restore/')
               ? policyHistoryErrors[code]
-              : undefined) ??
-            (path === '/api/workspace-review' || path.startsWith('/api/workspace-review/')
-              ? workspaceErrors[code]
-              : undefined) ??
-            (path === '/api/workspace-task-controls' ||
-            path.startsWith('/api/workspace-task-controls/')
-              ? workspaceTaskErrors[code]
-              : undefined) ??
-            (path === '/api/workspace-monitor' || path.startsWith('/api/workspace-monitor/')
-              ? WORKSPACE_MONITOR_ERROR_MESSAGES[code]
               : undefined) ??
             errors[code] ??
             (res.status === 401
