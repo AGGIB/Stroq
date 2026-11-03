@@ -6,7 +6,7 @@ import ts from 'typescript';
 import * as React from 'react';
 import * as jsx from 'react/jsx-runtime';
 import { renderToStaticMarkup } from 'react-dom/server';
-import type { ToolCall } from './data';
+import type { ToolCall } from './platform-types';
 import * as navigation from './activity-navigation';
 import * as platform from './platform';
 
@@ -30,7 +30,7 @@ function page({
   query = `id=audit-17&evidence=${sha}`,
   table = false,
 }: {
-  source?: 'local' | 'demo';
+  source?: 'local';
   row?: ToolCall;
   query?: string;
   table?: boolean;
@@ -196,31 +196,6 @@ describe('Activity joins the authoritative investigation', () => {
     expect(value.html).toContain('Recorded policy denial; host enforcement was not checked.');
     expect(value.html).toContain('Command and content withheld');
     expect(value.html).toContain('Local journal');
-  });
-
-  it('preserves browser-only demo review without offering a local finding', () => {
-    const value = page({
-      source: 'demo',
-      row: call({ id: '18204', evidenceSha: undefined }),
-      query: 'id=18204',
-    });
-    expect(value.html).toContain('Reviewed · undo');
-    expect(value.html).toContain('Event trace');
-    expect(value.html).toContain('01 · SOURCE');
-    expect(value.html).toContain('Untrusted README');
-    expect(value.html).toContain('Next steps');
-    expect(value.storage).toContainEqual(['get', 'stroq-reviewed-v1:demo:18204']);
-    expect(value.downloads[0].reviewed).toBe(true);
-    expect(value.links.some((href) => href.startsWith('/incidents/'))).toBe(false);
-    const button = value.elements.find(
-      (item) =>
-        item.type === 'button' &&
-        Array.isArray(item.props.children) &&
-        item.props.children.includes('Reviewed · undo'),
-    );
-    expect(button).toBeDefined();
-    button.props.onClick();
-    expect(value.storage).toContainEqual(['set', 'stroq-reviewed-v1:demo:18204', 'no']);
   });
 
   it('labels old sequence-only links as current-window evidence and does not adopt browser review', () => {

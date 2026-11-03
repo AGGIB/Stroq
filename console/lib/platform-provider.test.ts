@@ -60,7 +60,6 @@ vi.mock('react/jsx-dev-runtime', () => {
 });
 
 import { PlatformProvider } from '@/components/platform-provider';
-import { EXAMPLE } from '@/lib/connection';
 
 const TOKEN = 'fixture-private-local-token';
 const STORED_SOURCE = 'stroq-console-source';
@@ -241,79 +240,20 @@ describe('the console starts with only real data', () => {
   });
 });
 
-describe('example data needs an explicit choice', () => {
-  it('appears only after the choice, with the example rows and a plain label', async () => {
+describe('the provider offers no example data', () => {
+  it('has no way to switch to example rows', async () => {
     const page = mount();
     await page.start();
-    expect(page.value.source).toBe('none');
-    page.value.showExample();
-    await page.flush();
-    expect(page.value.source).toBe('demo');
-    expect(page.value.calls).toBe(EXAMPLE.calls);
-    expect(page.value.calls.length).toBeGreaterThan(0);
-    expect(page.value.limitations.join(' ')).toMatch(/not results from your machine/i);
+    expect(page.value).not.toHaveProperty('showExample');
+    expect(page.value).not.toHaveProperty('leaveExample');
   });
 
-  it('is not remembered: the choice is never stored, and a reload is not connected again', async () => {
-    const page = mount();
-    await page.start();
-    page.value.showExample();
-    await page.flush();
-    expect(page.writes.some(([, value]) => value === 'demo')).toBe(false);
-    const reloaded = mount({ storage: Object.fromEntries(page.storage) });
-    await reloaded.start();
-    expect(reloaded.value.source).toBe('none');
-    expect(reloaded.value.calls).toEqual([]);
-  });
-
-  it('goes back to not connected in one step when there is no token', async () => {
-    const page = mount();
-    await page.start();
-    page.value.showExample();
-    await page.flush();
-    page.value.leaveExample();
-    await page.flush();
-    expect(page.value.source).toBe('none');
-    expect(page.value.calls).toEqual([]);
-    expect(page.fetchCalls).toEqual([]);
-  });
-
-  it('goes back to the real data in one step when there is a token', async () => {
+  it('keeps showing only the real rows after a reconnect', async () => {
     const page = mount({ storage: { 'stroq-console-token': TOKEN } });
     await page.start();
-    page.value.showExample();
-    await page.flush();
-    expect(page.value.source).toBe('demo');
-    page.value.leaveExample();
-    await page.flush();
-    expect(page.value.source).toBe('local');
-    expect(page.value.calls.map((c: { id: string }) => c.id)).toEqual(['audit-1']);
-  });
-
-  it('shows no example rows after leaving, even while the reconnect is still failing', async () => {
-    const page = mount({
-      storage: { 'stroq-console-token': TOKEN },
-      reply: { ok: false, status: 503, body: {} },
-    });
-    await page.start();
-    page.value.showExample();
-    await page.flush();
-    page.value.leaveExample();
-    await page.flush();
-    expect(page.value.source).toBe('none');
-    expect(page.value.calls).toEqual([]);
-    expect(page.value.agents).toEqual([]);
-    expect(page.value.keys).toEqual([]);
-  });
-
-  it('is replaced by real data when the user connects while the example is on', async () => {
-    const page = mount({ storage: { 'stroq-console-token': TOKEN } });
-    await page.start();
-    page.value.showExample();
-    await page.flush();
     await page.value.connectLocal();
     await page.flush();
     expect(page.value.source).toBe('local');
-    expect(page.value.calls.some((c: { id: string }) => c.id.startsWith('demo-'))).toBe(false);
+    expect(page.value.calls.map((c: { id: string }) => c.id)).toEqual(['audit-1']);
   });
 });

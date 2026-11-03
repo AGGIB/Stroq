@@ -9,7 +9,6 @@ import {
   ChevronRight,
   CircleAlert,
   Cpu,
-  KeyRound,
   Shield,
   ShieldBan,
 } from 'lucide-react';
@@ -18,20 +17,19 @@ import { useState, type ReactNode, type CSSProperties } from 'react';
 import { usePlatform } from './platform-provider';
 import { AgentGlyph, Badge, ExportButton, PageHeading, Panel, EmptyState } from './platform-ui';
 import { DECISIONS, inRange, sessionFor } from '@/lib/platform';
-import type { ToolCall } from '@/lib/data';
+import type { ToolCall } from '@/lib/platform-types';
 import { activityEventHref } from '@/lib/activity-navigation';
 import { NotConnected } from './not-connected';
 
 export function Overview() {
-  const { calls, agents, keys, source, generatedAt } = usePlatform();
+  const { calls, agents, source, generatedAt } = usePlatform();
   const [days, setDays] = useState(7);
   if (source === 'none') return <NotConnected title="Security overview" />;
   const scoped = inRange(calls, days, generatedAt),
     denied = scoped.filter((c) => c.decision === 'block'),
     review = scoped.filter((c) => c.decision === 'ask' || c.decision === 'flag'),
     verified = agents.filter((a) => a.state === 'ok');
-  const findings = keys.filter((k) => k.needsYou),
-    activity = scoped.filter((c) => c.decision !== 'allow').slice(0, 5);
+  const activity = scoped.filter((c) => c.decision !== 'allow').slice(0, 5);
   return (
     <div className="page-stack">
       <PageHeading
@@ -50,7 +48,7 @@ export function Overview() {
                 <option value={30}>Last 30 days</option>
               </select>
             </label>
-            <ExportButton data={{ source, generatedAt, days, calls: scoped, agents, keys }} />
+            <ExportButton data={{ source, generatedAt, days, calls: scoped, agents }} />
           </>
         }
       />
@@ -158,33 +156,10 @@ export function Overview() {
       <Panel
         title="Attention required"
         actions={
-          <span className="count-pill">
-            {findings.length + (agents.some((a) => a.state === 'unver') ? 1 : 0)}
-          </span>
+          <span className="count-pill">{agents.some((a) => a.state === 'unver') ? 1 : 0}</span>
         }
       >
         <div className="attention-grid">
-          {findings.map((k, i) => (
-            <Link
-              href={`/keys/#${k.id}`}
-              className={`attention-card ${i === 0 ? 'critical' : ''}`}
-              key={k.id}
-            >
-              <div className="attention-top">
-                <span className="signal-icon">
-                  <KeyRound size={16} />
-                </span>
-                <Badge tone={i === 0 ? 'red' : 'orange'}>
-                  {k.outcome === 'sent' ? 'Exposed' : 'Investigate'}
-                </Badge>
-                <ArrowUpRight size={15} />
-              </div>
-              <h3 className="finding-name">{k.name}</h3>
-              <p>
-                {k.destination} · {k.when}
-              </p>
-            </Link>
-          ))}
           {agents.some((a) => a.state === 'unver') ? (
             <Link href="/agents/" className="attention-card">
               <div className="attention-top">
@@ -203,7 +178,7 @@ export function Overview() {
               <p>Blocking not verified</p>
             </Link>
           ) : null}
-          {findings.length === 0 && !agents.some((a) => a.state === 'unver') ? (
+          {!agents.some((a) => a.state === 'unver') ? (
             <div className="panel-body muted">No findings available in this snapshot.</div>
           ) : null}
         </div>

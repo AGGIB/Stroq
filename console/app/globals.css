@@ -745,40 +745,8 @@ code,
 .source-indicator.none i {
   background: var(--muted-foreground);
 }
-.example-banner {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 34px;
-  border-bottom: 1px solid var(--st-amber);
-  background: color-mix(in srgb, var(--st-amber) 14%, var(--surface-2));
-  color: var(--foreground);
-  font-size: var(--text-ui);
-  line-height: 1.5;
-}
-.example-banner > svg {
-  flex: none;
-  color: var(--st-amber-ink);
-}
-.example-banner p {
-  flex: 1;
-  min-width: 0;
-}
-.example-banner strong {
-  font-weight: 650;
-}
-.not-connected-hint {
-  color: var(--muted-foreground);
-}
-.not-connected-hint a,
 .not-connected code {
   color: var(--foreground);
-}
-@media (max-width: 760px) {
-  .example-banner {
-    flex-wrap: wrap;
-    padding-inline: 16px;
-  }
 }
 .topbar-divider {
   height: 17px;

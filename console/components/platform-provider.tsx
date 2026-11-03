@@ -8,7 +8,7 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { EXAMPLE, NOT_CONNECTED, type Snapshot } from '@/lib/connection';
+import { NOT_CONNECTED, type Snapshot } from '@/lib/connection';
 import { validateSnapshot } from '@/lib/snapshot';
 import { validateLocalContext, type LocalContext } from '@/lib/local-context';
 import { isLocalOperation } from '@/lib/local-operations';
@@ -34,10 +34,6 @@ interface Platform extends Snapshot {
   loading: boolean;
   error: string | null;
   connectLocal: () => Promise<void>;
-  /** Shows the made-up example. Only ever called from an explicit user choice. */
-  showExample: () => void;
-  /** Drops the example and reconnects to the real source when a token is held. */
-  leaveExample: () => void;
   refresh: () => Promise<void>;
   localAccess: boolean;
   localContext: LocalContext | null;
@@ -355,25 +351,10 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
     }
     if (incoming) history.replaceState(null, '', location.pathname + location.search);
     setLocalAccess(Boolean(token.current));
-    // A token always means the real source. Example data is never chosen on load.
+    // A token always means the real source.
     if (token.current) void connectLocal();
     setReady(true);
     return () => active.current?.abort();
-  }, [connectLocal]);
-  const showExample = useCallback(() => {
-    active.current?.abort();
-    active.current = null;
-    setSnapshot(EXAMPLE);
-    setError(null);
-    setLoading(false);
-  }, []);
-  const leaveExample = useCallback(() => {
-    active.current?.abort();
-    active.current = null;
-    setSnapshot(NOT_CONNECTED);
-    setError(null);
-    setLoading(false);
-    if (token.current) void connectLocal();
   }, [connectLocal]);
   return (
     <Context.Provider
@@ -383,8 +364,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
         loading,
         error,
         connectLocal,
-        showExample,
-        leaveExample,
         refresh: connectLocal,
         localAccess,
         localContext,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { ToolCall } from './data';
+import type { ToolCall } from './platform-types';
 import {
   activityEventHref,
   activityEventSelection,
@@ -21,17 +21,17 @@ const call = (changes: Record<string, unknown> = {}): ToolCall => ({
 const select = (
   query: string,
   calls: readonly ToolCall[] = [call()],
-  source: 'local' | 'demo' = 'local',
+  source: 'local' | 'none' = 'local',
 ) => activityEventSelection(new URLSearchParams(query), calls, source);
 
 describe('exact Activity navigation', () => {
-  it('binds new event links to the captured raw-line digest and keeps old/demo links readable', () => {
+  it('binds new event links to the captured raw-line digest and keeps old links readable', () => {
     expect(activityEventHref(call())).toBe(`/activity/event/?id=audit-17&evidence=${sha}`);
     expect(activityEventHref(call({ evidenceSha: undefined }))).toBe(
       '/activity/event/?id=audit-17',
     );
-    expect(activityEventHref(call({ id: 'demo-17', evidenceSha: undefined }))).toBe(
-      '/activity/event/?id=demo-17',
+    expect(activityEventHref(call({ id: 'legacy-17', evidenceSha: undefined }))).toBe(
+      '/activity/event/?id=legacy-17',
     );
   });
 
@@ -60,7 +60,7 @@ describe('exact Activity navigation', () => {
     });
   });
 
-  it('refuses malformed, empty, duplicate and demo evidence selectors', () => {
+  it('refuses malformed, empty, duplicate and unconnected evidence selectors', () => {
     for (const query of [
       'id=audit-17&evidence=',
       'id=audit-17&evidence=bad',
@@ -69,30 +69,32 @@ describe('exact Activity navigation', () => {
       `id=audit-17&id=audit-17&evidence=${sha}`,
     ])
       expect(select(query)).toEqual({ call: null, binding: null, error: 'invalid' });
-    expect(select(`id=audit-17&evidence=${sha}`, [call()], 'demo')).toEqual({
+    expect(select(`id=audit-17&evidence=${sha}`, [call()], 'none')).toEqual({
       call: null,
       binding: null,
       error: 'invalid',
     });
   });
 
-  it('labels legacy local IDs as the current window and leaves demo selection unchanged', () => {
+  it('labels legacy local IDs as the current window', () => {
     expect(select('id=audit-17')).toEqual({ call: call(), binding: 'current-window', error: null });
-    expect(select('id=demo-17', [call({ id: 'demo-17', evidenceSha: undefined })], 'demo')).toEqual(
-      { call: call({ id: 'demo-17', evidenceSha: undefined }), binding: 'demo', error: null },
-    );
+    expect(select('id=legacy-17', [call({ id: 'legacy-17', evidenceSha: undefined })])).toEqual({
+      call: call({ id: 'legacy-17', evidenceSha: undefined }),
+      binding: 'current-window',
+      error: null,
+    });
   });
 
-  it('never claims allow, legacy, malformed or demo events are an authoritative finding', () => {
+  it('never claims allow, legacy, malformed or unconnected events are an authoritative finding', () => {
     for (const value of [
       call({ decision: 'allow' }),
       call({ decision: 'nj' }),
       call({ evidenceSha: undefined }),
       call({ evidenceSha: 'bad' }),
       call({ id: 'audit-0' }),
-      call({ id: 'demo-17' }),
+      call({ id: 'legacy-17' }),
     ])
       expect(activityFindingHref(value, 'local')).toBeNull();
-    expect(activityFindingHref(call(), 'demo')).toBeNull();
+    expect(activityFindingHref(call(), 'none')).toBeNull();
   });
 });

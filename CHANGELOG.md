@@ -30,6 +30,7 @@ The console is being cut down to five screens (Check, Live, Agents, Rules, Skill
 
 - **The Codex Network, Path and Skill guards of the console** (Agents & coverage → Codex → Manage, Credential paths and Codex sources, and their rows on Protection). Their own documents said the protection there was not verified. Codex is still an agent: its hooks are set up and checked on the Agents page, its settings are read by the settings check, and its `.codex/skills` folder is still inventoried and can still be quarantined. To restrict what Codex reaches, use Codex's own `config.toml` settings.
 - **The Guide page, the pwn.watch threat feed and the Settings choices of the console.** The Guide only repeated the sidebar. The threat feed downloaded a public list of incidents from pwn.watch and matched it against your files; nothing is downloaded by the console any more. Settings is the theme switch (dark, light, system) and nothing else; the example-data choice left it with the data source picker.
+- **The example data of the console.** The console shows only what Stroq recorded on this machine. The made-up events, agents and keys, the Example data button, the banner that marked them and the made-up key incident are gone; with no private link the pages say that nothing is connected, as before.
 
 ### Fixed
 

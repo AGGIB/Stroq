@@ -18,7 +18,7 @@ From a source checkout, the console requires Node.js 22+ and pnpm. Run from this
 
 ```sh
 pnpm install --ignore-workspace --frozen-lockfile
-pnpm dev                 # http://127.0.0.1:47813 — synthetic demo
+pnpm dev                 # http://127.0.0.1:47813 — shows "not connected"; real data needs the private link of pnpm serve:local
 pnpm build               # local engine adapters + static export in out/
 pnpm serve:local         # private loopback URL printed at startup
 ```

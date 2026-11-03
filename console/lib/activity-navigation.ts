@@ -1,5 +1,5 @@
 import type { PlatformSource } from './connection';
-import type { ToolCall } from './data';
+import type { ToolCall } from './platform-types';
 import { incidentHref } from './incident-navigation';
 
 const SHA = /^[a-f0-9]{64}$/;
@@ -17,7 +17,7 @@ export function activityEventHref(call: ToolCall) {
   return `/activity/event/?${params}`;
 }
 
-export type ActivityBinding = 'exact' | 'current-window' | 'demo';
+export type ActivityBinding = 'exact' | 'current-window';
 export interface ActivitySelection {
   call: ToolCall | null;
   binding: ActivityBinding | null;
@@ -41,7 +41,7 @@ export function activityEventSelection(
     return { call: null, binding: null, error: 'stale' };
   return {
     call,
-    binding: source === 'demo' ? 'demo' : evidence !== null ? 'exact' : 'current-window',
+    binding: evidence !== null ? 'exact' : 'current-window',
     error: null,
   };
 }

@@ -32,7 +32,6 @@ import { Dialog } from 'radix-ui';
 import { useEffect, useState, type ReactNode } from 'react';
 import { usePlatform } from './platform-provider';
 import { BrandMark } from './brand-mark';
-import { ExampleDataBanner } from './example-data-banner';
 import { PLATFORM_PAGES, PLATFORM_SECTIONS } from '@/lib/platform-map';
 const ICONS: Readonly<Record<string, LucideIcon>> = {
   '/': ShieldCheck,
@@ -154,14 +153,9 @@ export function PlatformShell({ children }: { children: ReactNode }) {
     path.startsWith('/try') ||
     path.startsWith('/live') ||
     (path.startsWith('/policies') && !path.includes('/reference'));
-  // What the top bar claims must match what is connected: example data and no connection are
-  // never worded like a live machine.
-  const connection =
-    source === 'demo'
-      ? 'demo'
-      : source === 'local' || (localOperation && localAccess)
-        ? 'local'
-        : 'none';
+  // What the top bar claims must match what is connected: no connection is never worded like a
+  // live machine.
+  const connection = source === 'local' || (localOperation && localAccess) ? 'local' : 'none';
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -226,23 +220,19 @@ export function PlatformShell({ children }: { children: ReactNode }) {
               href="/settings/"
               className={`source-indicator ${connection}`}
               aria-label={
-                connection === 'demo'
-                  ? 'Example data, not yours · connection settings'
-                  : connection === 'local'
-                    ? localOperation
-                      ? 'Local engine · connection settings'
-                      : 'Local snapshot · connection settings'
-                    : 'Not connected · connection settings'
+                connection === 'local'
+                  ? localOperation
+                    ? 'Local engine · connection settings'
+                    : 'Local snapshot · connection settings'
+                  : 'Not connected · connection settings'
               }
             >
               <i />
-              {connection === 'demo'
-                ? 'Example'
-                : connection === 'local'
-                  ? localOperation
-                    ? 'Local engine'
-                    : 'Local'
-                  : 'Not connected'}
+              {connection === 'local'
+                ? localOperation
+                  ? 'Local engine'
+                  : 'Local'
+                : 'Not connected'}
             </Link>
             <span className="topbar-divider" />
             <button
@@ -255,18 +245,15 @@ export function PlatformShell({ children }: { children: ReactNode }) {
             </button>
           </div>
         </header>
-        <ExampleDataBanner />
         <main id="content" tabIndex={-1}>
           {children}
           <footer className="workspace-footer">
             <span>
-              {connection === 'demo'
-                ? 'Example data · Oct 15–21, 2026 · UTC'
-                : connection === 'none'
-                  ? 'Not connected'
-                  : localOperation
-                    ? 'Runs on this machine'
-                    : 'Local snapshot · UTC'}
+              {connection === 'none'
+                ? 'Not connected'
+                : localOperation
+                  ? 'Runs on this machine'
+                  : 'Local snapshot · UTC'}
             </span>
           </footer>
         </main>
@@ -323,7 +310,6 @@ export function PlatformShell({ children }: { children: ReactNode }) {
                     {c.label}
                     <small>
                       {c.agent} · {c.date}
-                      {source === 'demo' ? ' · example' : ''}
                     </small>
                   </span>
                   <ArrowUpRight size={14} aria-hidden="true" />

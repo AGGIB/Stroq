@@ -47,15 +47,13 @@ vi.mock('react/jsx-dev-runtime', async (importOriginal) => {
 
 import { ActivityPage, InvestigationPage } from '@/components/platform-activity';
 import { Overview } from '@/components/platform-overview';
-import { ExampleDataBanner } from '@/components/example-data-banner';
 import { PlatformShell } from '@/components/platform-shell';
 import { SessionsPage } from '@/components/platform/sessions';
 import { SettingsPage } from '@/components/platform/settings';
-import { EXAMPLE, NOT_CONNECTED, type Snapshot } from '@/lib/connection';
+import { NOT_CONNECTED, type Snapshot } from '@/lib/connection';
 
 const NOT_CONNECTED_TEXT =
   'Not connected to Stroq on this machine. Run npx @stroq/cli console to open this page with your data.';
-const BANNER_TEXT = 'Example data, not yours';
 
 const LOCAL: Snapshot = {
   source: 'local',
@@ -85,8 +83,6 @@ function platform(snapshot: Snapshot, extra: Record<string, unknown> = {}) {
     localAccess: snapshot.source === 'local',
     localContext: null,
     connectLocal: vi.fn(),
-    showExample: vi.fn(),
-    leaveExample: vi.fn(),
     refresh: vi.fn(),
     requestLocal: vi.fn(),
     ...extra,
@@ -98,15 +94,6 @@ function render(component: ComponentType<any>, props: object = {}) {
   seen.elements.length = 0;
   return text(renderToStaticMarkup(createElement(component, props)));
 }
-function textOf(node: any): string {
-  if (node == null || typeof node === 'boolean') return '';
-  if (typeof node === 'string' || typeof node === 'number') return String(node);
-  if (Array.isArray(node)) return node.map(textOf).join('');
-  return textOf(node.props?.children);
-}
-function button(label: RegExp) {
-  return seen.elements.find((e) => e.type === 'button' && label.test(textOf(e.props.children)));
-}
 
 beforeEach(() => {
   seen.search = '';
@@ -117,12 +104,6 @@ beforeEach(() => {
 describe('the default state', () => {
   it('holds no calls, agents or keys', () => {
     expect(NOT_CONNECTED).toMatchObject({ source: 'none', calls: [], agents: [], keys: [] });
-  });
-
-  it('keeps the example apart and marked as such', () => {
-    expect(EXAMPLE.source).toBe('demo');
-    expect(EXAMPLE.calls.length).toBeGreaterThan(0);
-    expect(EXAMPLE.limitations.join(' ')).toMatch(/not results from your machine/i);
   });
 });
 
@@ -138,7 +119,7 @@ describe('pages that read the snapshot, when not connected', () => {
     seen.search = 'id=18204';
     const out = render(page);
     expect(out).toContain(NOT_CONNECTED_TEXT);
-    expect(out).not.toMatch(/collector\.example|acme|demo-|Example incident|Untrusted README/);
+    expect(out).not.toMatch(/collector\.example|acme|demo-|Example|Untrusted README/);
     expect(out).not.toMatch(
       /Events evaluated|Agents verified|Session groups|Security events table/,
     );
@@ -174,69 +155,23 @@ describe('pages with real data', () => {
   });
 });
 
-describe('the example incident', () => {
-  it('appears only while the example is on', () => {
-    seen.search = 'id=18204';
-    seen.platform = platform(EXAMPLE);
-    const shown = render(InvestigationPage);
-    expect(shown).toContain('Example incident');
-    expect(shown).toContain('Illustrative chain');
-    expect(shown).toContain('Untrusted README');
-    expect(shown).toContain('Instructions found in the README');
-
-    seen.platform = platform({
-      ...LOCAL,
-      calls: [{ ...LOCAL.calls[0]!, id: '18204' }],
-    });
-    const real = render(InvestigationPage);
-    expect(real).not.toMatch(
-      /Example incident|Illustrative chain|Untrusted README|Instructions found in the README/,
-    );
-    expect(real).toContain('Recorded event');
-
-    seen.platform = platform(NOT_CONNECTED);
-    expect(render(InvestigationPage)).not.toMatch(
-      /Untrusted README|Illustrative chain|Instructions found in the README/,
-    );
-  });
-});
-
-describe('the example banner', () => {
-  it('shows on every page of the shell while the example is on, and nowhere else', () => {
+describe('the shell', () => {
+  it('says plainly when nothing is connected and offers no example or guide', () => {
     for (const path of ['/', '/activity/', '/sessions/', '/overview/', '/keys/', '/settings/']) {
       seen.path = path;
-      seen.platform = platform(EXAMPLE);
-      expect(render(PlatformShell, { children: 'page' }), path).toContain(BANNER_TEXT);
       seen.platform = platform(NOT_CONNECTED);
-      expect(render(PlatformShell, { children: 'page' }), path).not.toContain(BANNER_TEXT);
-      seen.platform = platform(LOCAL);
-      expect(render(PlatformShell, { children: 'page' }), path).not.toContain(BANNER_TEXT);
+      const out = render(PlatformShell, { children: 'page' });
+      expect(out, path).toContain('Not connected');
+      expect(out, path).not.toMatch(/Example|Guide/);
     }
   });
 
-  it('says what is invented and offers one click back', () => {
-    const leaveExample = vi.fn();
-    seen.platform = platform(EXAMPLE, { leaveExample });
-    const out = render(ExampleDataBanner);
-    expect(out).toContain(BANNER_TEXT);
-    expect(out).toMatch(/Activity, Sessions and Overview/);
-    const back = button(/Leave the example/);
-    expect(back).toBeDefined();
-    back!.props.onClick();
-    expect(leaveExample).toHaveBeenCalledTimes(1);
-  });
-
-  it('offers the way back to the real data when the machine is connected', () => {
-    seen.platform = platform(EXAMPLE, { localAccess: true });
-    render(ExampleDataBanner);
-    expect(button(/Back to my data/)).toBeDefined();
-  });
-
-  it('is announced politely to assistive technology and is absent otherwise', () => {
-    seen.platform = platform(EXAMPLE);
-    expect(renderToStaticMarkup(createElement(ExampleDataBanner))).toMatch(/role="status"/);
-    seen.platform = platform(NOT_CONNECTED);
-    expect(renderToStaticMarkup(createElement(ExampleDataBanner))).toBe('');
+  it('words a connected machine as local', () => {
+    seen.path = '/activity/';
+    seen.platform = platform(LOCAL);
+    const out = render(PlatformShell, { children: 'page' });
+    expect(out).toContain('Local snapshot');
+    expect(out).not.toMatch(/Example|Guide/);
   });
 });
 

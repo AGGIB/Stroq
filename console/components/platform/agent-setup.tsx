@@ -3,7 +3,7 @@ import { useEffect, useId, useRef, useState } from 'react';
 import Link from 'next/link';
 import { Dialog } from 'radix-ui';
 import { ArrowRight, Check, LoaderCircle, Plus, RefreshCw, ShieldCheck, X } from 'lucide-react';
-import type { Agent } from '@/lib/data';
+import type { Agent } from '@/lib/platform-types';
 import { usePlatform } from '@/components/platform-provider';
 import { useControl } from '@/components/control-provider';
 import { AgentGlyph, Badge, Command } from '@/components/platform-ui';
