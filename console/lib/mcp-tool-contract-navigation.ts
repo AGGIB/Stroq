@@ -1,3 +1,4 @@
+import { skillsPartHref } from './skills-navigation';
 const patterns = {
   workspace: /^workspace-[a-f0-9]{24}$/,
   registration: /^item-[a-f0-9]{24}$/,
@@ -70,6 +71,6 @@ export function mcpToolContractHref(
   };
   for (const [key, value] of Object.entries(fields)) if (value != null) params.set(key, value);
   return params.size && !mcpToolContractSelection(params).invalid
-    ? `/skills/mcp/contracts/?${params}`
-    : '/skills/mcp/contracts/';
+    ? skillsPartHref('tools', params)
+    : skillsPartHref('tools');
 }

@@ -536,3 +536,99 @@
 .protection-queue-row > div {
   min-width: 0;
 }
+
+/* Skills & MCP: the list by agent, and the parts under it. */
+.skills-agents {
+  display: grid;
+  gap: 22px;
+  padding: 4px 0 8px;
+}
+.skills-agent h3 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0 0 8px;
+  padding: 0 18px;
+  font-size: var(--text-ui);
+  font-weight: 600;
+}
+.skills-agent .inventory-table small.muted {
+  display: block;
+  margin-top: 2px;
+}
+.skills-parts {
+  display: grid;
+  gap: 10px;
+}
+.skills-part-wrap {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}
+.skills-part-wrap > summary {
+  padding: 14px 18px;
+  font-size: var(--text-ui);
+  font-weight: 600;
+  cursor: pointer;
+}
+.skills-part-wrap[open] > summary {
+  border-bottom: 1px solid var(--border);
+}
+.skills-part {
+  display: grid;
+  gap: 16px;
+  padding: 16px 18px 20px;
+  scroll-margin-top: 80px;
+}
+.skills-part-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+}
+.skills-part-head h2 {
+  /* The part's name is the summary of the section it sits in. */
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+.skills-part-actions {
+  display: flex;
+  gap: 8px;
+}
+/* Preview, apply, undo: said once above the changes a skill or a server can take. */
+.action-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 22px;
+  margin: 0;
+  padding: 12px 14px;
+  list-style: none;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--secondary);
+  font-size: var(--text-secondary);
+}
+.action-steps li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.action-steps span:last-child {
+  color: var(--ink-2);
+}
+.action-step-n {
+  display: inline-grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  border: 1px solid var(--hairline-strong);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--ink-2);
+}

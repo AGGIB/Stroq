@@ -14,7 +14,7 @@ describe('quarantine history links are local and workspace-bound', () => {
   });
   it('does not silently bind a record to a different current workspace', () => {
     expect(quarantineSelection(new URLSearchParams('record=' + recordId)).invalid).toBe(true);
-    expect(quarantineHref(recordId, '/private/project')).toBe('/skills/quarantine/');
+    expect(quarantineHref(recordId, '/private/project')).toBe('/skills/?part=quarantine');
   });
   it('refuses traversal, source paths and credential-like identifiers', () => {
     for (const record of ['/private/secret', '../skill', 'token=private', ''])
@@ -33,7 +33,7 @@ describe('quarantine history links are local and workspace-bound', () => {
       }),
     );
     expect(quarantineHref(selected.recordId, selected.workspaceId, selected.filter)).toBe(
-      '/skills/quarantine/?workspace=' + workspaceId + '&record=' + recordId,
+      '/skills/?part=quarantine&workspace=' + workspaceId + '&record=' + recordId,
     );
   });
 });

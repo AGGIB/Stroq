@@ -31,15 +31,15 @@ const MOVED = new Map([
   ['/agents/hooks/', '/agents/'],
   ['/try/', '/policies/#try'],
   ['/policies/reference/', '/policies/#reference'],
-  ['/skills/quarantine/', '/skills/'],
-  ['/skills/mcp/', '/skills/'],
-  ['/skills/mcp/contracts/', '/skills/'],
-  ['/skills/scan/', '/skills/'],
+  ['/skills/scan/', '/skills/?part=check#check'],
 ]);
 
 /** Every old address, so that a test can check each one has a place to go. */
 export const MOVED_ADDRESSES = Object.freeze([
   ...MOVED.keys(),
+  '/skills/quarantine/',
+  '/skills/mcp/',
+  '/skills/mcp/contracts/',
   '/policies/history/',
   '/activity/',
   '/activity/event/',
@@ -72,6 +72,30 @@ function eventQuery(params) {
   return next;
 }
 
+const WORKSPACE = /^workspace-[a-f0-9]{24}$/;
+const IDS = {
+  // A recorded change: its number, the workspace it belongs to and the filter of the list.
+  record: /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/,
+  workspace: WORKSPACE,
+  view: /^(?:quarantined|attention|removed|configured)$/,
+  // One tool version of one registration.
+  registration: /^item-[a-f0-9]{24}$/,
+  binding: /^binding-[a-f0-9]{64}$/,
+  tool: /^tool-[a-f0-9]{64}$/,
+  version: /^[a-f0-9]{64}$/,
+};
+
+/** The part of Skills & MCP an old address was about, with the values of it that still read. */
+function skillsPartAddress(part, keys, params) {
+  const next = new URLSearchParams({ part });
+  for (const key of keys) {
+    const value = params.get(key);
+    if (value !== null && params.getAll(key).length === 1 && IDS[key].test(value))
+      next.set(key, value);
+  }
+  return `/skills/?${next}#${part}`;
+}
+
 const suffix = (params) => (params.size > 0 ? `?${params}` : '');
 
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
@@ -96,6 +120,16 @@ export function redirectFor(pathname, search = '') {
   if (path === '/activity/event/' || path === '/incidents/')
     return `/live/${suffix(eventQuery(params))}`;
   if (path === '/policies/history/') return historyAddress(params);
+  if (path === '/skills/quarantine/')
+    return skillsPartAddress('quarantine', ['workspace', 'record', 'view'], params);
+  if (path === '/skills/mcp/')
+    return skillsPartAddress('registrations', ['workspace', 'record', 'view'], params);
+  if (path === '/skills/mcp/contracts/')
+    return skillsPartAddress(
+      'tools',
+      ['workspace', 'registration', 'binding', 'tool', 'version'],
+      params,
+    );
   if (path === '/sessions/') return `/live/${suffix(liveQuery(params))}`;
   return MOVED.get(path) ?? null;
 }

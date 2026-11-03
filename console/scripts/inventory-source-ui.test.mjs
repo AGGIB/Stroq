@@ -141,6 +141,17 @@ function harness() {
               slots[at] = { deps, callback };
             return slots[at].callback;
           },
+          useMemo(factory, deps) {
+            const at = cursor++;
+            const before = slots[at];
+            if (
+              !before ||
+              before.deps.length !== deps.length ||
+              deps.some((v, i) => !Object.is(v, before.deps[i]))
+            )
+              slots[at] = { deps, value: factory() };
+            return slots[at].value;
+          },
           useRef(value) {
             return (slots[cursor++] ??= { current: value });
           },
@@ -235,11 +246,12 @@ function harness() {
             return signalAction;
           },
         };
-      if (name === './inventory-monitor')
-        return {
-          InventoryMonitor: () =>
-            React.createElement('section', { 'data-inventory-watch': 'enabled-control' }),
-        };
+      // The parts under the list have their own tests; here they are left out of the layout.
+      if (name === './skill-quarantine') return { QuarantineHistory: () => null };
+      if (name === './mcp-containment') return { RegistrationHistory: () => null };
+      if (name === './mcp-tool-contracts') return { ToolVersions: () => null };
+      if (name === './skills') return { CheckText: () => null };
+      if (name === '@/hooks/use-scroll-to-hash') return { useScrollToHash: () => undefined };
       if (name === './inventory-signal-controls')
         return {
           InventorySignalControls: () => null,
@@ -292,7 +304,7 @@ function harness() {
     );
     return exports;
   }
-  const { InventoryPage } = load(resolve(root, 'components/platform/inventory.tsx'));
+  const { SkillsMcpPage } = load(resolve(root, 'components/platform/inventory.tsx'));
   return {
     data,
     action,
@@ -305,7 +317,7 @@ function harness() {
     render() {
       cursor = 0;
       elements.length = 0;
-      return renderToStaticMarkup(InventoryPage());
+      return renderToStaticMarkup(SkillsMcpPage());
     },
     query(value) {
       query = value;
@@ -338,43 +350,25 @@ test('inventory heading renders without starting review or watch and offers no C
 test('same skill names retain six distinct fixed roots and a neutral shared source', () => {
   const h = harness(),
     html = h.render();
-  assert.match(html, /<th>Source<\/th>/);
+  assert.match(html, /<th>Where from<\/th>/);
   for (const [, , folder] of sources) assert.ok(html.includes(`<code>${folder}</code>`), folder);
   assert.match(html, /Shared source/);
   assert.match(html, /data-brand="Codex CLI"/);
   assert.doesNotMatch(html, /data-brand="Shared|data-brand="undefined"|Protected|Activated/);
   assert.deepEqual(h.calls, []);
 });
-test('inventory watch defers current-source refresh while an artifact dialog or review is active', () => {
+test('the list is checked when it opens and when asked, and nothing watches it', () => {
   const h = harness();
-  h.render();
-  let watch = h.elements.find(({ props }) => typeof props.onCheck === 'function');
-  assert.equal(watch.props.canRefresh, true);
-  assert.equal(watch.props.onCheck('check'), true);
-  assert.deepEqual(h.calls, [['refresh']]);
-  h.calls.length = 0;
-  h.select(h.data.items[0]);
-  h.render();
-  watch = h.elements.find(({ props }) => typeof props.onCheck === 'function');
-  assert.equal(watch.props.canRefresh, false);
-  assert.equal(watch.props.onCheck('check'), false);
-  assert.deepEqual(h.calls, []);
-  h.query('');
-  h.action.reviewing = true;
-  h.render();
-  watch = h.elements.find(({ props }) => typeof props.onCheck === 'function');
-  assert.equal(watch.props.canRefresh, false);
-  assert.equal(watch.props.onCheck('check'), false);
-  h.action.reviewing = false;
-  h.action.needsRecheck = true;
-  h.render();
-  watch = h.elements.find(({ props }) => typeof props.onCheck === 'function');
+  const html = h.render();
+  assert.match(html, /Check again/);
   assert.equal(
-    watch.props.canRefresh,
+    h.elements.some(({ props }) => typeof props.onCheck === 'function'),
     false,
-    'An uncertain baseline write still needs an explicit inventory recheck',
+    'no watcher with a clock is on the page',
   );
-  assert.equal(watch.props.onCheck('check'), false);
+  assert.deepEqual(h.calls, []);
+  h.button('Check again').props.onClick();
+  assert.deepEqual(h.calls, [['refresh']]);
 });
 test('inventory search includes the finite source root and does not collapse equal names', () => {
   const h = harness();
@@ -710,7 +704,7 @@ test('comparison drift offers inventory refresh and leaves the newer version clo
         .replace(/<[^>]*>/g, '')
         .trim() === 'Refresh inventory',
   );
-  assert.equal(refresh.length, 2, 'The open dialog exposes the real inventory reread');
+  assert.equal(refresh.length, 1, 'The open dialog exposes the real inventory reread');
   refresh.at(-1).props.onClick();
   assert.deepEqual(h.calls, [['refresh']]);
   h.data.items[1] = { ...old, sha256: 'c'.repeat(64) };
@@ -745,7 +739,7 @@ test('missing captured bytes expose an inventory reread while review remains una
         .replace(/<[^>]*>/g, '')
         .trim() === 'Refresh inventory',
   );
-  assert.equal(refreshButtons.length, 2);
+  assert.equal(refreshButtons.length, 1);
   refreshButtons.at(-1).props.onClick();
   assert.deepEqual(h.calls, [['refresh']]);
   assert.equal(h.button('Mark version reviewed').props.disabled, true);

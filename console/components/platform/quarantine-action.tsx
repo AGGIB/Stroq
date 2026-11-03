@@ -1,4 +1,5 @@
 'use client';
+import { skillsPartHref } from '@/lib/skills-navigation';
 import { useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { Archive, LoaderCircle, RefreshCw, RotateCcw } from 'lucide-react';
@@ -175,7 +176,7 @@ export function QuarantineAction({
         </button>
       )}
       {needsRecheck && (
-        <Link className="inline-link" href="/skills/quarantine/">
+        <Link className="inline-link" href={skillsPartHref('quarantine')}>
           Open quarantine history
         </Link>
       )}

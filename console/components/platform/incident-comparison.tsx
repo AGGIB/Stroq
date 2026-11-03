@@ -1,9 +1,7 @@
 'use client';
-import Link from 'next/link';
-import { ArrowRight, GitCompareArrows, LoaderCircle } from 'lucide-react';
+import { GitCompareArrows, LoaderCircle } from 'lucide-react';
 import { Badge } from '@/components/platform-ui';
 import { usePlatform } from '@/components/platform-provider';
-import { policyEventHref } from '@/lib/policy-navigation';
 import { SaveRegressionDialog } from './policy-case-save';
 import {
   ACTION_LABELS,
@@ -27,12 +25,8 @@ export function IncidentComparisonPanel({
   comparing: boolean;
   onCompare: () => void;
 }) {
-  const { localAccess, localContext } = usePlatform();
-  const policyHref = report
-    ? policyEventHref(report.incidentId, localContext?.workspace.id ?? null)
-    : '/policies/';
-  const canDraft =
-    localAccess && report && report.classes.length > 0 && policyHref !== '/policies/';
+  const { localAccess } = usePlatform();
+  const canSave = localAccess && report && report.classes.length > 0;
   return (
     <section
       className="incident-policy-comparison"
@@ -149,15 +143,7 @@ export function IncidentComparisonPanel({
       )}
       <div className="incident-comparison-next">
         <p className="control-meta">A comparison does not verify a fix or host blocking.</p>
-        {canDraft && <SaveRegressionDialog report={report} disabled={busy} />}
-        {canDraft && (
-          <Link className="inline-link" href={policyHref}>
-            {report.scenarios.every((scenario) => scenario.effect === 'deny')
-              ? 'View action controls'
-              : 'Draft action controls'}
-            <ArrowRight size={14} />
-          </Link>
-        )}
+        {canSave && <SaveRegressionDialog report={report} disabled={busy} />}
       </div>
     </section>
   );

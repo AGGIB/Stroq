@@ -64,7 +64,9 @@ describe('MCP recovery attention queue', () => {
     );
     expect(rows).toHaveLength(1);
     expect(rows[0]?.title).toContain('reappeared');
-    expect(rows[0]?.href).toBe(`/skills/mcp/?workspace=${workspaceId}&record=${record.id}`);
+    expect(rows[0]?.href).toBe(
+      `/skills/?part=registrations&workspace=${workspaceId}&record=${record.id}`,
+    );
     expect(rows[0]?.detail).toContain('configuration');
     expect(
       mcpContainmentRows(
@@ -124,7 +126,9 @@ describe('MCP recovery attention queue', () => {
       expect(rows[0]?.title).toContain(
         runtimeMatches === false ? 'runtime changed' : 'runtime unverified',
       );
-      expect(rows[0]?.href).toBe(`/skills/mcp/?workspace=${workspaceId}&record=${record.id}`);
+      expect(rows[0]?.href).toBe(
+        `/skills/?part=registrations&workspace=${workspaceId}&record=${record.id}`,
+      );
       expect(rows[0]?.tone).toBe('orange');
     }
   });

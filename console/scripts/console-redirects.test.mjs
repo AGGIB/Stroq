@@ -27,7 +27,7 @@ test('the five screens do not move, and an unknown address is left alone', () =>
 
 test('an address with no closing slash is treated as the one with it', () => {
   assert.equal(redirectFor('/keys'), '/#keys');
-  assert.equal(redirectFor('/skills/mcp'), '/skills/');
+  assert.equal(redirectFor('/skills/mcp'), '/skills/?part=registrations#registrations');
 });
 
 test('Activity and Sessions keep a session, a decision filter and words', () => {
@@ -70,6 +70,38 @@ test('the rules reference and the history keep the one thing they were asked abo
   assert.equal(redirectFor('/policies/history/'), '/policies/#history');
   assert.equal(redirectFor('/policies/reference/', 'find=x'), '/policies/#reference');
   assert.equal(redirectFor('/try/'), '/policies/#try');
+});
+
+test('the Skills & MCP parts keep the one record or tool version they were asked about', () => {
+  const workspace = `workspace-${'a'.repeat(24)}`;
+  const record = '11111111-2222-4333-8444-555555555555';
+  assert.equal(
+    redirectFor('/skills/quarantine/', `workspace=${workspace}&record=${record}&view=attention`),
+    `/skills/?part=quarantine&workspace=${workspace}&record=${record}&view=attention#quarantine`,
+  );
+  assert.equal(
+    redirectFor('/skills/mcp/', `workspace=${workspace}&record=${record}&control=abc`),
+    `/skills/?part=registrations&workspace=${workspace}&record=${record}#registrations`,
+  );
+  const tool = `tool-${'b'.repeat(64)}`;
+  const binding = `binding-${'c'.repeat(64)}`;
+  const registration = `item-${'d'.repeat(24)}`;
+  assert.equal(
+    redirectFor(
+      '/skills/mcp/contracts/',
+      `workspace=${workspace}&registration=${registration}&binding=${binding}&tool=${tool}&version=${'e'.repeat(64)}`,
+    ),
+    `/skills/?part=tools&workspace=${workspace}&registration=${registration}&binding=${binding}&tool=${tool}&version=${'e'.repeat(64)}#tools`,
+  );
+  assert.equal(redirectFor('/skills/scan/'), '/skills/?part=check#check');
+  assert.equal(
+    redirectFor('/skills/mcp/', 'record=../../x&workspace=nope'),
+    '/skills/?part=registrations#registrations',
+  );
+  assert.equal(
+    redirectFor('/skills/quarantine/', `record=${record}&record=${record}`),
+    '/skills/?part=quarantine#quarantine',
+  );
 });
 
 test('the console menu lists the screens the redirects lead to', async () => {

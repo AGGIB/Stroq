@@ -21,8 +21,12 @@ describe('MCP registration history links', () => {
       invalid: false,
       filter: 'attention',
     });
-    expect(mcpContainmentHref(null, null, 'removed')).toBe('/skills/mcp/?view=removed');
-    expect(mcpContainmentHref(null, null, 'configured')).toBe('/skills/mcp/?view=configured');
+    expect(mcpContainmentHref(null, null, 'removed')).toBe(
+      '/skills/?part=registrations&view=removed',
+    );
+    expect(mcpContainmentHref(null, null, 'configured')).toBe(
+      '/skills/?part=registrations&view=configured',
+    );
     expect(read('view=configured').filter).toBe('configured');
   });
   it('refuses incomplete, duplicate and malformed selections', () => {
@@ -70,9 +74,11 @@ describe('MCP registration history links', () => {
       `record=${record}&workspace=${workspace}&view=unknown&token=secret&q=/private`,
     );
     expect(mcpContainmentHref(selected.recordId, selected.workspaceId, selected.filter)).toBe(
-      `/skills/mcp/?workspace=${workspace}&record=${record}`,
+      `/skills/?part=registrations&workspace=${workspace}&record=${record}`,
     );
-    expect(mcpContainmentHref('../private?token=secret', workspace)).toBe('/skills/mcp/');
-    expect(mcpContainmentHref(record, '/private/workspace')).toBe('/skills/mcp/');
+    expect(mcpContainmentHref('../private?token=secret', workspace)).toBe(
+      '/skills/?part=registrations',
+    );
+    expect(mcpContainmentHref(record, '/private/workspace')).toBe('/skills/?part=registrations');
   });
 });

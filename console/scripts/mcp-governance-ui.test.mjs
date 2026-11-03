@@ -73,7 +73,7 @@ test('exact historical operation focuses after admission once and links full pol
   assert.equal(h.focused.length, 1);
   assert.equal(h.scrolled.length, 1);
   assert.match(html, /Preview whole-policy restore/);
-  assert.match(html, /policies\/history/);
+  assert.match(html, /policies\/\?entry=[a-f0-9-]+#history/);
   h.render();
   h.commit();
   assert.equal(h.focused.length, 1);

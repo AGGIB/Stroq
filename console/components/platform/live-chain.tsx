@@ -6,6 +6,7 @@ import { ACTION_LABELS } from '@/lib/incident-comparison';
 import { JOURNAL_TOOL_TITLE, describeRow, type JournalRow } from '@/lib/journal-view';
 import { chainCommands, hasEvidence, readBefore } from '@/lib/live-feed';
 import { rulesReferenceHref } from '@/lib/rules-navigation';
+import { IncidentComparisonPanel } from './incident-comparison';
 import { IncidentRecordedEvidencePanel } from './incident-recorded-evidence';
 import { useIncidentEvidence } from './use-incidents';
 import { useIncidentRecordedEvidence } from './use-incident-recorded-evidence';
@@ -14,11 +15,23 @@ const when = (at: string): string => new Date(at).toLocaleString('en-GB');
 
 /** The recorded evidence for a finding, read once when the row is opened. */
 function Evidence({ row }: { row: JournalRow }) {
-  const { state, busy, error } = useIncidentEvidence();
+  const { state, busy, error, comparisons, compare } = useIncidentEvidence();
   const incident = state?.incidents.find((item) => item.evidenceSha === row.evidenceSha) ?? null;
   const evidence = useIncidentRecordedEvidence(incident);
   if (incident !== null)
-    return <IncidentRecordedEvidencePanel action={evidence} disabled={false} />;
+    return (
+      <>
+        <IncidentRecordedEvidencePanel action={evidence} disabled={false} />
+        {incident.kind !== 'content-flag' ? (
+          <IncidentComparisonPanel
+            report={comparisons.find((item) => item.incidentId === incident.id) ?? null}
+            busy={busy !== null}
+            comparing={busy === 'compare'}
+            onCompare={() => void compare(incident)}
+          />
+        ) : null}
+      </>
+    );
   if (state === null && error === null)
     return (
       <p className="control-meta" role="status">

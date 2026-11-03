@@ -160,7 +160,6 @@ function harness() {
           ExportButton: () => null,
         };
       if (name === '@/components/local-link') return { CopyLocalLink: () => null };
-      if (name === './inventory') return { SkillsTabs: () => null };
       if (name === './use-quarantine-action') return { useQuarantineAction: () => control };
       if (name === './use-skill-quarantine') return { useSkillQuarantine: () => page };
       if (name.startsWith('@/')) return load(resolve(root, name.slice(2)));
@@ -175,7 +174,7 @@ function harness() {
   }
   const { QuarantineAction } = load(resolve(root, 'components/platform/quarantine-action')),
     { QuarantineDetail } = load(resolve(root, 'components/platform/quarantine-detail')),
-    { SkillQuarantinePage } = load(resolve(root, 'components/platform/skill-quarantine'));
+    { QuarantineHistory } = load(resolve(root, 'components/platform/skill-quarantine'));
   const render = (component, props) => {
     cursor = 0;
     elements.length = 0;
@@ -206,7 +205,7 @@ function harness() {
         onReturnFocus() {},
         onCompleted() {},
       }),
-    history: () => render(SkillQuarantinePage),
+    history: () => render(QuarantineHistory),
     button(label) {
       return elements.find(
         ({ type, props }) =>

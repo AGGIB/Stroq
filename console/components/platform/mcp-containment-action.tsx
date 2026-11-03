@@ -1,4 +1,5 @@
 'use client';
+import { skillsPartHref } from '@/lib/skills-navigation';
 import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import { LoaderCircle, RotateCcw, Shield, Unplug } from 'lucide-react';
@@ -315,7 +316,7 @@ export function McpContainmentAction({
         <Link
           ref={historyLink}
           className="inline-link"
-          href="/skills/mcp/"
+          href={skillsPartHref('registrations')}
           aria-disabled={busy === 'apply'}
           tabIndex={busy === 'apply' ? -1 : undefined}
           onClick={(event) => {

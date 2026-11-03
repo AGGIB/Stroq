@@ -36,6 +36,8 @@ vi.mock('@/components/platform/use-journal-live', () => ({ useJournalLive: () =>
 vi.mock('@/components/platform/live-receipt', () => ({ LiveReceipt: () => null }));
 vi.mock('@/components/platform/use-incidents', () => ({
   useIncidentEvidence: () => ({
+    comparisons: [],
+    compare: () => undefined,
     state: seen.incidents,
     busy: seen.incidents ? null : 'load',
     error: null,
@@ -44,6 +46,10 @@ vi.mock('@/components/platform/use-incidents', () => ({
 vi.mock('@/components/platform/use-incident-recorded-evidence', () => ({
   useIncidentRecordedEvidence: () => ({}),
 }));
+vi.mock('@/components/platform/incident-comparison', async () => {
+  const { createElement: h } = await import('react');
+  return { IncidentComparisonPanel: () => h('section', null, 'Policy comparison panel') };
+});
 vi.mock('@/components/platform/incident-recorded-evidence', async () => {
   const { createElement: h } = await import('react');
   return { IncidentRecordedEvidencePanel: () => h('section', null, 'Recorded evidence panel') };
@@ -180,6 +186,7 @@ describe('the Live screen', () => {
     expect(words).toContain('Denied');
     expect(out).toContain('href="/policies/?find=STROQ-0042#reference"');
     expect(words).toContain('Recorded evidence panel');
+    expect(words).toContain('Policy comparison panel');
     expect(out).toContain('data-copy="stroq why --seq 9"');
     expect(out).toContain('data-copy="stroq untaint --session &lt;id&gt;"');
   });

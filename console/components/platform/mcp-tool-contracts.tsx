@@ -1,15 +1,9 @@
 'use client';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ArrowLeft, ArrowRight, RefreshCw } from 'lucide-react';
-import {
-  AgentGlyph,
-  Badge,
-  EmptyState,
-  ExportButton,
-  PageHeading,
-  Panel,
-} from '@/components/platform-ui';
+import { ArrowRight, RefreshCw } from 'lucide-react';
+import { AgentGlyph, Badge, EmptyState, ExportButton, Panel } from '@/components/platform-ui';
+import { partParams } from '@/lib/skills-navigation';
 import { INVENTORY_AGENTS } from '@/lib/inventory';
 import { mcpToolContractText } from '@/lib/mcp-tool-contract-presentation';
 import { mcpToolContractHref, mcpToolContractSelection } from '@/lib/mcp-tool-contract-navigation';
@@ -17,8 +11,9 @@ import { useMcpToolContracts } from './use-mcp-tool-contracts';
 import { McpToolContractDetail, toolContractLabel } from './mcp-tool-contract-detail';
 import { mcpToolComparisonLabel } from './mcp-tool-contract-comparison';
 
-export function McpToolContractsPage() {
-  const selection = mcpToolContractSelection(useSearchParams()),
+/** The tool versions MCP servers announced, and the approval of each exact version. A part of Skills & MCP. */
+export function ToolVersions() {
+  const selection = mcpToolContractSelection(partParams(useSearchParams(), 'tools')),
     action = useMcpToolContracts(selection),
     { state, registration, workspaceId } = action;
   const blocked =
@@ -49,37 +44,31 @@ export function McpToolContractsPage() {
     ? state?.registrations.find((row) => row.bindingId === action.affected?.bindingId)
     : null;
   return (
-    <div className="page-stack">
-      <PageHeading
-        title="MCP tool review"
-        actions={
-          <>
-            <Link className="button subtle" href="/skills/mcp/">
-              <ArrowLeft size={16} aria-hidden="true" />
-              MCP recovery
-            </Link>
-            <button
-              className="button"
-              disabled={!action.allowed || !!action.busy}
-              onClick={action.refresh}
-            >
-              <RefreshCw
-                size={16}
-                className={action.busy === 'load' ? 'spin' : undefined}
-                aria-hidden="true"
-              />
-              Refresh records
-            </button>
-            {state && (
-              <ExportButton
-                filename="stroq-mcp-tool-contracts.json"
-                label="Export evidence"
-                data={action.getEvidence}
-              />
-            )}
-          </>
-        }
-      />
+    <section id="tools" className="skills-part" tabIndex={-1} aria-labelledby="tools-title">
+      <div className="skills-part-head">
+        <h2 id="tools-title">MCP tool versions</h2>
+        <div className="skills-part-actions">
+          <button
+            className="button"
+            disabled={!action.allowed || !!action.busy}
+            onClick={action.refresh}
+          >
+            <RefreshCw
+              size={16}
+              className={action.busy === 'load' ? 'spin' : undefined}
+              aria-hidden="true"
+            />
+            Refresh records
+          </button>
+          {state && (
+            <ExportButton
+              filename="stroq-mcp-tool-contracts.json"
+              label="Export evidence"
+              data={action.getEvidence}
+            />
+          )}
+        </div>
+      </div>
       {action.error && (
         <p className="control-error" role="alert">
           {action.error}
@@ -117,13 +106,10 @@ export function McpToolContractsPage() {
         </Panel>
       ) : !action.localAccess ? (
         <Panel>
-          <EmptyState
-            title="Connect your local engine"
-            description="Open the private local link to read recorded MCP tool contracts."
-          />
-          <Link className="button" href="/settings/">
-            Connection settings
-          </Link>
+          <p className="panel-body control-meta">
+            Not connected to Stroq on this machine. Run <code>npx @stroq/cli console</code> to open
+            this page with your data.
+          </p>
         </Panel>
       ) : !state ? (
         <Panel>
@@ -369,6 +355,6 @@ export function McpToolContractsPage() {
         </>
       )}
       <McpToolContractDetail action={action} onClose={close} />
-    </div>
+    </section>
   );
 }
