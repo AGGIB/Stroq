@@ -117,12 +117,6 @@ export function HookCheckHistoryPage() {
           </>
         }
       />
-      <nav className="filter-tabs hook-history-tabs" aria-label="Check history type">
-        <Link className="is-active" aria-current="page" href="/agents/hooks/">
-          Stroq hook
-        </Link>
-        <Link href="/agents/checks/">In-agent</Link>
-      </nav>
       {history.error && enabled && (
         <p className="control-error" role="alert">
           {history.error}

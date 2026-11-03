@@ -507,10 +507,6 @@
   text-overflow: ellipsis;
 }
 
-.live-check-detail {
-  display: grid;
-  gap: 22px;
-}
 .protection-queue-row .queue-icon.orange {
   color: var(--st-amber);
 }
@@ -539,30 +535,4 @@
 }
 .protection-queue-row > div {
   min-width: 0;
-}
-.live-check-table {
-  min-width: 690px;
-}
-.live-check-table tr[aria-selected='true'] {
-  background: var(--muted);
-}
-.live-stored-list > div {
-  display: grid;
-  grid-template-columns: minmax(170px, 1fr) minmax(0, 2fr) auto;
-  align-items: center;
-  gap: 12px 20px;
-  padding: 18px 22px;
-}
-.live-stored-list > div + div {
-  border-top: 1px solid var(--border);
-}
-@media (max-width: 650px) {
-  .live-stored-list > div {
-    grid-template-columns: minmax(0, 1fr) auto;
-    padding: 18px 16px;
-  }
-  .live-stored-list .control-meta {
-    grid-column: 1 / -1;
-    grid-row: 2;
-  }
 }
