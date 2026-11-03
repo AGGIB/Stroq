@@ -25,9 +25,27 @@ const CWD = '/workspace/project';
 const classes = (command: string): readonly string[] => classifyCommand(command, CWD).classes;
 const asks = (command: string): boolean => classes(command).includes('shell.destructive');
 
+/**
+ * On Windows `/tmp/x` is a folder on the current drive (`D:\tmp\x`), not the system's scratch space, and
+ * the hook's directory is a drive path Stroq cannot place against `/tmp`: no delete there is exempt. The
+ * blocks that say when the exemption applies are for the systems that have `/tmp`; what keeps the
+ * question is checked everywhere.
+ */
+const WINDOWS = process.platform === 'win32';
+
 afterEach(() => vi.unstubAllEnvs());
 
-describe('a named path under the temp directory is not destructive', () => {
+describe.runIf(WINDOWS)('on Windows', () => {
+  it.each([
+    'rm -rf /tmp/test_output',
+    'rm -rf /var/tmp/build-cache',
+    'rm -rf /var/folders/zz/abc_123/T/build',
+  ])('%s keeps the question', (command) => {
+    expect(asks(command)).toBe(true);
+  });
+});
+
+describe.skipIf(WINDOWS)('a named path under the temp directory is not destructive', () => {
   it.each([
     'rm -rf /tmp/test_output',
     'rm -rf /tmp/test_output && mkdir -p /tmp/test_output',
@@ -188,7 +206,7 @@ describe('what stays a question', () => {
  * name under it can be the project, a folder above it, or the folder beside it. The exemption is off
  * wherever the directory the hook gives is inside scratch space.
  */
-describe('a project under the temp directory', () => {
+describe.skipIf(WINDOWS)('a project under the temp directory', () => {
   const asksIn = (command: string, cwd: string): boolean =>
     classifyCommand(command, cwd).classes.includes('shell.destructive');
 
@@ -369,7 +387,7 @@ const facts = (inert: boolean): LineFacts => ({
   scope: () => ({ roots: [] }),
 });
 
-describe('a link that leaves the temp directory', () => {
+describe.skipIf(WINDOWS)('a link that leaves the temp directory', () => {
   // The folder the tests make is the temp folder for them: a root that is given, and a literal path the hook knows
   // when it is under the system's own.
   const outside = dirname(fileURLToPath(import.meta.url));
@@ -423,7 +441,7 @@ describe('a link that leaves the temp directory', () => {
   });
 });
 
-describe('isNamedTempTarget', () => {
+describe.skipIf(WINDOWS)('isNamedTempTarget', () => {
   const system: TempScope = { roots: ['/tmp', '/var/tmp', '/private/tmp', '/private/var/tmp'] };
   const named = (target: string, inert = true): boolean =>
     isNamedTempTarget(target, facts(inert), CWD, system);
