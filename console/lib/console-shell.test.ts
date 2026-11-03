@@ -119,6 +119,16 @@ describe('the shell', () => {
     expect(out).not.toMatch(/Example|Guide/);
   });
 
+  it('holds the menu of the desktop panel in a sticky column that scrolls by itself', () => {
+    seen.path = '/';
+    seen.platform = platform(LOCAL);
+    render(PlatformShell, { children: 'page' });
+    const panel = seen.elements.find((e) => e.props?.className === 'desktop-sidebar');
+    expect(panel).toBeDefined();
+    const inner = [panel?.props.children].flat()[0];
+    expect(inner.props.className).toBe('sidebar-sticky');
+  });
+
   it('lists exactly five screens in its menu and has no Settings link', () => {
     seen.path = '/';
     seen.platform = platform(LOCAL);

@@ -499,18 +499,31 @@ code,
   top: 10px;
 }
 .platform-shell {
+  --sidebar-width: 240px;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   min-height: 100vh;
 }
+/* The panel is a column of the page, so it is as tall as the page however the page is drawn (a
+   full-page screenshot included). What it holds sticks to the top of the window, and the menu in it
+   scrolls by itself when the window is shorter than the menu. */
 .desktop-sidebar {
-  position: fixed;
-  inset: 0 auto 0 0;
-  width: 240px;
+  position: relative;
   background: var(--sidebar);
   border-right: 1px solid var(--border);
+  z-index: 30;
+}
+.sidebar-sticky {
+  position: sticky;
+  top: 0;
+  box-sizing: border-box;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   padding: 27px 14px 0;
-  z-index: 30;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .brand {
   display: flex;
@@ -682,7 +695,6 @@ code,
   margin-left: auto;
 }
 .workspace-main {
-  margin-left: 240px;
   min-width: 0;
 }
 .topbar {
@@ -2120,12 +2132,11 @@ code,
   }
 }
 @media (max-width: 1150px) {
-  .desktop-sidebar {
-    width: 216px;
-    padding-inline: 12px;
+  .platform-shell {
+    --sidebar-width: 216px;
   }
-  .workspace-main {
-    margin-left: 216px;
+  .sidebar-sticky {
+    padding-inline: 12px;
   }
   .brand {
     margin-left: 9px;
@@ -2265,11 +2276,11 @@ code,
   }
 }
 @media (max-width: 650px) {
+  .platform-shell {
+    display: block;
+  }
   .desktop-sidebar {
     display: none;
-  }
-  .workspace-main {
-    margin-left: 0;
   }
   .topbar {
     height: 55px;

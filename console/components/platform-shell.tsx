@@ -119,7 +119,9 @@ export function PlatformShell({ children }: { children: ReactNode }) {
   return (
     <div className="platform-shell">
       <aside className="desktop-sidebar">
-        <Navigation />
+        <div className="sidebar-sticky">
+          <Navigation />
+        </div>
       </aside>
       <div className="workspace-main">
         <header className="topbar">
