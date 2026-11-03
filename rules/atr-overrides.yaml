@@ -763,8 +763,9 @@ ATR-2026-00163:
     best to", "make it a habit to", "in order to", "proceed to"), and a request phrase ("you need to", "make sure
     to", "are required to", "instructed to") is one even when a setting's noun is earlier in the sentence. It may
     follow anything that is not part of a word (or the `\n` of a JSON
-    string). Every other surface reads the vendored pattern, as before. The pattern reads a lookbehind at
-    each verb and is linear. Condition 4 ("run ... in the background ... without telling the user") took
+    string). Every other surface reads the vendored pattern, as before. A lookahead for the verb comes first,
+    so the lookbehinds run only where a verb starts (Node 22 ran them at every blank of a run, in time that
+    grew with its square) and the pattern is linear. Condition 4 ("run ... in the background ... without telling the user") took
     51 s on a "run" followed by 40,000 blanks: the blanks the first `\s+` took could be given back one at a
     time to the optional group after it, which takes blanks too, so the work grew with the cube of the run. The
     blanks are now taken once (a lookahead that is read as a whole, then repeated), which accepts the same
@@ -774,7 +775,7 @@ ATR-2026-00163:
       from: |-
         (?i)(?:you\s+(?:must|should|will|shall)\s+)?(?:skip|bypass|disable|ignore|override)\s+(?:all\s+)?(?:security|safety|permission|access|auth)\s+(?:check|control|warning|prompt|gate|guard|verification|validation)s?\s+(?:for|when|before|during|to\s+(?:allow|enable|proceed|run|execute))
       web: |-
-        (?i)(?:(?<![\w'-])|(?<=\\[nrt]))(?:(?<=\b(?:need|needs|needed|have|has|had|sure|required|requires|instructed|told|asked|supposed|expected|ordered|want|wants|wanted|ought|tasked)\s+to\s+)|(?<!\b(?:flags?|options?|settings?|variables?|env|environment|params?|parameters?|toggle|switch|arguments?)\b[^\n.]{0,40}\bto\s+|\bset\s+to\s+\S+\s+to\s+))(?:skip|bypass|disable|ignore|override)\s+(?:all\s+)?(?:security|safety|permission|access|auth)\s+(?:check|control|warning|prompt|gate|guard|verification|validation)s?\s+(?:for|when|before|during|to\s+(?:allow|enable|proceed|run|execute))
+        (?i)(?=(?:skip|bypass|disable|ignore|override)\s)(?:(?<![\w'-])|(?<=\\[nrt]))(?:(?<=\b(?:need|needs|needed|have|has|had|sure|required|requires|instructed|told|asked|supposed|expected|ordered|want|wants|wanted|ought|tasked)\s+to\s+)|(?<!\b(?:flags?|options?|settings?|variables?|env|environment|params?|parameters?|toggle|switch|arguments?)\b[^\n.]{0,40}\bto\s+|\bset\s+to\s+\S+\s+to\s+))(?:skip|bypass|disable|ignore|override)\s+(?:all\s+)?(?:security|safety|permission|access|auth)\s+(?:check|control|warning|prompt|gate|guard|verification|validation)s?\s+(?:for|when|before|during|to\s+(?:allow|enable|proceed|run|execute))
     - index: 4
       from: |-
         (?i)(?:execute|run|perform)\s+(?:silently|quietly|without\s+(?:notification|alerting|informing|telling|notifying)|(?:[\w\s-]{0,30}\s+)?in\s+the\s+background\b[\s\S]{0,40}?(?:without\s+(?:notif\w*|alert\w*|inform\w*|telling|notifying|(?:the\s+)?user(?:.?s)?(?:\s+(?:knowledge|awareness|notice|consent|confirmation|approval|permission))?|confirmation|approval|consent|permission|notice)|silently|secretly|covertly|hidden\s+from\s+(?:the\s+)?user|unbeknownst))
