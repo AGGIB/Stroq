@@ -1,6 +1,6 @@
 const JOB = '[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}';
 const OPERATION = new RegExp(
-  '^/api/(?:context|control|agents|(?:quarantine|mcp-containment)(?:/(?:preview|apply))?|' +
+  '^/api/(?:context|control|agents|card(?:/start)?|(?:quarantine|mcp-containment)(?:/(?:preview|apply))?|' +
     'incidents(?:/(?:review|verify|compare|evidence))?|' +
     'journal/(?:tail|summary|since)|posture|' +
     'incident-assessments(?:/(?:preview|apply|recheck))?|' +

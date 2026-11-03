@@ -50,6 +50,7 @@ import {
   routePosture,
 } from './workspace-monitor-bridge.mjs';
 import { createSecretScanService } from './secret-scan-service.mjs';
+import { createCardService } from './card-service.mjs';
 import { createIncidentRecheckService } from './incident-recheck.mjs';
 import { routeOperational } from './operational-http.mjs';
 import { runtimeLayout } from './runtime-layout.mjs';
@@ -186,6 +187,7 @@ export async function startServer({
   journalView: suppliedJournalView,
   posture: suppliedPosture,
   secrets: suppliedSecrets,
+  card: suppliedCard,
   comparisons: suppliedComparisons,
   port = 47815,
   token = randomBytes(32).toString('base64url'),
@@ -287,6 +289,16 @@ export async function startServer({
       selectEvidence: (request) => incidents.selectForComparison(request),
     }));
   const secrets = suppliedSecrets ?? (await createSecretScanService(context));
+  // The card runs in the environment of this server, as the terminal's would; a test that names the
+  // user's home gives it an environment of its own.
+  const card =
+    suppliedCard ??
+    (await createCardService({
+      home: selectedHome,
+      userHome: selectedUserHome,
+      project: selectedProject,
+      environment: userHome === undefined ? process.env : {},
+    }));
   const comparisons =
     suppliedComparisons ??
     createIncidentRecheckService({
@@ -355,6 +367,22 @@ export async function startServer({
             secrets,
             comparisons,
           });
+        } else if (parsed.path === '/api/card') {
+          response =
+            req.method === 'GET'
+              ? { status: 200, body: await card.getState() }
+              : { status: 405, body: { error: 'method-not-allowed' } };
+        } else if (parsed.path === '/api/card/start') {
+          response = await jsonAction(
+            req,
+            origin,
+            (input) => {
+              if (input === null || typeof input !== 'object' || Object.keys(input).length > 0)
+                throw new Error('invalid-request');
+              return card.start();
+            },
+            256,
+          );
         } else if (parsed.path.startsWith('/api/incident-assessments')) {
           response = await routeIncidentAssessments(req, parsed.path, origin, incidentAssessments);
         } else if (parsed.path.startsWith('/api/session-taint')) {
@@ -571,6 +599,7 @@ export async function startServer({
           workspaceTasks,
           sessionTaint,
           secrets,
+          card,
           comparisons,
           policyCases,
           journalView,

@@ -327,3 +327,58 @@ test('an address of the older console is sent to the screen that took its place'
   assert.equal((await get(app, '/keys/', {}, 'POST')).status, 405);
   assert.equal((await get(app, '/live/')).status, 404, 'a screen itself is served as a file');
 });
+
+test('the card route needs the token, reads on GET and starts a run on an empty POST', async (t) => {
+  let started = 0;
+  const state = { schema: 'stroq-card-state/1', status: 'idle', result: null };
+  const card = {
+    getState: async () => state,
+    start: async () => {
+      started++;
+      return { status: 202, body: { ...state, status: 'running' } };
+    },
+    close: async () => {},
+  };
+  const dir = await realpath(await mkdtemp(join(tmpdir(), 'stroq-console-card-')));
+  await mkdir(join(dir, 'out'));
+  await mkdir(join(dir, 'home'));
+  await writeFile(join(dir, 'out', 'index.html'), 'fixture');
+  const app = await startServer({
+    root: join(dir, 'out'),
+    home: join(dir, 'home'),
+    userHome: join(dir, 'home'),
+    project: dir,
+    port: 0,
+    card,
+  });
+  t.after(async () => {
+    await app.close();
+    await rm(dir, { recursive: true, force: true });
+  });
+  const auth = { Authorization: `Bearer ${app.token}` };
+  const origin = app.url.split('/#')[0];
+  const headers = { ...auth, Origin: origin, 'Content-Type': 'application/json' };
+  assert.equal((await get(app, '/api/card')).status, 401);
+  assert.equal((await get(app, '/api/card/start', {}, 'POST', '{}')).status, 401);
+  const read = await get(app, '/api/card', auth);
+  assert.equal(read.status, 200);
+  assert.equal(JSON.parse(read.text).status, 'idle');
+  assert.equal((await get(app, '/api/card', headers, 'POST', '{}')).status, 405);
+  assert.equal((await get(app, '/api/card/start', headers, 'GET')).status, 405);
+  assert.equal((await get(app, '/api/card/start', auth, 'POST', '{}')).status, 403);
+  assert.equal(
+    (await get(app, '/api/card/start', { ...headers, 'Content-Type': 'text/plain' }, 'POST', '{}'))
+      .status,
+    415,
+  );
+  assert.equal(
+    (await get(app, '/api/card/start', headers, 'POST', '{"days":3650,"path":"/etc"}')).status,
+    400,
+  );
+  assert.equal((await get(app, '/api/card/start', headers, 'POST', 'null')).status, 400);
+  assert.equal(started, 0, 'nothing was started by a refused request');
+  const run = await get(app, '/api/card/start', headers, 'POST', '{}');
+  assert.equal(run.status, 202);
+  assert.equal(JSON.parse(run.text).status, 'running');
+  assert.equal(started, 1);
+});

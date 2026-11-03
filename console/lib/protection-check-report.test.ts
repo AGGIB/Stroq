@@ -280,7 +280,7 @@ describe('actual five-stage local check report', () => {
     expect(html).toContain('No saved checks');
     expect(html).toContain('no provider requests');
     expect(html).toContain('run=22222222-2222-4222-8222-222222222222');
-    expect(html).toContain('/protection/workspace/?');
+    expect(html).toContain('stroq inspect &lt;folder&gt;');
     expect(html).not.toContain('Protected');
     expect(html).not.toContain('Cancel check');
     expect(html.indexOf('1 errors · 0 warnings · complete')).toBeGreaterThan(-1);

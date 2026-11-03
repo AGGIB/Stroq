@@ -22,6 +22,7 @@ const ADAPTERS = [
   'incidents-engine.js',
   'secret-scan-engine.js',
   'incident-recheck-engine.js',
+  'card-view.js',
   'corpus.json',
   'atlas.json',
   'scope.json',

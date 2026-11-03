@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildCard, defaultWorkers, sessionFolders, type BuildEnv } from '../../src/card/build.js';
 import type { CardData } from '../../src/card/data.js';
+import { cardDataSchema } from '../../src/card/data-schema.js';
 import { handleJob, type CardJob, type CardResult } from '../../src/card/jobs.js';
 import type { Channel } from '../../src/card/pool.js';
 import { renderCard } from '../../src/card/render.js';
@@ -244,5 +245,18 @@ describe('helpers', () => {
     const repos: CardJob = { kind: 'repos', dirs: [m.work], stopAt: Date.now() + 10_000 };
     const result = await handleJob(repos);
     expect(result.kind).toBe('repos');
+  });
+});
+
+describe('the card as `--json` prints it', () => {
+  it('is accepted by the schema the console reads it with, and a changed field is not', async () => {
+    populate(m);
+    const data = await buildCard(30, env());
+    const printed: unknown = JSON.parse(JSON.stringify(data));
+    expect(cardDataSchema.safeParse(printed).success).toBe(true);
+    const extra = { ...(printed as object), unexpected: 1 };
+    expect(cardDataSchema.safeParse(extra).success).toBe(false);
+    const wrong = { ...(printed as { counts: object }), counts: { commands: -1 } };
+    expect(cardDataSchema.safeParse(wrong).success).toBe(false);
   });
 });

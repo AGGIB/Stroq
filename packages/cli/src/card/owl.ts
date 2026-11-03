@@ -10,13 +10,8 @@ import { mascotPlan, playGreeting, type MascotFlags } from '../ui/mascot/play.js
 import { renderCard as drawCard, visibleWidth, type ColorDepth } from '../ui/mascot/render.js';
 import type { FrameName } from '../ui/mascot/sprites.js';
 import { currentTerminal } from '../ui/terminal.js';
-import type { CardData } from './data.js';
 
-/** What the owl says about the result: found something, found nothing, or had nothing to read. */
-export function owlFrame(data: CardData): FrameName {
-  if (data.coverage.found === 0) return 'idle';
-  return data.moments.length > 0 ? 'alert' : 'happy';
-}
+export { owlFrame } from './owl-frame.js';
 
 /** What printing the card needs from the world, so that a test can stand in for it. */
 export interface OwlWorld {

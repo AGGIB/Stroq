@@ -25,6 +25,7 @@
 @import './live-view.css';
 @import './posture.css';
 @import './home.css';
+@import './check.css';
 
 :root {
   --text-ui: 16px;

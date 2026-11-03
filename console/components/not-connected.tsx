@@ -1,5 +1,6 @@
 'use client';
-import { LoaderCircle, Plug } from 'lucide-react';
+import { LoaderCircle } from 'lucide-react';
+import { Hoo } from './hoo';
 import { usePlatform } from './platform-provider';
 import { PageHeading } from './platform-ui';
 
@@ -21,7 +22,7 @@ export function NotConnected({ title }: { title: string }) {
         </div>
       ) : (
         <div className="empty-state not-connected" role="status">
-          <Plug size={30} aria-hidden="true" />
+          <Hoo frame="idle" size={72} />
           <h3>Nothing to show yet</h3>
           <p>
             Not connected to Stroq on this machine. Run <code>npx @stroq/cli console</code> to open

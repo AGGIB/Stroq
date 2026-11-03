@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { renderCard, shareLine, WIDTH } from '../../src/card/render.js';
+import { cardView, renderCard, shareLine, WIDTH } from '../../src/card/render.js';
+import { owlFrame } from '../../src/card/owl-frame.js';
 import { card, moment } from './fixtures.js';
 
 const HOME = '/Users/dev';
@@ -243,5 +244,70 @@ describe('the share line', () => {
     );
     expect(line).not.toContain('\n');
     expect(line).not.toMatch(/STRIPE|invalid|\/Users|~/);
+  });
+});
+
+describe('the card as sentences and numbers (what the console reads)', () => {
+  const found = card({
+    counts: {
+      commands: 31_785,
+      toldByText: 3,
+      keysSent: 1,
+      keysStopped: 2,
+      keysSeen: 1,
+      autorunRepos: 2,
+    },
+    moments: [moment(1, { line: 'First.' }), moment(2), moment(3), moment(4, { line: 'Fourth.' })],
+  });
+
+  it('holds the same title, counts, moments and next step as the printed lines', () => {
+    const view = cardView(found, HOME);
+    if (view.kind !== 'card') throw new Error('expected a card');
+    const printed = text(renderCard(found, HOME));
+    expect(printed).toContain(view.title);
+    expect(printed).toContain(view.subtitle);
+    expect(view.rows.map((r) => [r.id, r.count])).toEqual([
+      ['commands', 31_785],
+      ['told', 3],
+      ['keys', 1],
+      ['autorun', 2],
+    ]);
+    expect(view.rows[2]?.text).toBe(
+      'key that left this machine (2 more were stopped before they left)',
+    );
+    expect(view.moments.map((m) => m.n)).toEqual([1, 2, 3]);
+    expect(view.nothing).toBeNull();
+    expect(printed).toContain(`${view.next.label}  ${view.next.command}`);
+  });
+
+  it('says there is nothing to look at, and where to see what Stroq stops', () => {
+    const view = cardView(card(), HOME);
+    if (view.kind !== 'card') throw new Error('expected a card');
+    expect(view.nothing).toBe('Nothing worth a look in these sessions.');
+    expect(view.moments).toEqual([]);
+    expect(view.next).toEqual({ label: 'See what Stroq stops:', command: 'npx @stroq/cli attack' });
+  });
+
+  it('keeps each note whole, for the console to lay out itself', () => {
+    const cut = card({ coverage: { ...card().coverage, checked: 812, notChecked: 944 } });
+    const view = cardView(cut, HOME);
+    if (view.kind !== 'card') throw new Error('expected a card');
+    expect(view.notes).toContain(
+      'Checked 812 of 1,756 sessions, newest first; run again to check the rest.',
+    );
+  });
+
+  it('has its own view for a machine with no sessions', () => {
+    const none = card({
+      coverage: { ...card().coverage, found: 0, checked: 0, agents: { claudeCode: 0, codex: 0 } },
+    });
+    const view = cardView(none, HOME);
+    expect(view).toMatchObject({
+      kind: 'nothing-to-read',
+      title: 'Hoo found no agent sessions in the last 30 days.',
+    });
+    expect(owlFrame(none)).toBe('idle');
+    expect(owlFrame(found)).toBe('alert');
+    expect(owlFrame(card())).toBe('happy');
   });
 });

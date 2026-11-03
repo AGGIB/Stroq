@@ -59,6 +59,7 @@ export async function buildEngine() {
     ['incidents-engine', 'incidents-engine-entry.ts'],
     ['secret-scan-engine', 'secret-scan-engine.ts'],
     ['incident-recheck-engine', 'incident-recheck-engine-entry.ts'],
+    ['card-view', 'card-view-engine.ts'],
   ]) {
     const path = resolve(repository, 'console/scripts', source);
     try {

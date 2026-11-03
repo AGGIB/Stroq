@@ -1,14 +1,12 @@
 'use client';
 
-import { Suspense, useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Suspense, useEffect, useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import {
-  ArrowRight,
   CircleAlert,
   ClipboardCheck,
   FlaskConical,
-  FolderSearch,
   LoaderCircle,
   RefreshCw,
   Settings2,
@@ -16,9 +14,6 @@ import {
 } from 'lucide-react';
 import { useControl } from '@/components/control-provider';
 import { usePlatform } from '@/components/platform-provider';
-import { ProtectionQueue } from './protection-queue';
-import { PostureStrip } from './posture-strip';
-import { ProtectionVerdict } from './protection-verdict';
 import { ProtectionCheckReport } from './protection-check-report';
 import {
   protectionRunHref,
@@ -34,8 +29,7 @@ import {
   PolicyResult,
   ScenariosResult,
 } from './protection-results';
-import { Badge, EmptyState, PageHeading, Panel } from '@/components/platform-ui';
-import { mcpGovernanceHref } from '@/lib/mcp-governance-navigation';
+import { Badge, EmptyState, Panel } from '@/components/platform-ui';
 import {
   RUN_ERRORS,
   RUN_LABELS,
@@ -165,7 +159,7 @@ function RunFrame({
   );
 }
 
-function ProtectionPageContent() {
+export function SetupChecksContent() {
   const { ready, loading, error, control, runs, busy, needsRecheck, refresh, start, cancel } =
     useControl();
   const { localAccess, localContext } = usePlatform();
@@ -224,10 +218,6 @@ function ProtectionPageContent() {
     });
     return () => cancelAnimationFrame(frame);
   }, [selectionAllowed, selection.runId, requestedRun?.id, requestedRun?.kind]);
-  const queueKey = `${checks
-    .filter((run) => run.kind === 'protection-check' && run.status !== 'running')
-    .map((run) => `${run.id}:${run.status}:${run.finishedAt}`)
-    .join(',')}`;
   async function cancelParent() {
     if (!parent || cancelling.current) return;
     cancelling.current = parent.id;
@@ -246,38 +236,7 @@ function ProtectionPageContent() {
     ]),
   ) as Partial<Record<CheckKind, ControlRun>>;
   return (
-    <div className="page-stack">
-      <PageHeading
-        title="Protection"
-        actions={
-          <>
-            <Link className="button" href={mcpGovernanceHref({ draft: 'deny-all' })}>
-              <ShieldCheck size={17} aria-hidden="true" />
-              Block MCP calls
-            </Link>
-            <Link className="button" href="/protection/workspace/">
-              <FolderSearch size={17} aria-hidden="true" />
-              Workspace review
-            </Link>
-            <button
-              className="icon-button"
-              aria-label={needsRecheck ? 'Recheck recorded checks' : 'Refresh local checks'}
-              disabled={loading}
-              onClick={() => void refresh()}
-            >
-              <RefreshCw size={17} className={loading ? 'spin' : undefined} aria-hidden="true" />
-            </button>
-            <button
-              className="button primary"
-              disabled={!canRun || busy || !selectionAllowed}
-              onClick={() => void runCheck('protection-check')}
-            >
-              <ShieldCheck size={17} aria-hidden="true" />
-              Run protection check
-            </button>
-          </>
-        }
-      />
+    <div className="check-setup-body">
       {error && (
         <div className="control-error" role="alert">
           <CircleAlert size={18} aria-hidden="true" />
@@ -285,43 +244,48 @@ function ProtectionPageContent() {
         </div>
       )}
       {!ready || !control ? (
-        <Panel>
-          <div className="control-empty">
-            {connecting ? (
-              <>
-                <LoaderCircle size={26} className="spin" aria-hidden="true" />
-                <p role="status">Connecting to the local engine…</p>
-              </>
-            ) : (
-              <>
-                <EmptyState
-                  title={ready ? 'Local checks unavailable' : 'Connect your local engine'}
-                  description={
-                    ready
-                      ? 'Refresh to retry the local connection.'
-                      : 'Open the private link printed by the local server.'
-                  }
-                />
-                <Link className="button" href="/settings/">
-                  Connection settings <ArrowRight size={16} aria-hidden="true" />
-                </Link>
-              </>
-            )}
-          </div>
-        </Panel>
+        <div className="control-empty">
+          {connecting ? (
+            <>
+              <LoaderCircle size={26} className="spin" aria-hidden="true" />
+              <p role="status">Connecting to the local engine…</p>
+            </>
+          ) : (
+            <EmptyState
+              title={ready ? 'Setup checks unavailable' : 'Connect your local engine'}
+              description={
+                ready
+                  ? 'Open the section again to retry the local connection.'
+                  : 'Run npx @stroq/cli console to open this page with your data.'
+              }
+            />
+          )}
+        </div>
       ) : (
         <>
-          <ProtectionVerdict />
-          <PostureStrip />
-          <ProtectionQueue refreshKey={queueKey} />
-          <section className="protection-checks" aria-labelledby="protection-checks-title">
-            <h2 id="protection-checks-title" className="protection-checks-title">
-              Checks
-            </h2>
+          <section className="protection-checks" aria-label="Setup checks">
             <p className="protection-checks-hint">
-              Run these after you connect an agent or change a policy. They read local configuration
+              Run these after you connect an agent or change a rule. They read local configuration
               and run made-up scenarios; nothing is sent to a provider.
             </p>
+            <div className="protection-actions">
+              <button
+                className="icon-button"
+                aria-label={needsRecheck ? 'Recheck recorded checks' : 'Refresh local checks'}
+                disabled={loading}
+                onClick={() => void refresh()}
+              >
+                <RefreshCw size={17} className={loading ? 'spin' : undefined} aria-hidden="true" />
+              </button>
+              <button
+                className="button"
+                disabled={!canRun || busy || !selectionAllowed}
+                onClick={() => void runCheck('protection-check')}
+              >
+                <ShieldCheck size={17} aria-hidden="true" />
+                Check setup
+              </button>
+            </div>
             <div className="protection-status">
               <div className="protection-status-main">
                 <ShieldCheck size={20} aria-hidden="true" />
@@ -367,7 +331,7 @@ function ProtectionPageContent() {
                       : 'This exact check is not in the retained history.'
                   }
                 />
-                <Link className="button" href="/protection/">
+                <Link className="button" href="/">
                   Open current checks
                 </Link>
               </Panel>
@@ -463,16 +427,33 @@ function ProtectionPageContent() {
     </div>
   );
 }
-export function ProtectionPage() {
+/**
+ * The checks of the older Protection screen that are still true: the installation, the rule file and
+ * the scenarios. They sit in a section of the Check screen, closed, and read nothing until it is
+ * opened.
+ */
+export function SetupChecks() {
+  // A link to one run of the checks opens the section on it.
+  const [open, setOpen] = useState(useSearchParams().has('run'));
   return (
-    <Suspense
-      fallback={
-        <div className="control-empty" role="status">
-          Reading local checks…
-        </div>
-      }
+    <details
+      id="setup-checks"
+      className="check-setup"
+      open={open || undefined}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
     >
-      <ProtectionPageContent />
-    </Suspense>
+      <summary>Setup checks</summary>
+      {open ? (
+        <Suspense
+          fallback={
+            <div className="control-empty" role="status">
+              Reading local checks…
+            </div>
+          }
+        >
+          <SetupChecksContent />
+        </Suspense>
+      ) : null}
+    </details>
   );
 }

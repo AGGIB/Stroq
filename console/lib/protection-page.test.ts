@@ -9,7 +9,6 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import * as control from './control';
 import * as checks from './protection-check';
 import * as navigation from './protection-check-navigation';
-import * as governanceNavigation from './mcp-governance-navigation';
 const workspaceId = `workspace-${'a'.repeat(24)}`;
 function harness(query = '', configure?: (state: any) => void) {
   const calls: any[] = [],
@@ -45,7 +44,7 @@ function harness(query = '', configure?: (state: any) => void) {
   };
   configure?.(state);
   const code = ts.transpileModule(
-    readFileSync(resolve(process.cwd(), 'components/platform/protection.tsx'), 'utf8'),
+    readFileSync(resolve(process.cwd(), 'components/platform/setup-checks.tsx'), 'utf8'),
     {
       compilerOptions: {
         module: ts.ModuleKind.CommonJS,
@@ -98,8 +97,6 @@ function harness(query = '', configure?: (state: any) => void) {
         };
       if (name === '@/components/platform-ui')
         return {
-          PageHeading: ({ title, actions }: any) =>
-            React.createElement('header', {}, title, actions),
           Panel: ({ children }: any) => React.createElement('section', {}, children),
           Badge: ({ children }: any) => React.createElement('span', {}, children),
           EmptyState: ({ title }: any) => React.createElement('h2', {}, title),
@@ -113,25 +110,20 @@ function harness(query = '', configure?: (state: any) => void) {
           PolicyResult: () => null,
           ScenariosResult: () => null,
         };
-      if (name === './protection-queue')
-        return { ProtectionQueue: () => React.createElement('h2', {}, 'Current attention') };
-      if (name === './posture-strip') return { PostureStrip: () => null };
-      if (name === './protection-verdict') return { ProtectionVerdict: () => null };
       if (name === './protection-check-report') return { ProtectionCheckReport: () => null };
       const modules: Record<string, unknown> = {
         '@/lib/control': control,
         '@/lib/protection-check': checks,
         '@/lib/protection-check-navigation': navigation,
-        '@/lib/mcp-governance-navigation': governanceNavigation,
       };
       if (modules[name]) return modules[name];
       throw Error(name);
     },
   });
-  const html = renderToStaticMarkup(React.createElement(exports.ProtectionPage));
+  const html = renderToStaticMarkup(React.createElement(exports.SetupChecksContent));
   return { html, calls, elements, effects, state };
 }
-describe('actual Protection page entry action', () => {
+describe('actual setup checks entry action', () => {
   it('re-reads on page entry without treating navigation as explicit uncertain-action confirmation', () => {
     const page = harness('', (state) => {
       state.needsRecheck = true;
@@ -167,8 +159,8 @@ describe('actual Protection page entry action', () => {
     const primary = page.elements.find(
       (e) =>
         e.type === 'button' &&
-        e.props.className === 'button primary' &&
-        e.props.children?.includes?.('Run protection check'),
+        e.props.className === 'button' &&
+        e.props.children?.includes?.('Check setup'),
     );
     expect(primary).toBeTruthy();
     await primary.props.onClick();
@@ -187,8 +179,8 @@ describe('actual Protection page entry action', () => {
     const primary = page.elements.find(
       (e) =>
         e.type === 'button' &&
-        e.props.className === 'button primary' &&
-        e.props.children?.includes?.('Run protection check'),
+        e.props.className === 'button' &&
+        e.props.children?.includes?.('Check setup'),
     );
     expect(primary.props.disabled).toBe(true);
   });
@@ -198,7 +190,7 @@ describe('actual Protection page entry action', () => {
     expect(page.calls).toEqual([]);
     expect(harness('run=private').html).toContain('Invalid check link');
   });
-  it('offers explicit MCP blocking navigation and places the queue before historical checks', () => {
+  it('keeps the recorded protection check closed until it is asked for', () => {
     const page = harness('', (state) => {
       state.runs = [
         {
@@ -211,15 +203,12 @@ describe('actual Protection page entry action', () => {
         },
       ];
     });
-    expect(page.html).toContain('Block MCP calls');
-    expect(page.html).toContain('governanceDraft=deny-all');
-    expect(page.html.indexOf('Current attention')).toBeLessThan(
-      page.html.indexOf('Recorded protection check'),
-    );
+    expect(page.html).toContain('Recorded protection check');
+    expect(page.html).not.toContain('Block MCP calls');
     expect(page.html).not.toContain('class="control-check-details" open=""');
     expect(page.calls).toEqual([]);
   });
-  it('keeps an exact selected protection report expanded below the queue', () => {
+  it('keeps an exact selected protection report expanded', () => {
     const id = '11111111-1111-4111-8111-111111111111';
     const page = harness(`workspace=${workspaceId}&run=${id}`, (state) => {
       state.runs = [
@@ -233,8 +222,5 @@ describe('actual Protection page entry action', () => {
       ];
     });
     expect(page.html).toContain('class="control-check-details" open=""');
-    expect(page.html.indexOf('Current attention')).toBeLessThan(
-      page.html.indexOf('Recorded protection check'),
-    );
   });
 });
