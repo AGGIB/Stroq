@@ -3,23 +3,15 @@ import {
   Activity,
   ArrowDownLeft,
   ArrowUpRight,
-  ChevronRight,
   Command as CommandIcon,
   Cpu,
-  FileClock,
   FileCode2,
-  KeyRound,
-  LayoutDashboard,
   Menu,
   Monitor,
   Moon,
   Search,
-  Settings2,
-  ShieldAlert,
   ShieldCheck,
   SlidersHorizontal,
-  FlaskConical,
-  ListChecks,
   Radio,
   Sun,
   X,
@@ -32,32 +24,25 @@ import { Dialog } from 'radix-ui';
 import { useEffect, useState, type ReactNode } from 'react';
 import { usePlatform } from './platform-provider';
 import { BrandMark } from './brand-mark';
-import { PLATFORM_PAGES, PLATFORM_SECTIONS } from '@/lib/platform-map';
+import { PLATFORM_PAGES } from '@/lib/platform-map';
+import { liveEventHref } from '@/lib/live-navigation';
 const ICONS: Readonly<Record<string, LucideIcon>> = {
   '/': ShieldCheck,
   '/live/': Radio,
-  '/activity/': Activity,
   '/agents/': Cpu,
-  '/posture/': ListChecks,
   '/policies/': SlidersHorizontal,
-  '/try/': FlaskConical,
   '/skills/': FileCode2,
-  '/incidents/': ShieldAlert,
-  '/sessions/': FileClock,
-  '/keys/': KeyRound,
-  '/overview/': LayoutDashboard,
 };
-/** The sidebar, grouped by what a page is for (`lib/platform-map.ts`). */
+/** The sidebar: the five screens of `lib/platform-map.ts`, and nothing else. */
 const NAV = PLATFORM_PAGES.map((page) => ({
   href: page.href,
   label: page.label,
-  section: page.section,
   icon: ICONS[page.href] ?? ShieldCheck,
 }));
 const SEARCHABLE = NAV;
 export function Logo() {
   return (
-    <Link href="/" className="brand" aria-label="Stroq protection">
+    <Link href="/" className="brand" aria-label="Stroq check">
       <BrandMark />
     </Link>
   );
@@ -68,22 +53,16 @@ function Navigation({ close }: { close?: () => void }) {
   return (
     <>
       <Logo />
-      <Link href="/settings/" className="workspace-switch" onClick={close}>
+      <div className="workspace-switch" aria-label="Workspace">
         <span className="workspace-icon">
           <Monitor size={16} aria-hidden="true" />
         </span>
         <strong>{localContext?.workspace.label ?? 'Local workspace'}</strong>
-        <ChevronRight size={13} aria-hidden="true" />
-      </Link>
+      </div>
       <nav aria-label="Main navigation" className="primary-nav">
-        {PLATFORM_SECTIONS.map((section) => {
-          const isCurrent = (href: string) =>
-            href === '/'
-              ? path === '/' || path.startsWith('/protection')
-              : path.startsWith(href.slice(0, -1));
-          const items = NAV.filter((n) => n.section === section.id);
-          const links = items.map((n) => {
-            const current = isCurrent(n.href);
+        <div className="nav-group">
+          {NAV.map((n) => {
+            const current = n.href === '/' ? path === '/' : path.startsWith(n.href.slice(0, -1));
             return (
               <Link
                 key={n.href}
@@ -96,37 +75,10 @@ function Navigation({ close }: { close?: () => void }) {
                 <span>{n.label}</span>
               </Link>
             );
-          });
-          // The pages used only now and then fold away until one of them is open.
-          return section.id === 'review' ? (
-            <details
-              key={section.id}
-              className="nav-group nav-more"
-              open={items.some((n) => isCurrent(n.href)) || undefined}
-            >
-              <summary className="nav-section">
-                <ChevronRight size={14} aria-hidden="true" />
-                {section.label}
-              </summary>
-              {links}
-            </details>
-          ) : (
-            <div key={section.id} className="nav-group" role="group" aria-label={section.label}>
-              <p className="nav-section">{section.label}</p>
-              {links}
-            </div>
-          );
-        })}
+          })}
+        </div>
       </nav>
       <div className="sidebar-bottom">
-        <Link
-          className={`nav-item ${path === '/settings/' ? 'active' : ''}`}
-          href="/settings/"
-          onClick={close}
-        >
-          <Settings2 size={17} aria-hidden="true" />
-          <span>Settings</span>
-        </Link>
         <div className="sidebar-user">
           <Monitor size={14} aria-hidden="true" />
           <span>On this machine</span>
@@ -142,20 +94,9 @@ export function PlatformShell({ children }: { children: ReactNode }) {
     [query, setQuery] = useState('');
   const { source, calls, localAccess } = usePlatform(),
     { resolvedTheme, setTheme } = useTheme();
-  const path = usePathname();
-  const localOperation =
-    path === '/' ||
-    path.startsWith('/protection') ||
-    path.startsWith('/skills') ||
-    path.startsWith('/agents') ||
-    path.startsWith('/incidents') ||
-    path.startsWith('/keys') ||
-    path.startsWith('/try') ||
-    path.startsWith('/live') ||
-    (path.startsWith('/policies') && !path.includes('/reference'));
   // What the top bar claims must match what is connected: no connection is never worded like a
   // live machine.
-  const connection = source === 'local' || (localOperation && localAccess) ? 'local' : 'none';
+  const connection = source === 'local' || localAccess ? 'local' : 'none';
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -216,24 +157,16 @@ export function PlatformShell({ children }: { children: ReactNode }) {
               <span>Search…</span>
               <kbd>⌘ K</kbd>
             </button>
-            <Link
-              href="/settings/"
+            <span
               className={`source-indicator ${connection}`}
+              role="status"
               aria-label={
-                connection === 'local'
-                  ? localOperation
-                    ? 'Local engine · connection settings'
-                    : 'Local snapshot · connection settings'
-                  : 'Not connected · connection settings'
+                connection === 'local' ? 'Connected to the local engine' : 'Not connected'
               }
             >
               <i />
-              {connection === 'local'
-                ? localOperation
-                  ? 'Local engine'
-                  : 'Local'
-                : 'Not connected'}
-            </Link>
+              {connection === 'local' ? 'Local engine' : 'Not connected'}
+            </span>
             <span className="topbar-divider" />
             <button
               className="icon-button theme-button"
@@ -248,13 +181,7 @@ export function PlatformShell({ children }: { children: ReactNode }) {
         <main id="content" tabIndex={-1}>
           {children}
           <footer className="workspace-footer">
-            <span>
-              {connection === 'none'
-                ? 'Not connected'
-                : localOperation
-                  ? 'Runs on this machine'
-                  : 'Local snapshot · UTC'}
-            </span>
+            <span>{connection === 'none' ? 'Not connected' : 'Runs on this machine'}</span>
           </footer>
         </main>
       </div>
@@ -300,11 +227,7 @@ export function PlatformShell({ children }: { children: ReactNode }) {
               )}
               {query ? <p className="eyebrow">MATCHING EVENTS</p> : null}
               {found.map((c) => (
-                <Link
-                  href={`/activity/event/?id=${encodeURIComponent(c.id)}`}
-                  key={c.id}
-                  onClick={() => setSearchOpen(false)}
-                >
+                <Link href={liveEventHref(c)} key={c.id} onClick={() => setSearchOpen(false)}>
                   <Activity size={17} aria-hidden="true" />
                   <span>
                     {c.label}

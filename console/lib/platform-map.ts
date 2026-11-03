@@ -1,21 +1,13 @@
 /**
- * One map of the console: every page, the group it sits in, when to open it and what to read on it.
- * The sidebar groups its links by it. The words describe what each page shows; none of them says a
- * page blocks, secures or protects.
+ * One map of the console: its five screens, in the order the menu lists them, when to open each and
+ * what to read on it. The words describe what each screen shows; none of them says a screen blocks,
+ * secures or protects. Addresses of the older console that moved into these screens are in
+ * `scripts/console-redirects.mjs`.
  */
-
-export const PLATFORM_SECTIONS = [
-  { id: 'daily', label: 'Every day', hint: 'Look here first.' },
-  { id: 'setup', label: 'Set up', hint: 'Once per agent, and again after you change something.' },
-  { id: 'review', label: 'When you need it', hint: 'Open these when you have a reason to.' },
-] as const;
-
-export type PlatformSectionId = (typeof PLATFORM_SECTIONS)[number]['id'];
 
 export interface PlatformPage {
   readonly href: string;
   readonly label: string;
-  readonly section: PlatformSectionId;
   /** When to open it, in one sentence. */
   readonly when: string;
   /** What to read once it is open, in one sentence. */
@@ -25,90 +17,32 @@ export interface PlatformPage {
 export const PLATFORM_PAGES: readonly PlatformPage[] = [
   {
     href: '/',
-    label: 'Protection',
-    section: 'daily',
+    label: 'Check',
     when: 'Start here, every time.',
-    read: 'The answer at the top: which agents Stroq is asked about, then the list of what needs you.',
+    read: 'What your agents did in the last days: commands a text told them to run, keys that left this machine, and folders that run code when an agent opens them.',
   },
   {
     href: '/live/',
     label: 'Live',
-    section: 'daily',
     when: 'While an agent is working, or right after.',
-    read: 'Denied and flagged rows. Leave it open and turn on notifications to hear about them.',
-  },
-  {
-    href: '/activity/',
-    label: 'Activity',
-    section: 'daily',
-    when: 'To find a decision from earlier.',
-    read: 'Pick Deny or Needs review, then open a row to see what the agent read and what Stroq decided.',
+    read: 'Every recorded decision, newest first. Open a row to see what the agent read, what it did and which rule decided.',
   },
   {
     href: '/agents/',
-    label: 'Agents & coverage',
-    section: 'setup',
+    label: 'Agents',
     when: 'Once for each agent you use, and after you update one.',
-    read: 'One state per agent. Configure connects it; Test hook checks the hook without running the agent.',
-  },
-  {
-    href: '/posture/',
-    label: 'Settings check',
-    section: 'setup',
-    when: 'After you clone a repository or change an agent’s settings.',
-    read: 'Critical and high findings first, and any file that could not be checked.',
+    read: 'Whether each agent has Stroq’s hooks, when Stroq was last asked, and which of its settings weaken them.',
   },
   {
     href: '/policies/',
-    label: 'Policies',
-    section: 'setup',
-    when: 'When a decision is wrong for your work.',
-    read: 'The rules Stroq applies, the checks they pass, and their history. Rules are changed here.',
-  },
-  {
-    href: '/try/',
-    label: 'Try an action',
-    section: 'setup',
-    when: 'Before you change a rule, or to see what a command would get.',
-    read: 'Two answers for what you type: in a clean session, and after the agent read untrusted text.',
+    label: 'Rules',
+    when: 'When a decision is wrong for your work, or before you change a rule.',
+    read: 'What a command would get, the rules you can turn on or off, their history and the rules reference.',
   },
   {
     href: '/skills/',
     label: 'Skills & MCP',
-    section: 'review',
     when: 'Before you trust a new skill or MCP server, or when one changed.',
-    read: 'Items awaiting review and items changed since you reviewed them.',
-  },
-  {
-    href: '/incidents/',
-    label: 'Investigations',
-    section: 'review',
-    when: 'When a session did something you did not expect.',
-    read: 'Recorded denies, approval requests and content findings, and the evidence behind each.',
-  },
-  {
-    href: '/sessions/',
-    label: 'Sessions',
-    section: 'review',
-    when: 'To see one agent session from start to end.',
-    read: 'Each session with its events and how often Stroq stepped in.',
-  },
-  {
-    href: '/keys/',
-    label: 'Secret exposure',
-    section: 'review',
-    when: 'When you think a key or token was sent somewhere.',
-    read: 'Where each secret appeared, and what Stroq recorded for it.',
-  },
-  {
-    href: '/overview/',
-    label: 'Activity overview',
-    section: 'review',
-    when: 'For a look back over a week or a month.',
-    read: 'Counts and one chart for the period you pick.',
+    read: 'Every skill and MCP server by agent, where it came from, and what changed since you last looked.',
   },
 ];
-
-export function pagesIn(section: PlatformSectionId): readonly PlatformPage[] {
-  return PLATFORM_PAGES.filter((page) => page.section === section);
-}

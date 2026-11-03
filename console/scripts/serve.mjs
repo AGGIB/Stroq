@@ -53,6 +53,7 @@ import { createSecretScanService } from './secret-scan-service.mjs';
 import { createIncidentRecheckService } from './incident-recheck.mjs';
 import { routeOperational } from './operational-http.mjs';
 import { runtimeLayout } from './runtime-layout.mjs';
+import { redirectFor } from './console-redirects.mjs';
 
 const DEFAULT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../out');
 const MIME = {
@@ -506,6 +507,13 @@ export async function startServer({
       }
       if (req.method !== 'GET' && req.method !== 'HEAD')
         return respond(res, 405, 'Method not allowed');
+      // An address of the older console goes to the screen that took its place.
+      const query = req.url.indexOf('?');
+      const moved = redirectFor(parsed.path, query === -1 ? '' : req.url.slice(query + 1));
+      if (moved !== null) {
+        res.writeHead(302, { ...HEADERS, Location: moved });
+        return res.end();
+      }
       const file = await staticFile(staticRoot, parsed.parts);
       if (!file) return respond(res, 404, 'Not found');
       return respond(res, 200, req.method === 'HEAD' ? undefined : file.bytes, file.type);

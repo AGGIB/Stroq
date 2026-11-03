@@ -309,3 +309,21 @@ test('static files are served with security headers, traversal and symlinks are 
     assert.ok(!result.text.includes('PRIVATE_SENTINEL'));
   }
 });
+
+test('an address of the older console is sent to the screen that took its place', async (t) => {
+  const app = await fixture(t);
+  const keys = await get(app, '/keys/');
+  assert.equal(keys.status, 302);
+  assert.equal(keys.headers.location, '/#keys');
+  assert.equal(keys.headers['cache-control'], 'no-store');
+  const moved = await get(
+    app,
+    `/activity/event/?id=audit-4&evidence=${'c'.repeat(64)}&token=${app.token}`,
+  );
+  assert.equal(moved.status, 302);
+  assert.equal(moved.headers.location, `/live/?event=${'c'.repeat(64)}`);
+  assert.ok(!moved.headers.location.includes(app.token));
+  assert.equal((await get(app, '/skills/quarantine/', {}, 'HEAD')).status, 302);
+  assert.equal((await get(app, '/keys/', {}, 'POST')).status, 405);
+  assert.equal((await get(app, '/live/')).status, 404, 'a screen itself is served as a file');
+});

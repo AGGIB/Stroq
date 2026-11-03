@@ -157,7 +157,7 @@ describe('pages with real data', () => {
 
 describe('the shell', () => {
   it('says plainly when nothing is connected and offers no example or guide', () => {
-    for (const path of ['/', '/activity/', '/sessions/', '/overview/', '/keys/', '/settings/']) {
+    for (const path of ['/', '/live/', '/agents/', '/policies/', '/skills/']) {
       seen.path = path;
       seen.platform = platform(NOT_CONNECTED);
       const out = render(PlatformShell, { children: 'page' });
@@ -167,11 +167,32 @@ describe('the shell', () => {
   });
 
   it('words a connected machine as local', () => {
-    seen.path = '/activity/';
+    seen.path = '/';
     seen.platform = platform(LOCAL);
     const out = render(PlatformShell, { children: 'page' });
-    expect(out).toContain('Local snapshot');
+    expect(out).toContain('Local engine');
     expect(out).not.toMatch(/Example|Guide/);
+  });
+
+  it('lists exactly five screens in its menu and has no Settings link', () => {
+    seen.path = '/';
+    seen.platform = platform(LOCAL);
+    render(PlatformShell, { children: 'page' });
+    const nav = seen.elements.find(
+      (e) => e.type === 'nav' && e.props['aria-label'] === 'Main navigation',
+    );
+    expect(nav).toBeDefined();
+    const links = seen.elements.filter(
+      (e) => typeof e.props?.className === 'string' && e.props.className.startsWith('nav-item'),
+    );
+    expect(links.map((e) => e.props.href)).toEqual([
+      '/',
+      '/live/',
+      '/agents/',
+      '/policies/',
+      '/skills/',
+    ]);
+    expect(seen.elements.some((e) => e.props?.href === '/settings/')).toBe(false);
   });
 });
 
