@@ -52,7 +52,6 @@ export async function buildEngine() {
     ['mcp-containment-worker', 'mcp-containment-worker.ts'],
     ['policy-engine', 'policy-engine-entry.ts'],
     ['agent-status-engine', 'agent-status-engine.ts'],
-    ['live-proof-engine', 'live-proof-engine.ts'],
     ['hook-check-engine', 'hook-check-engine.ts'],
     ['task-lock-worker', 'task-lock-worker.ts'],
     ['workspace-review-worker', 'workspace-review-worker.ts'],

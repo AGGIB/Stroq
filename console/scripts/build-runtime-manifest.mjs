@@ -15,7 +15,6 @@ const ADAPTERS = [
   'local-api-schema.js',
   'policy-engine.js',
   'agent-status-engine.js',
-  'live-proof-engine.js',
   'hook-check-engine.js',
   'task-lock-worker.js',
   'workspace-review-worker.js',

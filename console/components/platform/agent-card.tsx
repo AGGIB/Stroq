@@ -8,7 +8,6 @@ import { hookCheckHref } from '@/lib/hook-check-navigation';
 import type { HookCheckEvidence } from '@/lib/hook-check-evidence';
 import { SetupDialog } from './agent-setup';
 import { AgentDisconnect } from './agent-disconnect';
-import { LiveProofDialog } from './live-proof';
 import { HookCheckDialog } from './hook-check-dialog';
 export function AgentCard({
   agent,
@@ -150,7 +149,6 @@ export function AgentCard({
             </dl>
           )}
           <div className="agent-row-detail-actions">
-            <LiveProofDialog agent={agent.id} label="Test in agent" />
             <AgentDisconnect
               agent={agent.id}
               scope={scope}

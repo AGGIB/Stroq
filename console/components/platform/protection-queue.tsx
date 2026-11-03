@@ -45,7 +45,6 @@ export function ProtectionQueue({ refreshKey }: { refreshKey?: string }) {
     unconfirmedAssessments,
     agents,
     quarantine,
-    live,
     secrets,
     mcp,
     mcpCallControls,
@@ -73,13 +72,7 @@ export function ProtectionQueue({ refreshKey }: { refreshKey?: string }) {
   const simulated =
     simulation?.status === 'completed' ? (simulation.result as GuardTestResult) : undefined;
   const installation = doctor?.status === 'completed' ? (doctor.result as DoctorResult) : undefined;
-  const rows: ProtectionEvidenceRow[] = protectionEvidenceRows({
-    live,
-    secrets,
-    agents,
-    workspaceId,
-    loading,
-  });
+  const rows: ProtectionEvidenceRow[] = protectionEvidenceRows({ secrets, workspaceId, loading });
   rows.push(...protectionCheckRows(runs, workspaceId));
   rows.push(
     ...mcpGovernanceAttentionRows({

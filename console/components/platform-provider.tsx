@@ -130,10 +130,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
           'stale-evidence':
             'The journal evidence changed or left the captured window. Refresh before reviewing it.',
           'review-unavailable': 'The review store could not be read or updated safely.',
-          'live-check-busy':
-            'A live check is already running. Reopen the test dialog to inspect it.',
-          'subscription-ack-required':
-            'Confirm the request budget and subscription usage before starting.',
           'agent-status-unavailable': 'Current agent configuration could not be read safely.',
           'server-stopped': 'The local server is stopping. Reconnect after it restarts.',
           'custom-home-unsupported':

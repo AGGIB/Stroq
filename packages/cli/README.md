@@ -94,7 +94,7 @@ Open the private URL printed at startup. The server binds only to `127.0.0.1`; i
 
 **Policies → Change history** makes retained policy backups usable from the platform. Test the selected prior bytes against the current policy and saved checks before explicitly restoring them. A prior absent file offers the current bundled default, with separate consent for reduced protection, shared scope and private recovery copies. See [tested policy recovery](../../docs/platform/policy-recovery.md).
 
-**Agents → Check history → Stroq hook** connects setup receipts to a fresh check of the exact captured source, with no provider requests. Recorded results have durable workspace-bound links and remain separate from **In-agent** history, hook approval and native blocking. See [isolated hook checks](../../docs/platform/hook-checks.md).
+**Agents → Check history → Stroq hook** connects setup receipts to a fresh check of the exact captured source, with no provider requests. Recorded results have durable workspace-bound links and remain separate from hook approval and native blocking. See [isolated hook checks](../../docs/platform/hook-checks.md).
 
 **Agents → Task permissions** pages through existing signed Task Lock records and opens exact permit links beyond the first 64 archived tasks. Inspect the scope, then explicitly revoke that permit; archives are preserved. The native gate denies later matching calls after revocation, while host termination remains unverified. See [task permissions](../../docs/platform/task-permissions.md).
 

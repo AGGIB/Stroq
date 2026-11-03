@@ -5,7 +5,6 @@ import { validateInventory, type InventoryState } from '@/lib/inventory';
 import { validateIncidents, type IncidentsState } from '@/lib/incidents';
 import { validateAgentStatus, type AgentStatusState } from '@/lib/agent-status';
 import { validateSkillQuarantine, type SkillQuarantineState } from '@/lib/skill-quarantine';
-import { validateLiveState, type LiveState } from '@/lib/live-proof';
 import { validateSecretScanState, type SecretScanState } from '@/lib/secret-scan';
 import { validateMcpContainment, type McpContainmentState } from '@/lib/mcp-containment';
 import {
@@ -41,7 +40,6 @@ interface QueueSnapshot {
   assessments: IncidentAssessmentState | null;
   agents: AgentStatusState | null;
   quarantine: SkillQuarantineState | null;
-  live: LiveState | null;
   secrets: SecretScanState | null;
   mcp: McpContainmentState | null;
   mcpCallControls: McpCallControlOverview | null;
@@ -76,7 +74,6 @@ const emptySnapshot = (key: string, workspaceId: string): QueueSnapshot => ({
   assessments: null,
   agents: null,
   quarantine: null,
-  live: null,
   secrets: null,
   mcp: null,
   mcpCallControls: null,
@@ -174,7 +171,6 @@ export function useProtectionQueue(refreshKey?: string) {
             agents: null,
             assessments: null,
             quarantine: null,
-            live: null,
             secrets: null,
             mcp: null,
             mcpCallControls: null,
@@ -194,7 +190,6 @@ export function useProtectionQueue(refreshKey?: string) {
         requestLocal('/api/incidents', undefined, controller.signal),
         requestLocal('/api/agents', undefined, controller.signal),
         requestLocal('/api/quarantine', undefined, controller.signal),
-        requestLocal('/api/live', undefined, controller.signal),
         requestLocal('/api/secrets', undefined, controller.signal),
         requestLocal('/api/mcp-containment', undefined, controller.signal),
         requestLocal('/api/policy/cases', undefined, controller.signal),
@@ -214,7 +209,6 @@ export function useProtectionQueue(refreshKey?: string) {
         inc,
         agent,
         retained,
-        liveResult,
         secretResult,
         mcpResult,
         caseResult,
@@ -242,10 +236,6 @@ export function useProtectionQueue(refreshKey?: string) {
         validateSkillQuarantine(retained.value) &&
         retained.value.workspaceId === workspaceId
           ? retained.value
-          : null;
-      const live =
-        liveResult.status === 'fulfilled' && validateLiveState(liveResult.value)
-          ? liveResult.value
           : null;
       const secrets =
         secretResult.status === 'fulfilled' && validateSecretScanState(secretResult.value)
@@ -292,7 +282,6 @@ export function useProtectionQueue(refreshKey?: string) {
         !incidents && 'Recorded investigations could not be refreshed.',
         !agents && 'Current agent configuration could not be read.',
         !quarantine && 'Quarantine folders could not be rechecked.',
-        !live && 'Blocking-check history could not be refreshed.',
         !secrets && 'Credential report history could not be refreshed.',
         !policyCases && 'Saved policy checks could not be rechecked.',
         !workspaceReview && 'Workspace check history could not be refreshed.',
@@ -340,7 +329,6 @@ export function useProtectionQueue(refreshKey?: string) {
           workspaceId,
         ),
         quarantine,
-        live,
         secrets,
         mcp:
           mcpResult.status === 'fulfilled' &&
@@ -496,7 +484,6 @@ export function useProtectionQueue(refreshKey?: string) {
           ? [
               '/api/workspace-review',
               '/api/workspace-monitor',
-              '/api/live',
               '/api/secrets',
               '/api/hook-checks',
               '/api/mcp-governance',
@@ -507,7 +494,7 @@ export function useProtectionQueue(refreshKey?: string) {
         );
         if (!mounted.current || currentKey.current !== key || active.current !== controller) return;
         if (controller.signal.aborted) throw new Error('deadline-exceeded');
-        const [workspaceResult, monitorResult, liveResult, secretResult, hookResult] = results;
+        const [workspaceResult, monitorResult, secretResult, hookResult] = results;
         const governanceResult = results.at(-1);
         const mcpGovernance =
           governanceResult?.status === 'fulfilled' &&
@@ -527,10 +514,6 @@ export function useProtectionQueue(refreshKey?: string) {
           monitorResult.value.workspaceId === workspaceId
             ? monitorResult.value
             : null;
-        const live =
-          liveResult?.status === 'fulfilled' && validateLiveState(liveResult.value)
-            ? liveResult.value
-            : null;
         const secrets =
           secretResult?.status === 'fulfilled' && validateSecretScanState(secretResult.value)
             ? secretResult.value
@@ -545,7 +528,7 @@ export function useProtectionQueue(refreshKey?: string) {
           workspaceReview &&
           workspaceMonitor &&
           mcpGovernance &&
-          (!jobs || (live && secrets && hookChecks));
+          (!jobs || (secrets && hookChecks));
         setSnapshot((previous) =>
           previous?.key === key
             ? {
@@ -560,7 +543,6 @@ export function useProtectionQueue(refreshKey?: string) {
                 ),
                 ...(jobs
                   ? {
-                      live: live ?? previous.live,
                       secrets: secrets ?? previous.secrets,
                       hookChecks: hookChecks ?? previous.hookChecks,
                     }
@@ -612,7 +594,6 @@ export function useProtectionQueue(refreshKey?: string) {
 
   const watching = evidence?.workspaceMonitor?.status === 'enabled';
   const running =
-    evidence?.live?.jobs.some((job) => job.status === 'running') ||
     evidence?.secrets?.jobs.some((job) => job.status === 'running') ||
     evidence?.workspaceReview?.runs.some((run) => run.status === 'running') ||
     evidence?.hookChecks?.jobs.some((job) => job.status === 'running');
@@ -672,7 +653,6 @@ export function useProtectionQueue(refreshKey?: string) {
     ),
     agents: evidence?.agents ?? null,
     quarantine: evidence?.quarantine ?? null,
-    live: evidence?.live ?? null,
     secrets: evidence?.secrets ?? null,
     mcp: evidence?.mcp ?? null,
     mcpCallControls: evidence?.mcpCallControls ?? null,

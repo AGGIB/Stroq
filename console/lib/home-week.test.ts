@@ -251,7 +251,7 @@ describe('what to do next', () => {
   const verdict = (agents: ReturnType<typeof agent>[]): ProtectionVerdict =>
     ({ tone: 'green', title: 't', detail: 'd', agents }) as unknown as ProtectionVerdict;
 
-  it('puts hooks that will not work first, then an agent to connect, then one to check', () => {
+  it('puts hooks that will not work first, then an agent to connect, then a hook to test', () => {
     const steps = nextSteps(
       verdict([
         agent('claude-code', 'Claude Code', 'connected-unseen'),
@@ -260,14 +260,33 @@ describe('what to do next', () => {
       ]),
       weekView(summary()),
     );
-    expect(steps.map((s) => s.key)).toEqual(['fix', 'connect', 'prove']);
+    expect(steps.map((s) => s.key)).toEqual(['fix', 'connect', 'test']);
     expect(steps[1]?.command).toBe('npx @stroq/cli init --agent cursor');
-    expect(steps[2]?.command).toBe('npx @stroq/cli prove');
+    expect(steps[2]).toMatchObject({ href: '/agents/' });
   });
 
-  it('sends what prove cannot check to the page that tests it', () => {
-    const steps = nextSteps(verdict([agent('cursor', 'Cursor', 'connected-unseen')]), null);
-    expect(steps[0]).toMatchObject({ key: 'test', href: '/agents/' });
+  it('sends an agent that has not been asked yet to the page that tests its hook', () => {
+    for (const [id, name] of [
+      ['cursor', 'Cursor'],
+      ['claude-code', 'Claude Code'],
+    ] as const) {
+      const steps = nextSteps(verdict([agent(id, name, 'connected-unseen')]), null);
+      expect(steps[0]).toMatchObject({ key: 'test', href: '/agents/' });
+      expect(steps[0]?.command).toBeUndefined();
+    }
+  });
+
+  it('never sends the reader to a command or a button that no longer exists', () => {
+    const steps = nextSteps(
+      verdict([
+        agent('claude-code', 'Claude Code', 'connected-unseen'),
+        agent('cursor', 'Cursor', 'not-connected'),
+        agent('codex', 'Codex CLI', 'attention'),
+      ]),
+      weekView(summary()),
+    );
+    const words = steps.map((s) => `${s.title} ${s.detail} ${s.command ?? ''}`).join(' ');
+    expect(words).not.toMatch(/\b(?:prove|harden|task|permit|Test in agent)\b/);
   });
 
   it('points at what needs a look on Live, and with nothing to fix offers two checks', () => {

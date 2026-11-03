@@ -32,7 +32,7 @@ test('Agents presents all four branded rows without the three large inspection m
   for (const id of ids) assert(html.includes(`id="${id}"`));
   assert.deepEqual(h.calls, []);
 });
-test('each agent offers its scoped offline hook check before the separate in-agent subscription test', () => {
+test('each agent offers its scoped offline hook check, and no check that starts the agent', () => {
   const descendants = (value) => {
     if (Array.isArray(value)) return value.flatMap(descendants);
     if (!value || typeof value !== 'object') return [];
@@ -54,7 +54,7 @@ test('each agent offers its scoped offline hook check before the separate in-age
     assert.equal(offline.props.scope, 'project');
     assert.equal(typeof offline.props.onChanged, 'function');
     assert(!descendants(primary).some((e) => e.props?.label === 'Test in agent'));
-    assert(descendants(details).some((e) => e.props?.label === 'Test in agent'));
+    assert(!descendants(details).some((e) => e.props?.label === 'Test in agent'));
     assert(!descendants(details).some((e) => e.props?.label === 'Test hook'));
     assert.deepEqual(h.calls, []);
   }

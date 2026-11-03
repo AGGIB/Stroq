@@ -115,7 +115,6 @@ export function harness(props = {}, agent = null, query = '') {
         const stubs = {
           './agent-setup': 'SetupDialog',
           './agent-disconnect': 'AgentDisconnect',
-          './live-proof': 'LiveProofDialog',
           './hook-check-dialog': 'HookCheckDialog',
           './use-hook-check-history': 'useHookCheckHistory',
         };

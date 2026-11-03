@@ -19,7 +19,6 @@ import { usePlatform } from '@/components/platform-provider';
 import { ProtectionQueue } from './protection-queue';
 import { PostureStrip } from './posture-strip';
 import { ProtectionVerdict } from './protection-verdict';
-import { LiveProofDialog } from './live-proof';
 import { ProtectionCheckReport } from './protection-check-report';
 import {
   protectionRunHref,
@@ -36,7 +35,6 @@ import {
   ScenariosResult,
 } from './protection-results';
 import { Badge, EmptyState, PageHeading, Panel } from '@/components/platform-ui';
-import type { LiveJob } from '@/lib/live-proof';
 import { mcpGovernanceHref } from '@/lib/mcp-governance-navigation';
 import {
   RUN_ERRORS,
@@ -181,8 +179,6 @@ function ProtectionPageContent() {
       : null;
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const cancelling = useRef<string | null>(null);
-  const [liveUpdate, setLiveUpdate] = useState('');
-  const recordLiveJob = useCallback((job: LiveJob) => setLiveUpdate(`${job.id}:${job.status}`), []);
   useEffect(() => {
     void refresh(false);
   }, [refresh]);
@@ -228,7 +224,7 @@ function ProtectionPageContent() {
     });
     return () => cancelAnimationFrame(frame);
   }, [selectionAllowed, selection.runId, requestedRun?.id, requestedRun?.kind]);
-  const queueKey = `${liveUpdate}:${checks
+  const queueKey = `${checks
     .filter((run) => run.kind === 'protection-check' && run.status !== 'running')
     .map((run) => `${run.id}:${run.status}:${run.finishedAt}`)
     .join(',')}`;
@@ -460,14 +456,6 @@ function ProtectionPageContent() {
                 })}
               </div>
             </details>
-            <Panel title="Live blocking test" actions={<LiveProofDialog onJob={recordLiveJob} />}>
-              <div className="panel-body">
-                <p className="muted">
-                  Real allow, deny and control checks in a temporary project. Uses your agent
-                  subscription after confirmation.
-                </p>
-              </div>
-            </Panel>
             <History runs={checks} onSelect={selectRun} control={control} />
           </section>
         </>

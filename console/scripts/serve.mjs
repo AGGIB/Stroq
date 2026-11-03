@@ -33,7 +33,6 @@ import {
 import { createAgentStatus } from './agent-status.mjs';
 import { createIncidentService } from './incidents.mjs';
 import { createIncidentAssessmentService, routeIncidentAssessments } from './incidents-worker.mjs';
-import { createLiveProofService } from './live-proof-service.mjs';
 import { createHookCheckService } from './hook-check-service.mjs';
 import { createTaskLockService } from './task-lock-service.mjs';
 import { createTaskAccessService } from './task-access-service.mjs';
@@ -179,7 +178,6 @@ export async function startServer({
   agents: suppliedAgents,
   incidents: suppliedIncidents,
   incidentAssessments: suppliedIncidentAssessments,
-  live: suppliedLive,
   hookChecks: suppliedHookChecks,
   taskLocks: suppliedTaskLocks,
   taskAccess: suppliedTaskAccess,
@@ -262,7 +260,6 @@ export async function startServer({
   const incidents = suppliedIncidents ?? createIncidentService(context);
   const incidentAssessments =
     suppliedIncidentAssessments ?? (await createIncidentAssessmentService(context));
-  const live = suppliedLive ?? (await createLiveProofService(context));
   const hookChecks =
     suppliedHookChecks ?? (await createHookCheckService({ ...context, workspaceId }));
   const workspaceReview =
@@ -363,7 +360,6 @@ export async function startServer({
         if (
           parsed.path === '/api/agents' ||
           parsed.path.startsWith('/api/incidents') ||
-          parsed.path.startsWith('/api/live') ||
           parsed.path.startsWith('/api/hook-checks') ||
           parsed.path.startsWith('/api/task-locks') ||
           parsed.path.startsWith('/api/workspace-review') ||
@@ -372,7 +368,6 @@ export async function startServer({
           response = await routeOperational(req, parsed.path, origin, {
             agents,
             incidents,
-            live,
             hookChecks,
             taskLocks,
             taskAccess,
@@ -584,7 +579,6 @@ export async function startServer({
           agents,
           incidents,
           incidentAssessments,
-          live,
           hookChecks,
           taskLocks,
           taskAccess,

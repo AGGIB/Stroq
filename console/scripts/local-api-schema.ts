@@ -151,12 +151,6 @@ export {
   incidentAssessmentMatchesPreview,
 } from '../lib/incident-assessments';
 export {
-  validateLiveState,
-  validateLivePreview,
-  validateLiveJob,
-  validateLiveReport,
-} from '../lib/live-proof';
-export {
   validateSecretScanState,
   validateSecretScanPreview,
   validateSecretScanJob,

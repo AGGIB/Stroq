@@ -1,4 +1,3 @@
-import type { AgentId } from './agent-status';
 import type { ProtectionVerdict } from './agent-summary';
 import type { WeekView } from './week-view';
 
@@ -22,9 +21,6 @@ export interface NextStep {
 export const MAX_NEXT_STEPS = 3;
 
 const CLI = 'npx @stroq/cli';
-
-/** Agents whose blocking `stroq prove` can check on this machine. */
-const PROVABLE: ReadonlySet<AgentId> = new Set(['claude-code']);
 
 const list = (names: readonly string[]): string =>
   names.length <= 1
@@ -55,21 +51,12 @@ export function nextSteps(verdict: ProtectionVerdict, week: WeekView | null): Ne
       command: `${CLI} init --agent ${first.id}`,
     });
   const unseen = of('connected-unseen');
-  const provable = unseen.find((agent) => PROVABLE.has(agent.id));
-  if (provable !== undefined)
-    steps.push({
-      key: 'prove',
-      title: `Check that ${provable.name} is really blocked`,
-      detail:
-        'Its hooks are in place and have not been called yet. This runs three harmless commands and checks which ran.',
-      command: `${CLI} prove`,
-    });
-  else if (unseen[0] !== undefined)
+  if (unseen[0] !== undefined)
     steps.push({
       key: 'test',
-      title: `Test ${unseen[0].name} once`,
+      title: `Test the hook of ${unseen[0].name}`,
       detail:
-        'Its hooks are in place and have not been called yet. Test in agent shows they answer.',
+        'Its hooks are in place and have not been called yet. Test hook on Agents runs it once, without the agent.',
       href: '/agents/',
     });
   const needsLook = week === null ? 0 : week.totals.deny + week.totals.ask + week.totals.suspect;

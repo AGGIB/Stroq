@@ -160,6 +160,16 @@ describe('local API operation allowlist', () => {
     ])
       expect(isLocalOperation(path), path).toBe(false);
   });
+  it('no longer admits the removed live-check routes', () => {
+    for (const path of [
+      '/api/live',
+      '/api/live/preview',
+      '/api/live/start',
+      '/api/live/cancel',
+      '/api/live/jobs/11111111-1111-4111-8111-111111111111',
+    ])
+      expect(isLocalOperation(path), path).toBe(false);
+  });
   it('no longer admits the removed threat feed route', () => {
     for (const path of ['/api/threats', '/api/threats/fetch', '/api/threats?url=https://x'])
       expect(isLocalOperation(path), path).toBe(false);
@@ -329,9 +339,8 @@ describe('local API operation allowlist', () => {
       '/api/inventory/inspect',
       '/api/agent-setup/preview',
       '/api/policy/apply',
-      '/api/live/start',
       '/api/secrets/cancel',
-      '/api/live/jobs/11111111-1111-4111-8111-111111111111',
+      '/api/secrets/jobs/11111111-1111-4111-8111-111111111111',
       '/api/runs/11111111-1111-4111-8111-111111111111',
     ])
       expect(isLocalOperation(path), path).toBe(true);
@@ -345,7 +354,7 @@ describe('local API operation allowlist', () => {
       '/api/mcp-containment/../apply',
       '//foreign.invalid/api/mcp-containment',
       'https://foreign.invalid/api/mcp-containment',
-      '/api/live/jobs/' + '-'.repeat(36),
+      '/api/secrets/jobs/' + '-'.repeat(36),
       '',
       null,
     ])

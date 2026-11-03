@@ -49,17 +49,7 @@ export async function routeOperational(
   req,
   path,
   origin,
-  {
-    agents,
-    incidents,
-    live,
-    secrets,
-    comparisons,
-    hookChecks,
-    taskLocks,
-    taskAccess,
-    workspaceReview,
-  },
+  { agents, incidents, secrets, comparisons, hookChecks, taskLocks, taskAccess, workspaceReview },
 ) {
   if (path === '/api/workspace-review')
     return req.method === 'GET' ? evidence(() => workspaceReview.getState()) : noMethod();
@@ -144,17 +134,6 @@ export async function routeOperational(
     return jsonAction(req, origin, (input) => evidence(() => comparisons.compare(input)), 4096);
   if (path === '/api/incidents/task')
     return jsonAction(req, origin, (input) => taskLocks.relateIncident(input), 4096);
-  if (path === '/api/live')
-    return req.method === 'GET' ? evidence(() => live.getState()) : noMethod();
-  if (path.startsWith('/api/live/jobs/')) {
-    if (req.method !== 'GET') return noMethod();
-    const id = path.slice('/api/live/jobs/'.length);
-    const job = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/.test(id) ? live.getJob(id) : null;
-    return job ? { status: 200, body: job } : { status: 404, body: { error: 'not-found' } };
-  }
-  if (['/api/live/preview', '/api/live/start', '/api/live/cancel'].includes(path)) {
-    return jsonAction(req, origin, (input) => live[path.slice('/api/live/'.length)](input), 4096);
-  }
   if (path === '/api/secrets')
     return req.method === 'GET' ? evidence(() => secrets.getState()) : noMethod();
   if (path.startsWith('/api/secrets/jobs/')) {

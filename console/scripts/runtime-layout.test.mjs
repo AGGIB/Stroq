@@ -7,8 +7,8 @@ test('fixed source and package layouts resolve every runtime without a source fa
   assert.equal(source.cli, '/repo/packages/cli/dist/index.js');
   assert.equal(source.core, '/repo/packages/core/dist/index.js');
   assert.equal(
-    source.adapter('live-proof-engine.js'),
-    '/repo/console/.local-engine/live-proof-engine.js',
+    source.adapter('hook-check-engine.js'),
+    '/repo/console/.local-engine/hook-check-engine.js',
   );
   assert.equal(source.manifest, '/repo/console/.local-engine/runtime-manifest.json');
   const packed = runtimeLayout(

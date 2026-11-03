@@ -35,13 +35,13 @@ function installRecordedAt(agent: string): Date | null {
 function proofText(agent: string, installed: InstallStatus, now: number): string {
   const stored = readHostResult(stroqHome(), agent, new Date(now));
   if (stored.problem !== null)
-    return `the stored result cannot be read (${plainText(stored.problem, 60)}); run the live check in stroq console`;
-  if (stored.result === null) return 'no live check yet (run it in stroq console)';
+    return `the stored result cannot be read (${plainText(stored.problem, 60)})`;
+  if (stored.result === null) return 'no live check yet';
   let digest: string;
   try {
     digest = policySha256(loadPolicy());
   } catch {
-    return 'the policy cannot be read, so the stored check cannot be compared with it; mend it and run the live check in stroq console';
+    return 'the policy cannot be read, so the stored check cannot be compared with it; mend it';
   }
   const shown = displayState({
     capabilities: capabilitiesFor(agent),

@@ -58,9 +58,9 @@ const detailOf = async (name = 'hooks'): Promise<string> =>
   '';
 
 describe('the proof on the line of a whole install', () => {
-  it('says there is no live check yet, and the command that makes one', async () => {
+  it('says there is no live check yet', async () => {
     install();
-    expect(await detailOf()).toContain(' · proof: no live check yet (run it in stroq console)');
+    expect(await detailOf()).toContain(' · proof: no live check yet');
   });
 
   it('puts the proof before the time of the last call, so that the line still ends on the call', async () => {
@@ -142,9 +142,7 @@ describe('the proof on the line of a whole install', () => {
       '{"version":1,"hostVersion":"\\u001b[31mevil"',
     );
     const detail = await detailOf();
-    expect(detail).toMatch(
-      /proof: the stored result cannot be read \(not JSON\); run the live check in stroq console/,
-    );
+    expect(detail).toMatch(/proof: the stored result cannot be read \(not JSON\)(?: · |$)/m);
     expect(detail).not.toContain('evil');
   });
 

@@ -1,7 +1,6 @@
 import type { NextConfig } from 'next';
 
-// The static UI is served by the private loopback service. Browser assets stay local;
-// explicitly authorized live checks make their provider requests from the backend.
+// The static UI is served by the private loopback service. Browser assets stay local.
 const nextConfig: NextConfig = {
   output: 'export',
   trailingSlash: true,

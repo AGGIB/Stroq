@@ -16,7 +16,7 @@ const OPERATION = new RegExp(
     'mcp-governance(?:/(?:capture|preview|apply|recheck))?|' +
     `hook-checks(?:/(?:preview|start|cancel|jobs/${JOB}))?|` +
     `task-locks(?:/(?:page|preview|apply|access/(?:preview|issue|${TASK}/${SHA})))?|` +
-    `(?:live|secrets)(?:/(?:preview|start|cancel|jobs/${JOB}))?|runs(?:/(?:cancel|${JOB}))?|` +
+    `secrets(?:/(?:preview|start|cancel|jobs/${JOB}))?|runs(?:/(?:cancel|${JOB}))?|` +
     'inventory(?:/(?:review|inspect|compare|signals/(?:state|preview|apply)))?|agent-(?:setup|disconnect)(?:/(?:preview|apply))?|policy(?:/(?:preview|apply|try|history|restore/(?:preview|apply)|cases(?:/(?:save|remove))?))?)$',
 );
 /** Tokens are sent only to these exact same-origin local operations. */

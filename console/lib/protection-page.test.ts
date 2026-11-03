@@ -117,7 +117,6 @@ function harness(query = '', configure?: (state: any) => void) {
         return { ProtectionQueue: () => React.createElement('h2', {}, 'Current attention') };
       if (name === './posture-strip') return { PostureStrip: () => null };
       if (name === './protection-verdict') return { ProtectionVerdict: () => null };
-      if (name === './live-proof') return { LiveProofDialog: () => null };
       if (name === './protection-check-report') return { ProtectionCheckReport: () => null };
       const modules: Record<string, unknown> = {
         '@/lib/control': control,
