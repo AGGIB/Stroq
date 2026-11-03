@@ -30,7 +30,6 @@ const MOVED = new Map([
   ['/posture/', '/agents/#settings'],
   ['/agents/hooks/', '/agents/'],
   ['/try/', '/policies/#try'],
-  ['/policies/history/', '/policies/#history'],
   ['/policies/reference/', '/policies/#reference'],
   ['/skills/quarantine/', '/skills/'],
   ['/skills/mcp/', '/skills/'],
@@ -41,6 +40,7 @@ const MOVED = new Map([
 /** Every old address, so that a test can check each one has a place to go. */
 export const MOVED_ADDRESSES = Object.freeze([
   ...MOVED.keys(),
+  '/policies/history/',
   '/activity/',
   '/activity/event/',
   '/sessions/',
@@ -74,6 +74,16 @@ function eventQuery(params) {
 
 const suffix = (params) => (params.size > 0 ? `?${params}` : '');
 
+const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
+
+/** `/policies/` with the recorded change an old history address named, opened on the History section. */
+function historyAddress(params) {
+  const entry = params.get('entry');
+  return entry !== null && UUID.test(entry)
+    ? `/policies/?entry=${entry}#history`
+    : '/policies/#history';
+}
+
 /**
  * Where an old address now lives, or null for an address that has not moved. `pathname` is the path
  * of the request and `search` its query string with or without the leading `?`.
@@ -85,6 +95,7 @@ export function redirectFor(pathname, search = '') {
   if (path === '/activity/') return `/live/${suffix(liveQuery(params))}`;
   if (path === '/activity/event/' || path === '/incidents/')
     return `/live/${suffix(eventQuery(params))}`;
+  if (path === '/policies/history/') return historyAddress(params);
   if (path === '/sessions/') return `/live/${suffix(liveQuery(params))}`;
   return MOVED.get(path) ?? null;
 }

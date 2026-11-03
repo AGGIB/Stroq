@@ -4,6 +4,7 @@ import { useSearchParams } from 'next/navigation';
 import { RefreshCw } from 'lucide-react';
 import { SetupDialog } from './agent-setup';
 import { AgentCard } from './agent-card';
+import { useScrollToHash } from '@/hooks/use-scroll-to-hash';
 import { SettingsCheck } from './agent-settings';
 import { useHookCheckHistory } from './use-hook-check-history';
 import { usePosture } from './use-posture';
@@ -31,6 +32,7 @@ export function AgentsPage() {
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   const hookHistory = useHookCheckHistory({ enabled: readAllowed, generation: refreshGeneration });
   const posture = usePosture({ track: true });
+  useScrollToHash(captured !== null);
   const active = useRef<AbortController | null>(null);
   const state = readAllowed && captured?.workspaceId === workspaceId ? captured.report : null;
   const setScope = (value: 'project' | 'user') =>

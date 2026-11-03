@@ -142,3 +142,37 @@
   color: var(--ink-2);
   font-size: var(--text-secondary);
 }
+
+/* The sections of Rules: each has a heading row, and the sections sit apart. */
+.rules-page {
+  gap: 36px;
+}
+.rules-section {
+  display: grid;
+  gap: 16px;
+  scroll-margin-top: 80px;
+}
+.rules-section-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 6px 16px;
+}
+.rules-section-head h2 {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+.rules-section-head p {
+  margin: 0;
+  flex-basis: 100%;
+  color: var(--ink-2);
+  font-size: var(--text-ui);
+  max-width: 70ch;
+}
+.rules-section-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}

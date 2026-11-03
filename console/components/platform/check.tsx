@@ -3,6 +3,7 @@ import { Suspense, useEffect, useState } from 'react';
 import Link from 'next/link';
 import { CircleAlert, LoaderCircle, RefreshCw } from 'lucide-react';
 import { Hoo } from '@/components/hoo';
+import { useScrollToHash } from '@/hooks/use-scroll-to-hash';
 import { CopyCommand } from '@/components/copy-command';
 import { NotConnected } from '@/components/not-connected';
 import { usePlatform } from '@/components/platform-provider';
@@ -211,6 +212,7 @@ function AgentLines() {
 
 function CheckScreen() {
   const { state, problem, check } = useCard();
+  useScrollToHash(state?.result != null);
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 30_000);

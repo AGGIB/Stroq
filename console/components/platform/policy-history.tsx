@@ -1,8 +1,8 @@
 'use client';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ArrowLeft, ArrowRight, Check, History, LoaderCircle, RefreshCw } from 'lucide-react';
-import { Badge, EmptyState, ExportButton, PageHeading, Panel } from '@/components/platform-ui';
+import { ArrowRight, Check, History, LoaderCircle, RefreshCw } from 'lucide-react';
+import { Badge, EmptyState, ExportButton, Panel } from '@/components/platform-ui';
 import { policyHistoryHref, policyHistorySelection } from '@/lib/policy-history-navigation';
 import { usePolicyHistory } from './use-policy-history';
 import { PolicyRestorePreviewPanel } from './policy-restore-preview';
@@ -11,35 +11,28 @@ const target = {
   'current-default': 'Current bundled default',
   unavailable: 'Recovery unavailable',
 };
-export function PolicyHistoryPage() {
+/** What changed in the rules, with an undo for a change that was recorded. A section of Rules. */
+export function PolicyHistory() {
   const selection = policyHistorySelection(useSearchParams()),
     action = usePolicyHistory(selection),
     { state, entry, receipt } = action;
   return (
-    <div className="page-stack">
-      <PageHeading
-        title="Policy history"
-        actions={
-          <>
-            <Link className="button" href="/policies/">
-              <ArrowLeft size={16} aria-hidden="true" />
-              Policies
-            </Link>
-            <button
-              className="icon-button"
-              aria-label="Refresh recorded policy changes"
-              disabled={!action.allowed || !!action.busy}
-              onClick={() => void action.refresh()}
-            >
-              <RefreshCw
-                size={17}
-                className={action.busy === 'load' ? 'spin' : undefined}
-                aria-hidden="true"
-              />
-            </button>
-          </>
-        }
-      />
+    <section id="history" className="rules-section" aria-labelledby="history-title">
+      <div className="rules-section-head">
+        <h2 id="history-title">History</h2>
+        <button
+          className="icon-button"
+          aria-label="Refresh recorded policy changes"
+          disabled={!action.allowed || !!action.busy}
+          onClick={() => void action.refresh()}
+        >
+          <RefreshCw
+            size={17}
+            className={action.busy === 'load' ? 'spin' : undefined}
+            aria-hidden="true"
+          />
+        </button>
+      </div>
       {!action.allowed ? (
         <Panel>
           <EmptyState
@@ -47,12 +40,14 @@ export function PolicyHistoryPage() {
             description={
               selection.invalid
                 ? 'One exact recorded change is required. Another entry has not been selected.'
-                : 'Open the private local link to read policy recovery records.'
+                : 'Not connected to Stroq on this machine. Run npx @stroq/cli console to open this page with your data.'
             }
           />
-          <Link className="button" href={selection.invalid ? policyHistoryHref() : '/settings/'}>
-            {selection.invalid ? 'Open current history' : 'Connection settings'}
-          </Link>
+          {selection.invalid ? (
+            <Link className="button" href={policyHistoryHref()}>
+              Open current history
+            </Link>
+          ) : null}
         </Panel>
       ) : (
         <>
@@ -265,7 +260,7 @@ export function PolicyHistoryPage() {
                               ) : (
                                 <RefreshCw size={16} aria-hidden="true" />
                               )}
-                              Preview restore
+                              Preview undo
                             </button>
                           )}
                           <ExportButton
@@ -284,6 +279,6 @@ export function PolicyHistoryPage() {
           )}
         </>
       )}
-    </div>
+    </section>
   );
 }

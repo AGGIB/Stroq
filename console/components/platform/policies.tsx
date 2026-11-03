@@ -1,15 +1,10 @@
 'use client';
 
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { ChevronDown, Info, Search } from 'lucide-react';
-import {
-  Badge,
-  Command,
-  EmptyState,
-  ExportButton,
-  PageHeading,
-  Panel,
-} from '@/components/platform-ui';
+import { Badge, Command, EmptyState, ExportButton, Panel } from '@/components/platform-ui';
+import { referenceQuery } from '@/lib/rules-navigation';
 
 function SearchField({
   value,
@@ -216,8 +211,12 @@ function ruleCategory(rule: Rule) {
   return 'Actions';
 }
 
-export function PoliciesPage() {
-  const [query, setQuery] = useState('');
+/** Search over the rules reference. `?find=` opens it on a rule, as the chain of a Live row does. */
+export function RulesReference() {
+  const find = referenceQuery(useSearchParams().get('find'));
+  const [query, setQuery] = useState(find);
+  // A link that names another rule while this screen is open searches for that one.
+  useEffect(() => setQuery(find), [find]);
   const [category, setCategory] = useState('All rules');
   const visible = RULES.filter(
     (rule) =>
@@ -225,23 +224,21 @@ export function PoliciesPage() {
       `${rule.id} ${rule.reason} ${rule.action}`.toLowerCase().includes(query.toLowerCase()),
   );
   return (
-    <div className="page-stack">
-      <PageHeading
-        title="Policies"
-        actions={
-          <ExportButton
-            data={{
-              source: 'bundled-reference',
-              version: 1,
-              threshold: 0.6,
-              default: 'allow',
-              rules: RULES,
-            }}
-            filename="stroq-policy-reference.json"
-            label="Export reference"
-          />
-        }
-      />
+    <section id="reference" className="rules-section" aria-labelledby="reference-title">
+      <div className="rules-section-head">
+        <h2 id="reference-title">Rules reference</h2>
+        <ExportButton
+          data={{
+            source: 'bundled-reference',
+            version: 1,
+            threshold: 0.6,
+            default: 'allow',
+            rules: RULES,
+          }}
+          filename="stroq-policy-reference.json"
+          label="Export reference"
+        />
+      </div>
       <Panel
         title="Default policy"
         subtitle="default.yaml · v1"
@@ -318,6 +315,6 @@ export function PoliciesPage() {
           <p className="muted">Hosts without prompts may turn Ask into Deny.</p>
         </div>
       </Panel>
-    </div>
+    </section>
   );
 }

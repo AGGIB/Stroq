@@ -9,7 +9,7 @@ const id = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',
 describe('shared policy history selection', () => {
   it('selects only one exact intent record, without implying workspace ownership', () => {
     const href = policyHistoryHref(id);
-    expect(href).toBe(`/policies/history/?entry=${id}`);
+    expect(href).toBe(`/policies/?entry=${id}#history`);
     const selected = policyHistorySelection(new URL(href, 'http://local.test').searchParams);
     expect(selected).toEqual({ requested: true, invalid: false, entryId: id });
     expect(policyHistoryReadAllowed(selected, ws)).toBe(true);
@@ -33,6 +33,6 @@ describe('shared policy history selection', () => {
     expect(selected).toEqual({ requested: false, invalid: false, entryId: null });
     expect(policyHistoryReadAllowed(selected, ws)).toBe(true);
     expect(policyHistoryReadAllowed(selected, null)).toBe(false);
-    expect(policyHistoryHref('private-path')).toBe('/policies/history/');
+    expect(policyHistoryHref('private-path')).toBe('/policies/#history');
   });
 });

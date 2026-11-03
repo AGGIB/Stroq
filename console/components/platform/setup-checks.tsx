@@ -434,7 +434,8 @@ export function SetupChecksContent() {
  */
 export function SetupChecks() {
   // A link to one run of the checks opens the section on it.
-  const [open, setOpen] = useState(useSearchParams().has('run'));
+  const asked = useSearchParams().has('run');
+  const [open, setOpen] = useState(asked);
   return (
     <details
       id="setup-checks"

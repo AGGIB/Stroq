@@ -60,6 +60,18 @@ test('an event, or an investigation of one, opens that event on Live', () => {
   assert.equal(redirectFor('/incidents/', 'status=reviewed'), '/live/');
 });
 
+test('the rules reference and the history keep the one thing they were asked about', () => {
+  const entry = '11111111-2222-4333-8444-555555555555';
+  assert.equal(
+    redirectFor('/policies/history/', `entry=${entry}`),
+    `/policies/?entry=${entry}#history`,
+  );
+  assert.equal(redirectFor('/policies/history/', 'entry=../../x'), '/policies/#history');
+  assert.equal(redirectFor('/policies/history/'), '/policies/#history');
+  assert.equal(redirectFor('/policies/reference/', 'find=x'), '/policies/#reference');
+  assert.equal(redirectFor('/try/'), '/policies/#try');
+});
+
 test('the console menu lists the screens the redirects lead to', async () => {
   const map = await readFile(
     join(dirname(fileURLToPath(import.meta.url)), '../lib/platform-map.ts'),
