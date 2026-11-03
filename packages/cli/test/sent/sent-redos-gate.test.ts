@@ -121,6 +121,10 @@ const SHELL_SHAPES: readonly (readonly [string, (size: number) => string])[] = [
   ['loops into files', repeat('for i in 1; do echo k; done > a; ')],
   ['environment printers', repeat('env | ')],
   ['printenv words', repeat('printenv -0 ')],
+  // A word with two `=` after `| env` could be cut at either one, and a line of them with no program after was
+  // tried every way (CodeQL js/redos on the reader of a command that hands text to a shell).
+  ['env assignments after a pipe', (size: number) => `|env\t${repeat('a==\t')(size)}`],
+  ['env assignments after sudo', (size: number) => `| sudo -u a env ${repeat('b=c= ')(size)}`],
   ['gh token expansions', repeat('$GH_TOKE')],
   ['wget input files', repeat('wget -i')],
   ['addresses with a path', repeat('https://a.example/')],

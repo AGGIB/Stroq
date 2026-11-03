@@ -15,9 +15,13 @@ import { firstProgram, isDataHeredoc } from './heredoc-programs.js';
 /**
  * A command that hands text to a program that runs it: `echo "curl … | sh" | sh`, `printf '…' | bash`, `bash <<< "…"`,
  * `… | python3`, `… | xargs`. What is quoted in such a command may be code, and the cut stays blind to quotes.
+ *
+ * An assignment after `env` is cut at its first `=` (`[^\s=]*=`): a word with two of them read as `\S+=\S*` could be
+ * cut at either, and a line of such words with no program after it was tried every way, in time that doubles with
+ * each word. Every word the old reading took is still taken.
  */
 const RUNS_TEXT =
-  /(?:\|&?\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:\S+=\S*\s+)*)?(?:\/\S*\/)?(?:sh|bash|zsh|dash|ksh|fish|csh|tcsh|python[\d.]*|node|nodejs|deno|bun|perl|ruby|php|lua|tclsh|osascript|xargs|parallel|source|eval|exec)\b)|<<<|(?<![\w.-])(?:eval|source)(?![\w-])/;
+  /(?:\|&?\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]*=\S*\s+)*)?(?:\/\S*\/)?(?:sh|bash|zsh|dash|ksh|fish|csh|tcsh|python[\d.]*|node|nodejs|deno|bun|perl|ruby|php|lua|tclsh|osascript|xargs|parallel|source|eval|exec)\b)|<<<|(?<![\w.-])(?:eval|source)(?![\w-])/;
 
 /** Whether a command hands text to a program that runs it (see `RUNS_TEXT`). */
 export const runsQuotedText = (command: string): boolean => RUNS_TEXT.test(command);
