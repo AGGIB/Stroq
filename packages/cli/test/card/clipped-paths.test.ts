@@ -172,6 +172,8 @@ describe('a read of a deep path, through the real replay', () => {
     const path = claudeSession(m, { id: 's', cwd: PROJECT, calls: [read(file), bash] });
     const entries = await replayTranscript(await readTranscript(path));
     const model = buildReplay(entries, 's');
+    // One read, however long its path, and not a second node for the cut of it.
+    expect(model.sources).toHaveLength(1);
     const linked = model.sources.filter((source) => source.consequences.length > 0);
     expect(linked).toHaveLength(1);
     expect(linked[0]?.read?.phase).toBe('post');

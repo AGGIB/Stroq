@@ -14,6 +14,7 @@ import { join } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
   AuditLog,
+  MAX_STORED_CHARS,
   ageLabel,
   type AtomKind,
   type AuditEntry,
@@ -95,6 +96,14 @@ function sameSource(summary: string, source: string): boolean {
   return a.startsWith(b) || b.startsWith(a);
 }
 
+/**
+ * Whether `stored`, the source of a provenance record, is the cut of `summary`, the audit's longer
+ * summary of a read: it is as long as a record keeps and the summary goes on from it. A shorter
+ * source is whole, and a longer summary that merely begins with it names another file.
+ */
+const isCutOf = (stored: string, summary: string): boolean =>
+  stored.length >= MAX_STORED_CHARS && summary.length > stored.length && summary.startsWith(stored);
+
 /** The `post` entry that recorded a read, when the log still holds it. */
 export function findRead(
   entries: readonly AuditEntry[],
@@ -133,7 +142,13 @@ export function buildReplay(allEntries: readonly AuditEntry[], sessionId: string
     suspect: boolean,
   ): ReplayConsequence[] => {
     const key = sourceKey(tool, source);
-    const existing = bySource.get(key);
+    // A flagged read is named by its audit summary (300 characters) and what came of it by the
+    // provenance source (120): on a long path those are one read, not two. Only when exactly one
+    // known read can be what the source is the cut of; with two it is not guessed between.
+    const cutOf = [...bySource.values()].filter(
+      (g) => g.source.tool === tool && isCutOf(source, g.source.source),
+    );
+    const existing = bySource.get(key) ?? (cutOf.length === 1 ? cutOf[0] : undefined);
     if (existing) return existing.list;
     const list: ReplayConsequence[] = [];
     bySource.set(key, {
