@@ -6,7 +6,7 @@
 //
 //   pnpm owl:svg            rewrite the owl in site/index.html and console/public/hoo/
 //   pnpm owl:svg --check    fail if either is not what sprites.ts draws
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { frameToSvg } from '../packages/cli/src/ui/mascot/render.js';
 import { FRAMES, PALETTES } from '../packages/cli/src/ui/mascot/sprites.js';
@@ -49,6 +49,15 @@ export function withOwl(html: string, svg: string): string {
   return `${html.slice(0, start + BEGIN.length)}\n${svg}\n${html.slice(end)}`;
 }
 
+/** The file's text, or null when it cannot be read (not there yet): read once, not checked and then read. */
+function readIfThere(file: string): string | null {
+  try {
+    return readFileSync(file, 'utf8');
+  } catch {
+    return null;
+  }
+}
+
 function main(): number {
   const check = process.argv.includes('--check');
   const current = readFileSync(page, 'utf8');
@@ -57,7 +66,7 @@ function main(): number {
   if (!check && next !== current) writeFileSync(page, next);
   for (const [name, svg] of Object.entries(consoleOwlFiles())) {
     const file = resolve(consoleOwls, name);
-    if (existsSync(file) && readFileSync(file, 'utf8') === svg) continue;
+    if (readIfThere(file) === svg) continue;
     stale.push(`console/public/hoo/${name}`);
     if (!check) {
       mkdirSync(consoleOwls, { recursive: true });

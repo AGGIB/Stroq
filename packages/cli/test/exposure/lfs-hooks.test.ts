@@ -48,6 +48,8 @@ describe('isStockLfsHook', () => {
 
   it('is exact: one character more or less, or another name, is not the script', () => {
     const text = `${VARIANTS[0]?.('pre-push')}\n`;
+    const firstLineEnd = text.indexOf('\n');
+    const blankAfterFirstLine = `${text.slice(0, firstLineEnd)}\n${text.slice(firstLineEnd)}`;
     expect(isStockLfsHook('pre-push', text)).toBe(true);
     for (const bad of [
       `${text}\n`,
@@ -57,7 +59,7 @@ describe('isStockLfsHook', () => {
       text.replace('"$@"', '"$*"'),
       text.slice(0, -2),
       `${text}true\n`,
-      text.replace('\n', '\n\n'),
+      blankAfterFirstLine,
       text.replace(/\n/g, '\r\r\n'),
       '',
     ])

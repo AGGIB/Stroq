@@ -82,7 +82,17 @@ function platform(snapshot: Snapshot, extra: Record<string, unknown> = {}) {
   };
 }
 
-const text = (html: string) => html.replace(/<[^>]+>/g, '').replace(/\s+/g, ' ');
+/** What the markup says: everything outside `<…>`, white space folded. Read by hand, not with a pattern. */
+function text(html: string): string {
+  let out = '';
+  let inTag = false;
+  for (const c of html) {
+    if (c === '<') inTag = true;
+    else if (c === '>') inTag = false;
+    else if (!inTag) out += c;
+  }
+  return out.replace(/\s+/g, ' ');
+}
 function render(component: ComponentType<any>, props: object = {}) {
   seen.elements.length = 0;
   return text(renderToStaticMarkup(createElement(component, props)));

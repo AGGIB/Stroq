@@ -22,11 +22,17 @@ const BEGIN = '<!-- owl:begin (written by scripts/render-owl-svg.ts from sprites
 const END = '<!-- owl:end -->';
 const between = html.slice(html.indexOf(BEGIN) + BEGIN.length, html.indexOf(END)).trim();
 
-const textOf = (markup: string): string =>
-  markup
-    .replace(/<[^>]+>/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+/** What the markup says: everything outside `<…>`, white space folded. Read by hand, not with a pattern. */
+function textOf(markup: string): string {
+  let out = '';
+  let inTag = false;
+  for (const c of markup) {
+    if (c === '<') inTag = true;
+    else if (c === '>') inTag = false;
+    else if (!inTag) out += c;
+  }
+  return out.replace(/\s+/g, ' ').trim();
+}
 
 describe('Hoo on the landing page', () => {
   it('is what sprites.ts draws: the idle frame, in the orange palette', () => {
