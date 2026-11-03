@@ -15,7 +15,6 @@ import {
   type SetupScope,
 } from '@/lib/agent-setup';
 import { setupApplyInput } from '@/lib/agent-setup-binding';
-import { hookCheckHrefForSetup } from '@/lib/hook-check-navigation';
 import { useAgentSetup } from './use-agent-setup';
 
 export function SetupDialog({
@@ -58,7 +57,6 @@ export function SetupDialog({
     },
   });
   const { state, preview, result, busy } = action;
-  const hookHref = result ? hookCheckHrefForSetup(result) : null;
   const error =
     action.error ??
     (action.needsRecheck
@@ -141,9 +139,10 @@ export function SetupDialog({
               <p className="muted">
                 Open the private local server link to preview and install hooks.
               </p>
-              <Link href="/settings/" className="button" onClick={() => setOpen(false)}>
-                Connection settings <ArrowRight size={15} />
-              </Link>
+              <p className="control-meta">
+                Not connected to Stroq on this machine. Run <code>npx @stroq/cli console</code> to
+                open this page with your data.
+              </p>
             </div>
           ) : (
             <>
@@ -438,11 +437,7 @@ export function SetupDialog({
                 )}
               </div>
               <div className="dialog-footer">
-                {result && hookHref ? (
-                  <Link className="button primary" href={hookHref} onClick={() => setOpen(false)}>
-                    Test hook responses <ArrowRight size={15} />
-                  </Link>
-                ) : result ? (
+                {result ? (
                   <Link className="button" href="/agents/" onClick={() => setOpen(false)}>
                     Review current Agents <ArrowRight size={15} />
                   </Link>

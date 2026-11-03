@@ -1,11 +1,12 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ArrowRight, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { SetupDialog } from './agent-setup';
 import { AgentCard } from './agent-card';
+import { SettingsCheck } from './agent-settings';
 import { useHookCheckHistory } from './use-hook-check-history';
+import { usePosture } from './use-posture';
 import { agentScope, agentsHref } from '@/lib/agent-scope';
 import { hookCheckEvidence } from '@/lib/hook-check-evidence';
 import { usePlatform } from '@/components/platform-provider';
@@ -29,6 +30,7 @@ export function AgentsPage() {
     [error, setError] = useState<string | null>(null);
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   const hookHistory = useHookCheckHistory({ enabled: readAllowed, generation: refreshGeneration });
+  const posture = usePosture({ track: true });
   const active = useRef<AbortController | null>(null);
   const state = readAllowed && captured?.workspaceId === workspaceId ? captured.report : null;
   const setScope = (value: 'project' | 'user') =>
@@ -68,11 +70,13 @@ export function AgentsPage() {
   }, [refresh]);
   const refreshAll = () => {
     void refresh();
+    void posture.reload();
   };
   return (
     <div className="page-stack">
       <PageHeading
         title="Agents"
+        description="Whether each agent has Stroq’s hooks, when Stroq was last asked, and which of its settings weaken them."
         actions={
           <>
             <button
@@ -83,9 +87,6 @@ export function AgentsPage() {
             >
               <RefreshCw size={18} className={loading ? 'spin' : undefined} />
             </button>
-            <Link href="/agents/hooks/" className="button subtle">
-              Check history <ArrowRight size={16} />
-            </Link>
             {readAllowed && <SetupDialog scope={scope} onConfigured={refreshAll} />}
           </>
         }
@@ -109,9 +110,10 @@ export function AgentsPage() {
               description="Open the private server link to inspect the current installation in each scope."
             />
             <div className="panel-body">
-              <Link className="button" href="/settings/">
-                Connection settings <ArrowRight size={15} />
-              </Link>
+              <p className="control-meta">
+                Not connected to Stroq on this machine. Run <code>npx @stroq/cli console</code> to
+                open this page with your data.
+              </p>
             </div>
           </Panel>
           <div className="agent-grid agent-rows" aria-label="Supported agents">
@@ -179,12 +181,21 @@ export function AgentsPage() {
                 )}
                 hookHistoryLoading={hookHistory.busy && !hookHistory.state}
                 onHookChanged={() => void hookHistory.refresh()}
+                settings={{ audit: posture.audit, changes: posture.changes, state: posture.state }}
               />
             ))}
           </div>
           <p className="control-meta">
             Recorded Stroq hook checks are offline. In-agent checks test the client separately.
           </p>
+          <SettingsCheck
+            audit={posture.audit}
+            changes={posture.changes}
+            state={posture.state}
+            error={posture.error}
+            shownAgents={state?.agents.map((agent) => agent.id) ?? []}
+            onReload={() => void posture.reload()}
+          />
         </>
       )}
     </div>

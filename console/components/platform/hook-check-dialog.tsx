@@ -7,7 +7,6 @@ import { AgentGlyph, Badge } from '@/components/platform-ui';
 import { AGENT_NAMES, type AgentId } from '@/lib/agent-status';
 import type { HookCheckScope } from '@/lib/hook-checks';
 import { useHookChecks } from './use-hook-checks';
-import { hookCheckHref } from '@/lib/hook-check-navigation';
 import {
   HookCheckResult,
   HookCheckBindingDetails,
@@ -53,9 +52,6 @@ export function HookCheckDialog({
   const working = action.busy !== null && action.busy !== 'poll';
   const disabled =
     working || action.needsRecheck || action.sourceMismatch || action.contextMismatch || action.gap;
-  const resultHref = job
-    ? hookCheckHref({ workspaceId: job.binding.workspaceId, jobId: job.id })
-    : null;
   const close = () => {
     action.invalidate();
     setOpen(false);
@@ -260,11 +256,6 @@ export function HookCheckDialog({
               </>
             )}
             <div className="dialog-footer">
-              {resultHref && (
-                <Link className="button subtle" href={resultHref} onClick={close}>
-                  Open recorded result
-                </Link>
-              )}
               <button
                 className="button subtle"
                 disabled={!action.workspaceId || working}

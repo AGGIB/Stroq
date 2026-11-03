@@ -1,12 +1,13 @@
 'use client';
-import Link from 'next/link';
 import { Check } from 'lucide-react';
 import { AgentGlyph, Badge } from '@/components/platform-ui';
 import { AGENT_NAMES, AGENT_STATUS_REASONS, type AgentStatus } from '@/lib/agent-status';
-import { agentState } from '@/lib/agent-summary';
-import { hookCheckHref } from '@/lib/hook-check-navigation';
+import { agentState, ago } from '@/lib/agent-summary';
 import type { HookCheckEvidence } from '@/lib/hook-check-evidence';
+import type { PostureAudit, PostureChanges } from '@/lib/posture';
 import { SetupDialog } from './agent-setup';
+import { AgentSettings } from './agent-settings';
+import type { PostureState } from './use-posture';
 import { AgentDisconnect } from './agent-disconnect';
 import { HookCheckDialog } from './hook-check-dialog';
 export function AgentCard({
@@ -17,6 +18,7 @@ export function AgentCard({
   hookEvidence,
   hookHistoryLoading,
   onHookChanged,
+  settings,
 }: {
   agent: AgentStatus;
   scope: 'project' | 'user';
@@ -25,15 +27,14 @@ export function AgentCard({
   hookEvidence: HookCheckEvidence;
   hookHistoryLoading: boolean;
   onHookChanged: () => void;
+  settings: {
+    audit: PostureAudit | null;
+    changes: PostureChanges | null;
+    state: PostureState;
+  };
 }) {
   const configuration = agent.scopes.find((s) => s.scope === scope)!;
   const summary = agentState(agent, scope);
-  const recordedHookHref = hookEvidence.job
-    ? hookCheckHref({
-        workspaceId: hookEvidence.job.binding.workspaceId,
-        jobId: hookEvidence.job.id,
-      })
-    : null;
   const approval =
     configuration.state === 'missing'
       ? 'Not configured'
@@ -52,13 +53,7 @@ export function AgentCard({
           : agent.proof.state === 'invalid'
             ? 'Stored proof invalid'
             : 'Not established';
-  const hook = hookHistoryLoading ? (
-    'Reading history…'
-  ) : recordedHookHref ? (
-    <Link href={recordedHookHref}>{hookEvidence.label}</Link>
-  ) : (
-    hookEvidence.label
-  );
+  const hook = hookHistoryLoading ? 'Reading history…' : hookEvidence.label;
   return (
     <article id={agent.id} className="agent-card operations-agent-card agent-row" tabIndex={-1}>
       <div className="agent-row-main">
@@ -70,6 +65,22 @@ export function AgentCard({
               <Badge tone={summary.tone}>{summary.label}</Badge>
             </div>
             <p className="agent-row-summary agent-row-line">{summary.line}</p>
+            <p className="agent-row-last control-meta">
+              Last hook call:{' '}
+              {agent.observation.state === 'recorded' && agent.observation.lastHookAt
+                ? `${ago(agent.observation.lastHookAt, Date.now())} (${new Date(agent.observation.lastHookAt).toLocaleString('en-GB')})`
+                : 'none recorded on this machine'}
+              <br />
+              Last test of the hook: {hook}
+              {!hookHistoryLoading && hookEvidence.recordedAt ? (
+                <>
+                  {' · '}
+                  <time dateTime={hookEvidence.recordedAt}>
+                    {new Date(hookEvidence.recordedAt).toLocaleString('en-GB')}
+                  </time>
+                </>
+              ) : null}
+            </p>
           </div>
         </div>
         <div className="agent-row-actions">
@@ -88,6 +99,7 @@ export function AgentCard({
           />
         </div>
       </div>
+      <AgentSettings agent={agent.id} {...settings} />
       <details className="agent-row-details">
         <summary>Details</summary>
         <div className="agent-row-detail-body">
@@ -95,20 +107,6 @@ export function AgentCard({
             <div>
               <span>Hook approval</span>
               <strong>{approval}</strong>
-            </div>
-            <div>
-              <span>Stroq hook</span>
-              <strong>
-                {hook}
-                {!hookHistoryLoading && hookEvidence.recordedAt && (
-                  <>
-                    <br />
-                    <time className="control-meta" dateTime={hookEvidence.recordedAt}>
-                      {new Date(hookEvidence.recordedAt).toLocaleString('en-GB')}
-                    </time>
-                  </>
-                )}
-              </strong>
             </div>
             <div>
               <span>In-agent check</span>
@@ -120,14 +118,6 @@ export function AgentCard({
             <div>
               <dt>Scope</dt>
               <dd>{scope === 'project' ? 'Workspace' : 'User (all workspaces)'}</dd>
-            </div>
-            <div>
-              <dt>Last hook on this machine</dt>
-              <dd>
-                {agent.observation.state === 'recorded' && agent.observation.lastHookAt
-                  ? new Date(agent.observation.lastHookAt).toLocaleString('en-GB')
-                  : 'No confirmed observation'}
-              </dd>
             </div>
           </dl>
           {agent.proof.checkedAt && (

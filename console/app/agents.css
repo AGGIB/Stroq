@@ -217,3 +217,56 @@
     flex-wrap: wrap;
   }
 }
+
+/* The last hook call and the last test of it, under the agent's own line. */
+.agent-row-last {
+  margin: 6px 0 0;
+  line-height: 1.55;
+}
+/* The settings of one agent that weaken it: closed unless one is serious. */
+.agent-row-settings {
+  grid-column: 1;
+  align-self: center;
+  min-width: 0;
+  font-size: var(--text-ui);
+}
+.agent-row-settings > summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+  min-height: 44px;
+  cursor: pointer;
+  color: var(--muted-foreground);
+}
+.agent-row-settings[open] {
+  grid-column: 1/-1;
+  padding-bottom: 10px;
+}
+.agent-row-settings .posture-item {
+  padding-left: 0;
+  padding-right: 0;
+}
+/* The settings check under the agents. */
+.settings-check {
+  display: grid;
+  gap: 14px;
+  margin-top: 8px;
+  scroll-margin-top: 80px;
+}
+.settings-check h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+.settings-check-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-check > .posture-list {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--card);
+}

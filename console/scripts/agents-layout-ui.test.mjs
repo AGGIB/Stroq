@@ -79,10 +79,10 @@ test('native Details preserves approval, hook evidence, native gap, observation 
   for (const text of [
     'Hook approval',
     'Not verified',
-    'Stroq hook',
+    'Last test of the hook',
     'In-agent check',
     'Needs a fresh check',
-    'Last hook on this machine',
+    'Last hook call',
     'PreToolUse',
     'Current host version unverified',
   ])

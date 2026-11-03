@@ -122,6 +122,19 @@ export function harness(props = {}, agent = null, query = '') {
           return {
             useHookCheckHistory: () => ({ state: null, busy: false, error: null, refresh() {} }),
           };
+        if (name === './use-posture')
+          return {
+            usePosture: () => ({
+              audit: null,
+              changes: null,
+              state: 'loading',
+              error: null,
+              reload() {},
+            }),
+          };
+        // The settings of each agent have their own tests; here they are left out of the layout.
+        if (name === './agent-settings')
+          return { AgentSettings: () => null, SettingsCheck: () => null };
         if (stubs[name]) return { [stubs[name]]: () => null };
         if (name === 'lucide-react')
           return new Proxy({}, { get: () => () => React.createElement('svg') });
