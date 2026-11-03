@@ -2,8 +2,7 @@ import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { nodeFs, writeFileAtomic } from '../../src/harden/atomic.js';
-import { assertUnchanged } from '../../src/harden/recheck.js';
-import type { Fs } from '../../src/harden/types.js';
+import { HardenError, type Fs } from '../../src/harden/types.js';
 import { removeTempDirs, tempDir } from './helpers.js';
 
 afterEach(removeTempDirs);
@@ -187,7 +186,10 @@ describe('writeFileAtomic: the last look comes before every try', () => {
     const error = await writeFileAtomic(file, 'new', {
       fs,
       sleep,
-      beforeRename: () => assertUnchanged(file, file, Buffer.from('old')),
+      beforeRename: () => {
+        if (!readFileSync(file).equals(Buffer.from('old')))
+          throw new HardenError('stale-plan', 'the file changed while it waited');
+      },
     }).catch((err: unknown) => err);
 
     expect(error).toMatchObject({ code: 'stale-plan' });
