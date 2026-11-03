@@ -7,7 +7,7 @@
 // private home, a private file, and `O_NOFOLLOW` so that a link planted in the marker's place cannot
 // make Stroq create or overwrite the file it points at.
 
-import { closeSync, constants, lstatSync, mkdirSync, openSync } from 'node:fs';
+import { closeSync, constants, lstatSync, mkdirSync, openSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { logError } from '../../log.js';
 import { stroqHome } from '../../paths.js';
@@ -41,7 +41,14 @@ export function hasGreeted(home: string = stroqHome()): boolean {
     lstatSync(greetedFileIn(home));
     return true;
   } catch (error) {
-    return !hasCode(error, 'ENOENT');
+    if (!hasCode(error, 'ENOENT')) return true;
+    // Windows says ENOENT, where POSIX says ENOTDIR, for a name under a file: a home that is there and is not a
+    // folder is not "no marker". A home that is not there yet is.
+    try {
+      return !statSync(home).isDirectory();
+    } catch {
+      return false;
+    }
   }
 }
 

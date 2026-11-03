@@ -26,8 +26,12 @@ const SPELLINGS: Readonly<Record<string, string>> = {
   'value-joined': 'Its value is in this command once the shell joins its quotes',
 };
 
+/** Where the last folder of a path ends: a key file found on Windows is spelled with `\`. */
+const lastSeparator = (path: string): number =>
+  Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'));
+
 /** The file name of a path: what a command names a key file by. */
-const nameOf = (path: string): string => path.slice(path.lastIndexOf('/') + 1);
+const nameOf = (path: string): string => path.slice(lastSeparator(path) + 1);
 
 /** Whether the masked text shows the key: its `[NAME]`, or the name of the file it is kept in. */
 function showsKey(f: Finding, evidence: Evidence): boolean {
@@ -40,7 +44,7 @@ function showsKey(f: Finding, evidence: Evidence): boolean {
 function ruleWords(f: Finding, evidence: Evidence, home: string): { by: string; plain: string } {
   const word = evidence.word === undefined ? '' : clean(evidence.word, 60);
   const kept = shortPath(f.source, home, 50);
-  const folder = shortPath(f.source.slice(0, Math.max(0, f.source.lastIndexOf('/'))), home, 50);
+  const folder = shortPath(f.source.slice(0, Math.max(0, lastSeparator(f.source))), home, 50);
   switch (evidence.matched) {
     case 'file':
       return {
