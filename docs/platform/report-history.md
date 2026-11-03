@@ -1,7 +1,7 @@
 # Report queue and exact history
 
 The Protection queue reads existing inventory, incidents, agent configuration,
-quarantine, MCP recovery, native file filters, saved policy checks, live checks and credential reports. Opening it never starts a host
+quarantine, MCP recovery, saved policy checks, live checks and credential reports. Opening it never starts a host
 check or credential scan. Attention items sort before ordinary history; evidence
 and scope are disclosed within each row.
 

@@ -170,12 +170,6 @@ export {
 } from '../lib/skill-quarantine';
 
 export {
-  validateCredentialFilters,
-  validateCredentialFilterPreview,
-  validateCredentialFilterReceipt,
-} from '../lib/credential-filters';
-
-export {
   validateInventorySignalState,
   validateInventorySignalPreview,
   validateInventorySignalReceipt,

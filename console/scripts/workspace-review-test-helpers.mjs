@@ -12,7 +12,7 @@ export async function buildWorkspaceFixture() {
   const output = await realpath(await mkdtemp(join(tmpdir(), 'stroq-workspace-build-')));
   await writeFile(
     join(output, 'lock.ts'),
-    `export {withManifestLock} from '${repository}/packages/cli/src/harden/manifest.ts';`,
+    `export {withConfigurationLock as withManifestLock} from '${repository}/packages/cli/src/config-lock.ts';`,
   );
   await writeFile(
     join(output, 'schema.ts'),

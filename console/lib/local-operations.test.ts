@@ -284,20 +284,13 @@ describe('local API operation allowlist', () => {
     ])
       expect(isLocalOperation(path)).toBe(false);
   });
-  it('permits fixed credential-filter routes and rejects lookalikes', () => {
+  it('no longer admits the removed credential-filter routes', () => {
     for (const path of [
       '/api/credential-filters',
       '/api/credential-filters/preview',
       '/api/credential-filters/apply',
     ])
-      expect(isLocalOperation(path)).toBe(true);
-    for (const path of [
-      '/api/credential-filters/run',
-      '/api/credential-filters?target=claude-user',
-      '/api/credential-filters-evil',
-      '/api/credential-filters/apply/extra',
-    ])
-      expect(isLocalOperation(path)).toBe(false);
+      expect(isLocalOperation(path), path).toBe(false);
   });
   it('permits only fixed MCP call control operations', () => {
     for (const path of [

@@ -6,14 +6,7 @@ import { ArrowRight, RefreshCw } from 'lucide-react';
 import { SetupDialog } from './agent-setup';
 import { AgentCard } from './agent-card';
 import { useHookCheckHistory } from './use-hook-check-history';
-import { useCredentialFilters } from './use-credential-filters';
-import {
-  credentialFilterHref,
-  credentialFilterSelection,
-  credentialFilterReadAllowed,
-  resolveCredentialFilterSelection,
-} from '@/lib/credential-filter-navigation';
-import type { CredentialFilterTarget } from '@/lib/credential-filters';
+import { agentScope, agentsHref } from '@/lib/agent-scope';
 import { hookCheckEvidence } from '@/lib/hook-check-evidence';
 import { usePlatform } from '@/components/platform-provider';
 import { AgentGlyph, Badge, EmptyState, PageHeading, Panel } from '@/components/platform-ui';
@@ -25,13 +18,9 @@ import {
 } from '@/lib/agent-status';
 export function AgentsPage() {
   const { localAccess, localContext, requestLocal } = usePlatform();
-  const selection = credentialFilterSelection(useSearchParams());
+  const scope = agentScope(useSearchParams());
   const workspaceId = localAccess ? (localContext?.workspace.id ?? null) : null;
-  const readAllowed = credentialFilterReadAllowed(selection, workspaceId);
-  const scope = selection.scope;
-  const filters = useCredentialFilters(readAllowed, `${scope}:${selection.target ?? ''}`);
-  const resolved = resolveCredentialFilterSelection(selection, workspaceId, filters.state);
-  const blocked = resolved.status === 'invalid' || resolved.status === 'workspace-mismatch';
+  const readAllowed = workspaceId !== null;
   const [captured, setCaptured] = useState<{
       workspaceId: string;
       report: AgentStatusState;
@@ -42,16 +31,8 @@ export function AgentsPage() {
   const hookHistory = useHookCheckHistory({ enabled: readAllowed, generation: refreshGeneration });
   const active = useRef<AbortController | null>(null);
   const state = readAllowed && captured?.workspaceId === workspaceId ? captured.report : null;
-  const selectFilter = useCallback(
-    (target: CredentialFilterTarget | null) => {
-      const href = credentialFilterHref(target, workspaceId, scope);
-      if (target) window.history.pushState(null, '', href);
-      else window.history.replaceState(null, '', href);
-    },
-    [workspaceId, scope],
-  );
   const setScope = (value: 'project' | 'user') =>
-    window.history.pushState(null, '', credentialFilterHref(null, null, value));
+    window.history.pushState(null, '', agentsHref(value));
   const refresh = useCallback(async () => {
     if (!localAccess || !readAllowed || !workspaceId) return;
     active.current?.abort();
@@ -87,7 +68,6 @@ export function AgentsPage() {
   }, [refresh]);
   const refreshAll = () => {
     void refresh();
-    void filters.refresh();
   };
   return (
     <div className="page-stack">
@@ -98,7 +78,7 @@ export function AgentsPage() {
             <button
               className="icon-button"
               aria-label="Refresh agent configuration and checks"
-              disabled={!readAllowed || loading || filters.loading || hookHistory.busy}
+              disabled={!readAllowed || loading || hookHistory.busy}
               onClick={refreshAll}
             >
               <RefreshCw size={18} className={loading ? 'spin' : undefined} />
@@ -124,19 +104,7 @@ export function AgentsPage() {
           Stroq hook history could not be rechecked.
         </p>
       )}
-      {blocked ? (
-        <Panel>
-          <EmptyState
-            title={resolved.status === 'invalid' ? 'Invalid filter link' : 'Different workspace'}
-            description="No filter was selected and no configuration action was started."
-          />
-          <div className="panel-body">
-            <Link href={credentialFilterHref(null, null)} className="button">
-              Open current Agents <ArrowRight size={16} />
-            </Link>
-          </div>
-        </Panel>
-      ) : !localAccess ? (
+      {!localAccess ? (
         <>
           <Panel>
             <EmptyState
@@ -173,14 +141,6 @@ export function AgentsPage() {
         </Panel>
       ) : (
         <>
-          {(resolved.status === 'missing' || (selection.requested && filters.error)) && (
-            <p className="control-error" role="status">
-              This exact filter could not be rechecked. No other source was selected.{' '}
-              <button className="inline-link" onClick={() => selectFilter(null)}>
-                Clear selection
-              </button>
-            </p>
-          )}
           <div className="toolbar">
             <div className="filter-tabs" aria-label="Agent configuration scope">
               <button
@@ -213,10 +173,6 @@ export function AgentsPage() {
                 agent={agent}
                 scope={scope}
                 onRefresh={refreshAll}
-                filters={filters}
-                onWorkspaceScope={() => setScope('project')}
-                selectedFilter={readAllowed ? selection.target : null}
-                onFilterSelection={selectFilter}
                 generation={refreshGeneration}
                 hookEvidence={hookCheckEvidence(
                   hookHistory.error ? null : hookHistory.state,

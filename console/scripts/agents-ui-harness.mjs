@@ -117,19 +117,8 @@ export function harness(props = {}, agent = null, query = '') {
           './agent-disconnect': 'AgentDisconnect',
           './live-proof': 'LiveProofDialog',
           './hook-check-dialog': 'HookCheckDialog',
-          './credential-filters': 'CredentialFilters',
           './use-hook-check-history': 'useHookCheckHistory',
-          './use-credential-filters': 'useCredentialFilters',
         };
-        if (name === './use-credential-filters')
-          return {
-            useCredentialFilters: () => ({
-              state: null,
-              loading: false,
-              error: null,
-              refresh() {},
-            }),
-          };
         if (name === './use-hook-check-history')
           return {
             useHookCheckHistory: () => ({ state: null, busy: false, error: null, refresh() {} }),

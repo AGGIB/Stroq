@@ -79,39 +79,6 @@
   min-height: 44px;
   white-space: nowrap;
 }
-.agent-row-controls {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 0 20px;
-  min-width: 0;
-}
-.agent-row-controls:empty {
-  display: none;
-}
-.agent-row-controls .credential-filter-row {
-  display: inline-flex;
-  flex-wrap: wrap;
-  align-items: center;
-  justify-content: flex-start;
-  gap: 8px 12px;
-  border: 0;
-  padding: 0;
-  margin: 0;
-  min-height: 44px;
-  min-width: 0;
-  font-size: var(--text-ui);
-}
-.agent-row-controls .credential-filter-row > div {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-.agent-rows .agent-row-controls button {
-  min-height: 44px;
-}
 .agent-row-details {
   align-self: start;
   grid-column: 2;
@@ -201,9 +168,6 @@
   .agent-rows .agent-row {
     gap: 8px 12px;
   }
-  .agent-row-controls {
-    gap: 0 16px;
-  }
 }
 @media (max-width: 520px) {
   .agent-rows .agent-row {
@@ -234,14 +198,6 @@
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
     width: 100%;
-  }
-  .agent-row-controls {
-    grid-column: 1;
-    display: grid;
-    gap: 4px;
-  }
-  .agent-row-controls .credential-filter-row {
-    justify-content: space-between;
   }
   .agent-row-details {
     grid-column: 1;

@@ -20,7 +20,7 @@ Nine commands left the CLI. Typing one prints a single line that says it was rem
 
 - **`stroq add` and `stroq remove`.** Check a skill or MCP server with `stroq vet`, and install it with your agent's own command.
 - **`stroq run`, `stroq task` and `stroq permit`.** Run your agent as usual; `stroq init` guards it. The `task-hook` entry that older Task Lock settings call still works.
-- **`stroq harden`.** `stroq init` guards your agent, and your agent's own deny settings can close key files. The console keeps its credential filters.
+- **`stroq harden`.** `stroq init` guards your agent, and your agent's own deny settings can close key files. The console's credential filters went with it (see below).
 - **`stroq prove`.** `stroq doctor` shows whether the hook is called; the live check runs from the console, and `pnpm dev:prove` runs it from a checkout.
 - **`stroq bench` and `stroq coverage`.** They are developer tools, in the repository: `pnpm dev:bench` and `pnpm dev:coverage`.
 
@@ -31,6 +31,7 @@ The console is being cut down to five screens (Check, Live, Agents, Rules, Skill
 - **The Codex Network, Path and Skill guards of the console** (Agents & coverage → Codex → Manage, Credential paths and Codex sources, and their rows on Protection). Their own documents said the protection there was not verified. Codex is still an agent: its hooks are set up and checked on the Agents page, its settings are read by the settings check, and its `.codex/skills` folder is still inventoried and can still be quarantined. To restrict what Codex reaches, use Codex's own `config.toml` settings.
 - **The Guide page, the pwn.watch threat feed and the Settings choices of the console.** The Guide only repeated the sidebar. The threat feed downloaded a public list of incidents from pwn.watch and matched it against your files; nothing is downloaded by the console any more. Settings is the theme switch (dark, light, system) and nothing else; the example-data choice left it with the data source picker.
 - **The example data of the console.** The console shows only what Stroq recorded on this machine. The made-up events, agents and keys, the Example data button, the banner that marked them and the made-up key incident are gone; with no private link the pages say that nothing is connected, as before.
+- **The credential file filters of the console** (the Credential filters control in the Claude Code and Cursor agent cards, and their row on Protection). They were the console side of `stroq harden`. Filters an older version added stay in your agent's settings; remove them by hand if you want them gone. The lock that hook setup, hook removal and the other writers of agent settings share is the same file as before (`<STROQ_HOME>/harden/manifest.lock`), so an older Stroq still takes turns with this one.
 
 ### Fixed
 

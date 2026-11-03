@@ -20,8 +20,6 @@ import { createPolicyCasesService } from './policy-cases.mjs';
 import { runPolicyAdapter, runPolicyCaseEvaluation } from './policy-worker.mjs';
 import { createInventory } from './inventory.mjs';
 import { createSkillQuarantine } from './skill-quarantine.mjs';
-import { createCredentialFilterService } from './credential-filters.mjs';
-import { routeCredentialFilters } from './credential-filter-http.mjs';
 import { createMcpContainmentService } from './mcp-containment.mjs';
 import {
   routeMcpContainment,
@@ -173,8 +171,6 @@ export async function startServer({
   mcpGovernance: suppliedMcpGovernance,
   inventory: suppliedInventory,
   quarantine: suppliedQuarantine,
-  credentialFilters: suppliedCredentialFilters,
-  claudeConfigDir: suppliedClaudeConfigDir,
   mcp: suppliedMcp,
   mcpToolContracts: suppliedMcpToolContracts,
   mcpCallControls: suppliedMcpCallControls,
@@ -259,14 +255,6 @@ export async function startServer({
       close: async () => {},
     };
   const quarantine = suppliedQuarantine ?? createSkillQuarantine(context);
-  const credentialFilters =
-    suppliedCredentialFilters ??
-    createCredentialFilterService({
-      ...context,
-      claudeConfigDir:
-        suppliedClaudeConfigDir ??
-        (userHome === undefined ? (process.env.CLAUDE_CONFIG_DIR ?? '') : ''),
-    });
   const mcp = suppliedMcp ?? createMcpContainmentService(context);
   const mcpToolContracts = suppliedMcpToolContracts ?? createMcpToolContractService(context);
   const mcpCallControls = suppliedMcpCallControls ?? (await createMcpCallControlService(context));
@@ -408,8 +396,6 @@ export async function startServer({
           response = await routeWorkspaceMonitor(req, parsed.path, origin, workspaceMonitor);
         } else if (parsed.path.startsWith('/api/agent-setup')) {
           response = await routeAgentSetup(req, parsed.path, origin, setup);
-        } else if (parsed.path.startsWith('/api/credential-filters')) {
-          response = await routeCredentialFilters(req, parsed.path, origin, credentialFilters);
         } else if (parsed.path.startsWith('/api/mcp-call-controls')) {
           response = await routeMcpCallControls(req, parsed.path, origin, mcpCallControls);
         } else if (parsed.path.startsWith('/api/mcp-tool-contracts')) {
@@ -592,7 +578,6 @@ export async function startServer({
           mcpGovernance,
           inventory,
           quarantine,
-          credentialFilters,
           mcp,
           mcpToolContracts,
           mcpCallControls,

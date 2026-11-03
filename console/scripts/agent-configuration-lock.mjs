@@ -2,7 +2,7 @@ import { lstat } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import { runtimeLayout } from './runtime-layout.mjs';
 
-/** Share the existing harden lock with native-filter writers for these same files. */
+/** Take the one lock every writer of an agent's settings shares (`packages/cli/src/config-lock.ts`). */
 export async function withAgentConfigurationLock(
   { home, version, runtime },
   action,
@@ -17,16 +17,16 @@ export async function withAgentConfigurationLock(
   )
     throw new Error('agent-configuration-unavailable');
   try {
-    const file = runtimeLayout().adapter('credential-filter-engine.js');
+    const file = runtimeLayout().adapter('agent-configuration-lock-engine.js');
     const stat = await lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 16 * 1024 * 1024)
       throw new Error('agent-configuration-unavailable');
     const url = pathToFileURL(file);
     url.searchParams.set('runtime', runtime);
     const engine = await import(url.href);
-    if (typeof engine.withManifestLock !== 'function')
+    if (typeof engine.withConfigurationLock !== 'function')
       throw new Error('agent-configuration-unavailable');
-    return await engine.withManifestLock({ home, version, now: () => new Date() }, action, {
+    return await engine.withConfigurationLock({ home }, action, {
       timeoutMs: Math.max(1, Math.min(3000, timeoutMs)),
     });
   } catch (error) {

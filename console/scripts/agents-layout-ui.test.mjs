@@ -105,7 +105,6 @@ test('scoped row layout keeps a single desktop list and 44px controls without sh
   const { readFileSync } = await import('node:fs');
   const css = readFileSync(new URL('../app/agents.css', import.meta.url), 'utf8');
   assert(/\.agent-grid\.agent-rows\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/.test(css));
-  assert(/\.agent-row-controls button\s*\{[^}]*min-height:\s*44px/.test(css));
   assert(/\.agent-row \.agent-brand\s*\{[^}]*width:\s*30px/.test(css));
   assert(!/font-size:\s*(?:1[0-5]|[0-9])px/.test(css));
 });
@@ -133,7 +132,7 @@ test('44px row button declarations beat the later global small-button cascade', 
     specificity(small.selector),
     'old action selector ties the late small-button rule',
   );
-  for (const region of ['agent-row-actions', 'agent-row-detail-actions', 'agent-row-controls']) {
+  for (const region of ['agent-row-actions', 'agent-row-detail-actions']) {
     const candidates = rules(own).filter(
       (r) => r.selector.includes('.' + region) && /(?:\.button|\bbutton)$/.test(r.selector),
     );

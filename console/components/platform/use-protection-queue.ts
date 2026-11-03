@@ -12,7 +12,6 @@ import {
   validateMcpCallControlOverview,
   type McpCallControlOverview,
 } from '@/lib/mcp-call-control-overview';
-import { validateCredentialFilters, type CredentialFiltersState } from '@/lib/credential-filters';
 import { validatePolicyCases, type PolicyCasesState } from '@/lib/policy-cases';
 import { validateTaskLockState, type TaskLockState } from '@/lib/task-locks';
 import { validateWorkspaceReviewState, type WorkspaceReviewState } from '@/lib/workspace-review';
@@ -48,7 +47,6 @@ interface QueueSnapshot {
   mcpCallControls: McpCallControlOverview | null;
   mcpGovernance: McpGovernanceState | null;
   mcpGovernanceUnresolved: McpGovernanceUnknownLedger;
-  filters: CredentialFiltersState | null;
   policyCases: PolicyCasesState | null;
   taskLocks: TaskLockState | null;
   workspaceReview: WorkspaceReviewState | null;
@@ -84,7 +82,6 @@ const emptySnapshot = (key: string, workspaceId: string): QueueSnapshot => ({
   mcpCallControls: null,
   mcpGovernance: null,
   mcpGovernanceUnresolved: { records: [], limited: false },
-  filters: null,
   policyCases: null,
   taskLocks: null,
   workspaceReview: null,
@@ -182,7 +179,6 @@ export function useProtectionQueue(refreshKey?: string) {
             mcp: null,
             mcpCallControls: null,
             mcpGovernance: null,
-            filters: null,
             policyCases: null,
             taskLocks: null,
             workspaceReview: null,
@@ -201,7 +197,6 @@ export function useProtectionQueue(refreshKey?: string) {
         requestLocal('/api/live', undefined, controller.signal),
         requestLocal('/api/secrets', undefined, controller.signal),
         requestLocal('/api/mcp-containment', undefined, controller.signal),
-        requestLocal('/api/credential-filters', undefined, controller.signal),
         requestLocal('/api/policy/cases', undefined, controller.signal),
         requestLocal('/api/task-locks', undefined, controller.signal),
         requestLocal('/api/workspace-review', undefined, controller.signal),
@@ -222,7 +217,6 @@ export function useProtectionQueue(refreshKey?: string) {
         liveResult,
         secretResult,
         mcpResult,
-        filterResult,
         caseResult,
         taskResult,
         workspaceResult,
@@ -256,12 +250,6 @@ export function useProtectionQueue(refreshKey?: string) {
       const secrets =
         secretResult.status === 'fulfilled' && validateSecretScanState(secretResult.value)
           ? secretResult.value
-          : null;
-      const filters =
-        filterResult.status === 'fulfilled' &&
-        validateCredentialFilters(filterResult.value) &&
-        filterResult.value.workspaceId === workspaceId
-          ? filterResult.value
           : null;
       const policyCases =
         caseResult.status === 'fulfilled' &&
@@ -306,7 +294,6 @@ export function useProtectionQueue(refreshKey?: string) {
         !quarantine && 'Quarantine folders could not be rechecked.',
         !live && 'Blocking-check history could not be refreshed.',
         !secrets && 'Credential report history could not be refreshed.',
-        !filters && 'File filters could not be rechecked.',
         !policyCases && 'Saved policy checks could not be rechecked.',
         !workspaceReview && 'Workspace check history could not be refreshed.',
         !(
@@ -361,7 +348,6 @@ export function useProtectionQueue(refreshKey?: string) {
           mcpResult.value.workspaceId === workspaceId
             ? mcpResult.value
             : null,
-        filters,
         policyCases,
         taskLocks:
           taskResult.status === 'fulfilled' &&
@@ -698,7 +684,6 @@ export function useProtectionQueue(refreshKey?: string) {
     unconfirmedMcpCallControls: [...callControlPending(requestLocal).values()].filter(
       (write) => write.preview.workspaceId === workspaceId,
     ),
-    filters: evidence?.filters ?? null,
     policyCases: evidence?.policyCases ?? null,
     taskLocks: evidence?.taskLocks ?? null,
     workspaceReview: evidence?.workspaceReview ?? null,

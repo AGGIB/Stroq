@@ -57,14 +57,14 @@ async function start(status) {
 }
 test('an enabled watch refreshes passive workspace and MCP state every10s; no inventory rerun', async () => {
   const h = await start('enabled');
-  assert.equal(h.calls.length, 17);
+  assert.equal(h.calls.length, 16);
   assert.equal(h.calls.filter((call) => call.path === '/api/mcp-call-controls').length, 1);
   assert.equal(h.output.workspaceMonitor.status, 'enabled');
   const refreshedAt = h.output.refreshedAt;
   await h.advance(10000);
   assert.deepEqual(
     h.calls
-      .slice(17)
+      .slice(16)
       .map((call) => call.path)
       .sort(),
     ['/api/mcp-governance', '/api/workspace-monitor', '/api/workspace-review'],
@@ -87,7 +87,7 @@ test('invalid monitor polling is bounded, retains historical evidence and never 
   const initial = h.output.workspaceMonitor;
   h.control.bad = '/api/workspace-monitor';
   await h.advance(60000);
-  assert.equal(h.calls.length, 26);
+  assert.equal(h.calls.length, 25);
   assert.equal(h.output.workspaceMonitor, initial);
   assert.match(h.output.error, /Automatic updates paused/);
   const count = h.calls.length;
@@ -147,7 +147,7 @@ test('unmounted retained refresh cannot send, StrictMode re-entry performs read-
   assert.equal(h.calls.length, count);
   h.reenterEffects();
   await h.flush();
-  assert.equal(h.calls.length, count + 17);
+  assert.equal(h.calls.length, count + 16);
   assert.ok(h.calls.every((call) => call.body === undefined));
   h.unmount();
 });

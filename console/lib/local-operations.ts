@@ -2,7 +2,7 @@ const JOB = '[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}';
 const TASK = 'task-[a-f0-9]{64}';
 const SHA = '[a-f0-9]{64}';
 const OPERATION = new RegExp(
-  '^/api/(?:context|control|agents|(?:quarantine|mcp-containment|credential-filters)(?:/(?:preview|apply))?|' +
+  '^/api/(?:context|control|agents|(?:quarantine|mcp-containment)(?:/(?:preview|apply))?|' +
     'incidents(?:/(?:review|verify|compare|task|evidence))?|' +
     'journal/(?:tail|summary|since)|posture|' +
     'incident-assessments(?:/(?:preview|apply|recheck))?|' +

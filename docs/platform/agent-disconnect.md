@@ -8,7 +8,7 @@
 2. Choose **Preview removal**. Review the fixed source, actual scope, exact hooks to remove, other hooks preserved and similar commands remaining. Events and source/candidate fingerprints are available in details.
 3. Acknowledge weaker protection and retention of the full settings copy. User scope, including a workspace that resolves to the user home, requires separate consent to the effect across workspaces.
 4. Apply the single-use preview within five minutes. Changed source bytes, identity, permissions, runtime or relevant source context require a fresh preview. An unchanged preview cannot apply or create a backup.
-5. Review the receipt and refreshed configuration. Start a new agent session to load the change. Running agents and servers are not stopped, access is not revoked, and native file filters, policy and MCP registrations remain separate.
+5. Review the receipt and refreshed configuration. Start a new agent session to load the change. Running agents and servers are not stopped, access is not revoked, and policy and MCP registrations remain separate.
 6. To enable the integration again, use **Reconnect**. It opens the existing setup flow for the selected agent and scope, with a fresh current-runtime preview. The platform does not restore an old full settings copy over newer configuration.
 
 A timeout, interrupted apply or mismatched receipt leaves completion **Unknown**. **Recheck configuration** must successfully reread Agents & coverage and removal availability before another preview; it does not retry the removal automatically.
@@ -33,7 +33,7 @@ Each change first retains `before.json` and `manifest.json` under `<selected-use
 
 Retention is private but **unencrypted**, with `0700` directories and `0600` files. Copies have no automatic expiry or eviction. The store accepts at most 32 recovery records; a full or unsafe store refuses another removal rather than deleting an older copy. The UI offers no automatic raw-copy restore or deletion. Files remain sensitive after reconnecting.
 
-Removal uses the same harden configuration lock as native file-filter writes, then rechecks the source/runtime before replacement and verifies the written candidate. It refuses unsafe linked/ambiguous sources. Private permissions and portable identity checks do not protect against another process acting as the same OS user or provide filesystem compare-and-swap.
+Removal uses the same configuration lock as hook setup and the other writers of agent settings, then rechecks the source/runtime before replacement and verifies the written candidate. It refuses unsafe linked/ambiguous sources. Private permissions and portable identity checks do not protect against another process acting as the same OS user or provide filesystem compare-and-swap.
 
 ## Evidence limits
 

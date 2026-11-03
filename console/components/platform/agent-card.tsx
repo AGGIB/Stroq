@@ -4,24 +4,16 @@ import { Check } from 'lucide-react';
 import { AgentGlyph, Badge } from '@/components/platform-ui';
 import { AGENT_NAMES, AGENT_STATUS_REASONS, type AgentStatus } from '@/lib/agent-status';
 import { agentState } from '@/lib/agent-summary';
-import { credentialFilterTarget } from '@/lib/credential-filter-binding';
 import { hookCheckHref } from '@/lib/hook-check-navigation';
 import type { HookCheckEvidence } from '@/lib/hook-check-evidence';
-import type { CredentialFilterTarget } from '@/lib/credential-filters';
 import { SetupDialog } from './agent-setup';
 import { AgentDisconnect } from './agent-disconnect';
 import { LiveProofDialog } from './live-proof';
 import { HookCheckDialog } from './hook-check-dialog';
-import { CredentialFilters } from './credential-filters';
-import type { useCredentialFilters } from './use-credential-filters';
 export function AgentCard({
   agent,
   scope,
   onRefresh,
-  filters,
-  onWorkspaceScope,
-  selectedFilter,
-  onFilterSelection,
   generation,
   hookEvidence,
   hookHistoryLoading,
@@ -30,10 +22,6 @@ export function AgentCard({
   agent: AgentStatus;
   scope: 'project' | 'user';
   onRefresh: () => void;
-  filters: ReturnType<typeof useCredentialFilters>;
-  onWorkspaceScope: () => void;
-  selectedFilter: CredentialFilterTarget | null;
-  onFilterSelection: (target: CredentialFilterTarget | null) => void;
   generation: number;
   hookEvidence: HookCheckEvidence;
   hookHistoryLoading: boolean;
@@ -100,21 +88,6 @@ export function AgentCard({
             label="Test hook"
           />
         </div>
-      </div>
-      <div className="agent-row-controls">
-        {(agent.id === 'claude-code' || agent.id === 'cursor') && (
-          <CredentialFilters
-            agent={agent.id}
-            scope={scope}
-            filters={filters}
-            onWorkspaceScope={onWorkspaceScope}
-            onChanged={onRefresh}
-            linked={
-              selectedFilter !== null && selectedFilter === credentialFilterTarget(agent.id, scope)
-            }
-            onSelectionChange={onFilterSelection}
-          />
-        )}
       </div>
       <details className="agent-row-details">
         <summary>Details</summary>
