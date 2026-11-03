@@ -77,14 +77,17 @@ describe('what the key check keeps', () => {
     expect(readKeyCache(home)).toEqual(NO_KEY_CACHE);
   });
 
-  it('is private: the folder 0700, the file 0600, and no temporary file left', () => {
-    write({ '/s/a.jsonl': entry() });
-    expect(statSync(cardKeysFileIn(home)).mode & 0o777).toBe(0o600);
-    expect(statSync(cardDirIn(home)).mode & 0o777).toBe(0o700);
-    expect(readdirSync(cardDirIn(home))).toEqual(['keys.json']);
-  });
+  it.skipIf(process.platform === 'win32')(
+    'is private: the folder 0700, the file 0600, and no temporary file left',
+    () => {
+      write({ '/s/a.jsonl': entry() });
+      expect(statSync(cardKeysFileIn(home)).mode & 0o777).toBe(0o600);
+      expect(statSync(cardDirIn(home)).mode & 0o777).toBe(0o700);
+      expect(readdirSync(cardDirIn(home))).toEqual(['keys.json']);
+    },
+  );
 
-  it('tightens a folder that was made too open', () => {
+  it.skipIf(process.platform === 'win32')('tightens a folder that was made too open', () => {
     mkdirSync(cardDirIn(home), { mode: 0o755 });
     chmodSync(cardDirIn(home), 0o755);
     write({ '/s/a.jsonl': entry() });

@@ -483,7 +483,7 @@ describe('a session that cannot be read at first', () => {
   const CANARY = 'stroq_canary_FAKEcanary0123456789abcdefABCDEF';
   const SALT = 'fakesalt0123456789';
 
-  it.skipIf(process.getuid?.() === 0)(
+  it.skipIf(process.platform === 'win32' || process.getuid?.() === 0)(
     'is read once it can be, and the canary in it is found',
     async () => {
       populate(m);

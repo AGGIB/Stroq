@@ -175,10 +175,19 @@ describe('stroq sent reads session text in linear time', () => {
     ['relative ends', repeat('x/')],
     ['folders changed to', repeat('cd a; ')],
     ['copies', repeat('cp /w/x.sh /w/y ')],
-  ] as const)('a command that names a file the AI wrote: %s', (_name, shape) => {
-    gate((text) => fileUse(`${text} /w/x.sh`, '/w/x.sh', KEY, ctx), shape);
-    gate((text) => fileUse(`${text} x.sh`, '/w/x.sh', KEY, { ...ctx, cwds: ['/a', '/b'] }), shape);
-  });
+  ] as const)(
+    'a command that names a file the AI wrote: %s',
+    (_name, shape) => {
+      gate((text) => fileUse(`${text} /w/x.sh`, '/w/x.sh', KEY, ctx), shape);
+      gate(
+        (text) => fileUse(`${text} x.sh`, '/w/x.sh', KEY, { ...ctx, cwds: ['/a', '/b'] }),
+        shape,
+      );
+    },
+    // Linear, but every `cd` of 'folders changed to' is a stage the reader follows: about a second at 16 KiB,
+    // and over the 30 s default under coverage on Node 22 and on Windows.
+    120_000,
+  );
 
   it.each([
     ['copies of copies', repeat('cp /w/f /w/f')],

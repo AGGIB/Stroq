@@ -146,8 +146,9 @@ describe('stroq card', () => {
     });
     expect(code).toBe(0);
     expect(out).toContain('Hoo found no agent sessions in the last 30 days.');
-    expect(out).toContain('.claude/projects');
-    expect(out).toContain('.codex/sessions');
+    // Either separator: on Windows the folders are printed as the system spells them.
+    expect(out).toMatch(/\.claude[\\/]projects/);
+    expect(out).toMatch(/\.codex[\\/]sessions/);
   });
 
   it('has its own --help', () => {

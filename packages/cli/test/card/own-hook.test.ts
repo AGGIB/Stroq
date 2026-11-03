@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -15,7 +15,9 @@ let installed: string;
 let project: string;
 
 beforeEach(() => {
-  root = mkdtempSync(join(tmpdir(), 'stroq-own-hook-'));
+  // The long name of the folder: a runner's temporary folder on Windows is spelled with 8.3 names (`RUNNER~1`), and
+  // a path with `~` in it is never taken for Stroq's own.
+  root = realpathSync.native(mkdtempSync(join(tmpdir(), 'stroq-own-hook-')));
   home = join(root, 'stroq-home');
   entry = join(home, 'cli', '0.30.0', 'index.js');
   installed = join(root, 'lib', 'node_modules', '@stroq', 'cli', 'dist', 'index.js');

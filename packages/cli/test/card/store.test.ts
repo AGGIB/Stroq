@@ -88,8 +88,11 @@ describe('the session cache', () => {
     );
     const back = readSessionCache(m.stroqHome);
     expect([...back.keys()].sort()).toEqual(['/a.jsonl', '/b.jsonl']);
-    expect(statSync(cardDirIn(m.stroqHome)).mode & 0o777).toBe(0o700);
-    expect(statSync(cardSessionsFileIn(m.stroqHome)).mode & 0o777).toBe(0o600);
+    // Windows has no mode bits to read; the folder and file are the user's by its own access lists.
+    if (process.platform !== 'win32') {
+      expect(statSync(cardDirIn(m.stroqHome)).mode & 0o777).toBe(0o700);
+      expect(statSync(cardSessionsFileIn(m.stroqHome)).mode & 0o777).toBe(0o600);
+    }
   });
 
   it('leaves no temporary file behind', () => {
@@ -171,7 +174,7 @@ describe('the session cache', () => {
     expect(readdirSync(elsewhere)).toEqual([]);
   });
 
-  it('closes a folder that was left open to others', () => {
+  it.skipIf(process.platform === 'win32')('closes a folder that was left open to others', () => {
     mkdirSync(cardDirIn(m.stroqHome), { recursive: true, mode: 0o777 });
     chmodSync(cardDirIn(m.stroqHome), 0o755);
     writeSessionCache(m.stroqHome, new Map([['/a.jsonl', entry('a')]]));
@@ -193,7 +196,8 @@ describe('the last card', () => {
     const read = readLastCard(m.stroqHome);
     expect(read.kind).toBe('card');
     if (read.kind === 'card') expect(read.card.moments.map((x) => x.n)).toEqual([1, 2]);
-    expect(statSync(cardLastFileIn(m.stroqHome)).mode & 0o777).toBe(0o600);
+    if (process.platform !== 'win32')
+      expect(statSync(cardLastFileIn(m.stroqHome)).mode & 0o777).toBe(0o600);
   });
 
   it('reads as none when there is no file, and as unreadable when it is not a card', () => {
