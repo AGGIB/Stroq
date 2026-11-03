@@ -41,6 +41,7 @@ function scrubMoment(moment: ToldMoment, scrub: Scrub): ToldMoment {
     read: {
       ...moment.read,
       source: scrub(moment.read.source),
+      ...(moment.read.name === undefined ? {} : { name: scrub(moment.read.name) }),
       excerpt: scrub(moment.read.excerpt),
     },
   };

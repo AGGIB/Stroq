@@ -18,8 +18,14 @@ export const AGENTS = ['claude-code', 'codex'] as const;
 export type CardAgent = (typeof AGENTS)[number];
 const agent = z.enum(AGENTS);
 
-/** What a flagged text said and where the agent read it. */
-const readSchema = z.object({ tool: text, source: text, at: text, excerpt: text }).strict();
+/**
+ * What a flagged text said and where the agent read it. `source` is the longest form of it the replay
+ * had, and `name` the name of the file when that form was whole (see `read-name.ts`); a summary that
+ * has no `name` does not know it.
+ */
+const readSchema = z
+  .object({ tool: text, source: text, name: text.optional(), at: text, excerpt: text })
+  .strict();
 
 /** One command a text told the agent to run, as a session summary keeps it. */
 export const toldMomentSchema = z

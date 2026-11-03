@@ -11,6 +11,7 @@ import type { AutorunItem, AutorunRepo } from './autorun.js';
 import { KEPT } from './data.js';
 import { keyMoments, type PlacedFinding } from './key-moments.js';
 import { pasteable, sessionRows, withTranscript, type SessionPlace } from './moment-parts.js';
+import { FILE_TOOL, readSourceOf } from './read-name.js';
 import type { Moment, ToldMoment } from './schema.js';
 import { clean, shortPath } from './text.js';
 
@@ -44,13 +45,15 @@ const SHAPE_RANK: Readonly<Record<ToldMoment['shape'], number>> = {
 };
 
 const WEB_TOOL = /^(?:WebFetch|WebSearch)$|^mcp__.*(?:fetch|browser|web|crawl|scrape|search)/i;
-const FILE_TOOL = /^(?:Read|Grep|Glob)$/;
 
 /** Where the text came from, as the subject of the sentence. */
 function subjectOf(read: ToldMoment['read']): string {
   if (WEB_TOOL.test(read.tool)) return 'A web page';
   if (FILE_TOOL.test(read.tool)) {
-    const name = read.source.slice(read.source.lastIndexOf('/') + 1);
+    // `name` is set when the whole path was in hand. A summary without one (an older cache) is read the
+    // same way from its source, which names a file only if that is short enough to be whole: the last
+    // piece of a cut path is a folder or half a file.
+    const name = read.name ?? readSourceOf(read.tool, read.source, undefined).name ?? '';
     return name === '' || name.length > 40 ? 'A file' : clean(name, 40);
   }
   if (isShellTool(read.tool)) return 'The output of a command';
@@ -76,6 +79,11 @@ const POLICY_WORDS: Readonly<Record<ToldMoment['decision'], string>> = {
   none: 'have no rule for it',
 };
 
+/** Where it was read: a file path keeps its end, where the file is; anything else keeps its start. */
+function whereOf(read: ToldMoment['read'], home: string): string {
+  return FILE_TOOL.test(read.tool) ? shortPath(read.source, home, 120) : clean(read.source, 120);
+}
+
 function toldMoment({ moment, session }: ToldInput, home: string): Omit<Moment, 'n'> {
   const read = moment.read;
   return {
@@ -89,7 +97,7 @@ function toldMoment({ moment, session }: ToldInput, home: string): Omit<Moment, 
         title: 'What your agent read',
         rows: [
           ['Tool', clean(read.tool, 60)],
-          ['Where', clean(read.source, 120)],
+          ['Where', whereOf(read, home)],
           ['When', when(read.at)],
           ['It said', clean(read.excerpt, 160)],
         ],

@@ -96,7 +96,10 @@ function sameSource(summary: string, source: string): boolean {
 }
 
 /** The `post` entry that recorded a read, when the log still holds it. */
-function findRead(entries: readonly AuditEntry[], ev: ProvenanceEvidence): AuditEntry | null {
+export function findRead(
+  entries: readonly AuditEntry[],
+  ev: Pick<ProvenanceEvidence, 'tool' | 'source' | 'at'>,
+): AuditEntry | null {
   const candidates = entries.filter(
     (e) => e.phase === 'post' && e.tool === ev.tool && sameSource(e.summary, ev.source),
   );
@@ -139,7 +142,7 @@ export function buildReplay(allEntries: readonly AuditEntry[], sessionId: string
         source,
         at,
         suspect,
-        read: findRead(entries, { tool, source, at, suspect, kind: 'url', excerpt: '' }),
+        read: findRead(entries, { tool, source, at }),
         consequences: list,
       },
       list,

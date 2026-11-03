@@ -120,7 +120,8 @@ export interface AuditEntry extends AuditEntryInput {
 }
 
 export const GENESIS_HASH = '0'.repeat(64);
-const MAX_SUMMARY = 300;
+/** The longest a summary is kept in the audit; a longer command or path is cut at this length. */
+export const MAX_AUDIT_SUMMARY = 300;
 const PRIVATE_FILE_MODE = 0o600;
 const PRIVATE_DIR_MODE = 0o700;
 const MAX_HEAD_CACHE = 64;
@@ -299,7 +300,7 @@ export class AuditLog {
         before !== null && cached?.fingerprint === before.fingerprint
           ? cached.last
           : (await this.readAll()).at(-1);
-      const summary = redact(input.summary).slice(0, MAX_SUMMARY);
+      const summary = redact(input.summary).slice(0, MAX_AUDIT_SUMMARY);
       const { approvalReview, approvalRequest, mcpCallControl, ...ordinary } = input;
       const callControl = finiteCallControl(mcpCallControl);
       // Do not retain a signature over review text changed by the audit's final

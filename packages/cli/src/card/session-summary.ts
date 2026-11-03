@@ -6,12 +6,13 @@
 // key file is read, and nothing runs. A session with no shell command is not replayed at all: it has
 // nothing to count, and replaying is the whole cost.
 import { isShellTool, type AuditEntry } from '@stroq/core';
-import { replayTranscript } from '../commands/replay.js';
+import { findRead, replayTranscript } from '../commands/replay.js';
 import { readCodexRollout } from '../sent/codex.js';
 import { readTranscript, type Transcript } from '../replay/transcript.js';
 import { declaredPackages } from './declared-packages.js';
 import { leanTranscript } from './lean.js';
 import type { DeclaredPackages } from './package-claims.js';
+import { readSourceOf } from './read-name.js';
 import { hourOf, hoursOf } from './hours.js';
 import {
   MAX_TOLD_PER_SESSION,
@@ -50,7 +51,30 @@ function lazily(read: () => DeclaredPackages): DeclaredPackages {
   };
 }
 
-function momentOf(entry: AuditEntry, link: NonNullable<ReturnType<typeof strictLink>>): ToldMoment {
+type Link = NonNullable<ReturnType<typeof strictLink>>;
+
+/**
+ * Where the text was read, and the file's name when the path is whole. A provenance record keeps the
+ * first 120 characters of a read's source; the audit entry of the read, which the replay also made,
+ * keeps 300. The longer form is what names the file (see `read-name.ts`); the records are not changed.
+ */
+function readOf(link: Link, entries: readonly AuditEntry[]): ToldMoment['read'] {
+  const { evidence } = link;
+  const { source, name } = readSourceOf(
+    evidence.tool,
+    evidence.source,
+    findRead(entries, evidence)?.summary,
+  );
+  return {
+    tool: evidence.tool,
+    source,
+    ...(name === undefined ? {} : { name }),
+    at: evidence.at,
+    excerpt: evidence.excerpt,
+  };
+}
+
+function momentOf(entry: AuditEntry, link: Link, entries: readonly AuditEntry[]): ToldMoment {
   const effect = entry.decision?.effect;
   return {
     shape: link.shape,
@@ -59,12 +83,7 @@ function momentOf(entry: AuditEntry, link: NonNullable<ReturnType<typeof strictL
     command: entry.summary,
     at: entry.ts,
     decision: effect === 'allow' || effect === 'ask' || effect === 'deny' ? effect : 'none',
-    read: {
-      tool: link.evidence.tool,
-      source: link.evidence.source,
-      at: link.evidence.at,
-      excerpt: link.evidence.excerpt,
-    },
+    read: readOf(link, entries),
   };
 }
 
@@ -99,7 +118,7 @@ export async function summarizeTranscript(
   const declared = lazily(() =>
     deps.declared === undefined ? declaredPackages(transcript.cwd) : deps.declared(transcript.cwd),
   );
-  const moments: ToldMoment[] = [];
+  const kept: { readonly entry: AuditEntry; readonly link: Link }[] = [];
   const toldHours: (number | null)[] = [];
   for (const entry of entries) {
     if (entry.phase !== 'pre' || entry.sessionId !== transcript.sessionId) continue;
@@ -107,9 +126,11 @@ export async function summarizeTranscript(
     if (link === null) continue;
     toldHours.push(hourOf(entry.ts));
     // The newest are kept: a window cuts the old end of a session off.
-    moments.push(momentOf(entry, link));
-    if (moments.length > MAX_TOLD_PER_SESSION) moments.shift();
+    kept.push({ entry, link });
+    if (kept.length > MAX_TOLD_PER_SESSION) kept.shift();
   }
+  // Only the kept ones are looked up in the log: a session can have a great many told commands.
+  const moments = kept.map(({ entry, link }) => momentOf(entry, link, entries));
   return {
     ...base,
     told: toldHours.length,
