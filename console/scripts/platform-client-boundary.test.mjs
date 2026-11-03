@@ -94,14 +94,9 @@ async function client(t) {
   };
 }
 
-test('the actual client can reach implemented session-taint and hook-check operations', async (t) => {
+test('the actual client can reach the implemented hook-check operations', async (t) => {
   const f = await client(t);
   const operations = [
-    ['/api/session-taint'],
-    ['/api/session-taint/inspect', { id: 'fixture', expectedEvidenceSha: 'fixture' }],
-    ['/api/session-taint/preview', { expectedRevisionSha256: 'fixture' }],
-    ['/api/session-taint/clear', { previewId: 'fixture' }],
-    ['/api/session-taint/recheck', { recordId: 'fixture' }],
     ['/api/hook-checks'],
     ['/api/hook-checks/preview', { agent: 'claude-code' }],
     ['/api/hook-checks/start', { previewId: 'fixture' }],
@@ -142,60 +137,18 @@ test('the actual client refuses unbounded paths without sending the private toke
   assert.equal(operationCalls(f).length, 0);
 });
 
-test('workspace task file controls use finite recovery errors without forwarding server text', async (t) => {
+test('the actual client does not send its token to the routes of the pages the console no longer has', async (t) => {
   const f = await client(t);
-  for (const [code, expected] of [
-    ['recovery-full', /Recovery storage is full/],
-    ['recovery-required', /Recheck the previous change/],
-    ['unsupported-task-config', /cannot be safely edited automatically/],
-    ['no-automatic-tasks', /No supported automatic task triggers/],
-    ['history-unavailable', /Recovery storage could not be verified/],
-  ]) {
-    f.fail(code, 503);
-    await assert.rejects(f.request('/api/workspace-task-controls/preview', {}), expected);
-  }
-  f.fail('PRIVATE_SERVER_DETAIL', 503);
-  await assert.rejects(
-    f.request('/api/workspace-task-controls/preview', {}),
-    (error) => !error.message.includes('PRIVATE_SERVER_DETAIL'),
-  );
-});
-
-test('taint controls show scoped finite errors and never raw session or storage details', async (t) => {
-  const f = await client(t);
-  for (const [code, expected] of [
-    ['stale-state', /session state changed.*fresh preview/],
-    ['not-tainted', /No stored session taint/],
-    ['provenance-unavailable', /Learned-origin state could not be verified/],
-    ['write-unconfirmed', /Clear completion is unknown.*recorded change/],
-    ['recovery-full', /private recovery limit/],
-  ]) {
-    f.fail(code);
-    await assert.rejects(f.request('/api/session-taint/clear', { previewId: 'fixture' }), expected);
-  }
-  f.fail('/PRIVATE/session-raw/provenance', 503);
-  await assert.rejects(
-    f.request('/api/session-taint/inspect', {}),
-    (error) => !error.message.includes('PRIVATE') && !error.message.includes('session-raw'),
-  );
-});
-
-test('only exact finite taint refusal codes and statuses carry a no-write error identity', async (t) => {
-  const f = await client(t);
-  f.fail('stale-state', 409);
-  await assert.rejects(
-    f.request('/api/session-taint/clear', { previewId: 'fixture' }),
-    (error) => error.code === 'stale-state' && error.status === 409,
-  );
-  for (const [code, status] of [
-    ['stale-state', 500],
-    ['write-unconfirmed', 422],
-    ['PRIVATE', 409],
-  ]) {
-    f.fail(code, status);
-    await assert.rejects(
-      f.request('/api/session-taint/clear', { previewId: 'fixture' }),
-      (error) => error.code === undefined && error.status === undefined,
-    );
-  }
+  for (const path of [
+    '/api/session-taint',
+    '/api/session-taint/clear',
+    '/api/incident-assessments',
+    '/api/workspace-task-controls/apply',
+    '/api/workspace-review/check',
+    '/api/workspace-monitor',
+    '/api/inventory-monitor/apply',
+    '/api/secrets/start',
+  ])
+    await assert.rejects(f.request(path, {}), { message: 'Unsupported local operation.' }, path);
+  assert.equal(operationCalls(f).length, 0);
 });
