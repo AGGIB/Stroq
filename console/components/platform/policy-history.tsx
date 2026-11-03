@@ -93,9 +93,6 @@ export function PolicyHistoryPage() {
                   Recorded {new Date(receipt.restoredAt).toLocaleString('en-GB')}. Restart running
                   proxies; existing tasks keep their launch policy.
                 </p>
-                <Link className="inline-link" href="/agents/tasks/">
-                  Review task permissions <ArrowRight size={14} aria-hidden="true" />
-                </Link>
                 <details className="live-details">
                   <summary>Restore receipt</summary>
                   <p className="control-meta">

@@ -7,7 +7,6 @@ import { Badge, Panel } from '@/components/platform-ui';
 import { protectionEvidenceRows, type ProtectionEvidenceRow } from '@/lib/protection-evidence';
 import { mcpContainmentRows } from '@/lib/mcp-containment-queue';
 import { policyCaseRows } from '@/lib/policy-cases-queue';
-import { taskLockRows } from '@/lib/task-lock-queue';
 import { workspaceReviewRows } from '@/lib/workspace-review-queue';
 import { workspaceTaskRows } from '@/lib/workspace-task-queue';
 import { workspaceMonitorRows } from '@/lib/workspace-monitor-queue';
@@ -53,7 +52,6 @@ export function ProtectionQueue({ refreshKey }: { refreshKey?: string }) {
     mcpGovernanceUnresolved,
     unconfirmedMcpGovernance,
     policyCases,
-    taskLocks,
     workspaceReview,
     workspaceTasks,
     workspaceMonitor,
@@ -87,7 +85,6 @@ export function ProtectionQueue({ refreshKey }: { refreshKey?: string }) {
   rows.push(...mcpCallControlPendingRows(unconfirmedMcpCallControls, mcpCallControls, workspaceId));
   if (!loading || mcpCallControls) rows.push(...mcpCallControlRows(mcpCallControls, workspaceId));
   if (!loading || policyCases) rows.push(...policyCaseRows(policyCases, workspaceId));
-  if (!loading || taskLocks) rows.push(...taskLockRows(taskLocks, workspaceId));
   if (!loading || workspaceReview) rows.push(...workspaceReviewRows(workspaceReview, workspaceId));
   if (!loading || workspaceTasks) rows.push(...workspaceTaskRows(workspaceTasks, workspaceId));
   if (!loading || workspaceMonitor)

@@ -12,8 +12,8 @@ const closed = (v, keys) =>
   keys.every((key) => Object.hasOwn(v, key));
 
 /** Resolve only after termination, so the caller's real configuration lock outlives all writes. */
-export async function executeTaskLock(operation, input, options) {
-  const file = options.workerPath ?? runtimeLayout().adapter('task-lock-worker.js');
+export async function executeWorker(operation, input, options) {
+  const file = options.workerPath ?? runtimeLayout().adapter('session-taint-engine.js');
   try {
     const stat = await lstat(file);
     if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1 || stat.size > 16 * 1024 * 1024)
@@ -37,7 +37,7 @@ export async function executeTaskLock(operation, input, options) {
       try {
         if (worker) await worker.terminate();
       } catch {
-        error = new Error('task-lock-failed');
+        error = new Error('worker-failed');
       }
       if (error) reject(error);
       else resolve(value);
@@ -68,7 +68,7 @@ export async function executeTaskLock(operation, input, options) {
     };
     worker.stdout.on('data', count);
     worker.stderr.on('data', count);
-    worker.once('error', () => void finish(new Error('task-lock-failed')));
+    worker.once('error', () => void finish(new Error('worker-failed')));
     worker.once('exit', () => void finish(new Error('invalid-report')));
     worker.on('message', (message) => {
       try {

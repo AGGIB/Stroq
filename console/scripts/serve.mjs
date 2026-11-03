@@ -34,8 +34,6 @@ import { createAgentStatus } from './agent-status.mjs';
 import { createIncidentService } from './incidents.mjs';
 import { createIncidentAssessmentService, routeIncidentAssessments } from './incidents-worker.mjs';
 import { createHookCheckService } from './hook-check-service.mjs';
-import { createTaskLockService } from './task-lock-service.mjs';
-import { createTaskAccessService } from './task-access-service.mjs';
 import { createWorkspaceReviewService } from './workspace-review-service.mjs';
 import {
   createWorkspaceMonitorControl,
@@ -179,8 +177,6 @@ export async function startServer({
   incidents: suppliedIncidents,
   incidentAssessments: suppliedIncidentAssessments,
   hookChecks: suppliedHookChecks,
-  taskLocks: suppliedTaskLocks,
-  taskAccess: suppliedTaskAccess,
   workspaceReview: suppliedWorkspaceReview,
   workspaceTasks: suppliedWorkspaceTasks,
   sessionTaint: suppliedSessionTaint,
@@ -282,13 +278,6 @@ export async function startServer({
             : Promise.resolve({ status: 503, body: { error: 'inventory-unavailable' } }),
       },
     }));
-  const taskLocks =
-    suppliedTaskLocks ??
-    (await createTaskLockService({
-      ...context,
-      workspaceId,
-      selectEvidence: (request) => incidents.selectForComparison(request),
-    }));
   const sessionTaint =
     suppliedSessionTaint ??
     (await createSessionTaintControl({
@@ -297,13 +286,6 @@ export async function startServer({
       selectEvidence: (request) => incidents.selectForComparison(request),
     }));
   const secrets = suppliedSecrets ?? (await createSecretScanService(context));
-  const taskAccess =
-    suppliedTaskAccess ??
-    (await createTaskAccessService({
-      ...context,
-      workspaceId,
-      selectEvidence: (request) => incidents.selectForComparison(request),
-    }));
   const comparisons =
     suppliedComparisons ??
     createIncidentRecheckService({
@@ -361,7 +343,6 @@ export async function startServer({
           parsed.path === '/api/agents' ||
           parsed.path.startsWith('/api/incidents') ||
           parsed.path.startsWith('/api/hook-checks') ||
-          parsed.path.startsWith('/api/task-locks') ||
           parsed.path.startsWith('/api/workspace-review') ||
           parsed.path.startsWith('/api/secrets')
         ) {
@@ -369,8 +350,6 @@ export async function startServer({
             agents,
             incidents,
             hookChecks,
-            taskLocks,
-            taskAccess,
             workspaceReview,
             secrets,
             comparisons,
@@ -580,8 +559,6 @@ export async function startServer({
           incidents,
           incidentAssessments,
           hookChecks,
-          taskLocks,
-          taskAccess,
           workspaceReview,
           workspaceTasks,
           sessionTaint,

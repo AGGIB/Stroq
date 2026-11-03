@@ -1,16 +1,9 @@
 import { jsonAction } from './control-http.mjs';
-import { routeTaskAccess } from './task-access-http.mjs';
-import { parseTaskLockPageJson } from './task-lock-pages.mjs';
 import { parseFixedControlJson } from './workspace-monitor-bridge.mjs';
 const ERROR_STATUS = new Map([
-  ['task-lock-busy', 409],
-  ['task-page-stale', 409],
-  ['task-page-expired', 409],
-  ['task-lookup-limit', 422],
   ['runtime-unavailable', 503],
   ['context-unavailable', 503],
   ['platform-unsupported', 422],
-  ['task-lock-failed', 503],
   ['invalid-report', 503],
   ['unsafe-source', 503],
   ['invalid-request', 400],
@@ -49,7 +42,7 @@ export async function routeOperational(
   req,
   path,
   origin,
-  { agents, incidents, secrets, comparisons, hookChecks, taskLocks, taskAccess, workspaceReview },
+  { agents, incidents, secrets, comparisons, hookChecks, workspaceReview },
 ) {
   if (path === '/api/workspace-review')
     return req.method === 'GET' ? evidence(() => workspaceReview.getState()) : noMethod();
@@ -64,31 +57,6 @@ export async function routeOperational(
       req,
       origin,
       (input) => workspaceReview[path.slice('/api/workspace-review/'.length)](input),
-      4096,
-    );
-  if (path.startsWith('/api/task-locks/access/'))
-    return routeTaskAccess(req, path, origin, taskAccess);
-  if (path === '/api/task-locks')
-    return req.method === 'GET' ? evidence(() => taskLocks.getState()) : noMethod();
-  if (path === '/api/task-locks/page') {
-    if (
-      req.url?.includes('?') ||
-      (req.method === 'GET' &&
-        (req.headers['transfer-encoding'] !== undefined ||
-          (req.headers['content-length'] !== undefined && req.headers['content-length'] !== '0')))
-    ) {
-      req.resume();
-      return { status: 400, body: { error: 'invalid-request' } };
-    }
-    return req.method === 'GET'
-      ? evidence(() => taskLocks.getPage())
-      : jsonAction(req, origin, (input) => taskLocks.page(input), 4096, parseTaskLockPageJson);
-  }
-  if (['/api/task-locks/preview', '/api/task-locks/apply'].includes(path))
-    return jsonAction(
-      req,
-      origin,
-      (input) => taskLocks[path.slice('/api/task-locks/'.length)](input),
       4096,
     );
   if (path === '/api/hook-checks')
@@ -132,8 +100,6 @@ export async function routeOperational(
   }
   if (path === '/api/incidents/compare')
     return jsonAction(req, origin, (input) => evidence(() => comparisons.compare(input)), 4096);
-  if (path === '/api/incidents/task')
-    return jsonAction(req, origin, (input) => taskLocks.relateIncident(input), 4096);
   if (path === '/api/secrets')
     return req.method === 'GET' ? evidence(() => secrets.getState()) : noMethod();
   if (path.startsWith('/api/secrets/jobs/')) {

@@ -50,6 +50,10 @@ await build({
 });
 const { PlatformProvider, effects } = await import(pathToFileURL(join(output, 'client.mjs')).href);
 
+/** The operations a test asked for; the provider also reads its own snapshot and workspace context. */
+const operationCalls = (f) =>
+  f.calls.filter((call) => !['/api/snapshot', '/api/context'].includes(call.path));
+
 /** Exercises the actual provider callback, with React lifecycle and transport stubs. */
 async function client(t) {
   const globals = ['window', 'sessionStorage', 'fetch'].map((key) => [
@@ -90,7 +94,7 @@ async function client(t) {
   };
 }
 
-test('the actual client can reach implemented task, hook-check and incident operations', async (t) => {
+test('the actual client can reach implemented session-taint and hook-check operations', async (t) => {
   const f = await client(t);
   const operations = [
     ['/api/session-taint'],
@@ -98,19 +102,6 @@ test('the actual client can reach implemented task, hook-check and incident oper
     ['/api/session-taint/preview', { expectedRevisionSha256: 'fixture' }],
     ['/api/session-taint/clear', { previewId: 'fixture' }],
     ['/api/session-taint/recheck', { recordId: 'fixture' }],
-    ['/api/task-locks'],
-    ['/api/task-locks/page'],
-    ['/api/task-locks/page', { cursor: '11111111-1111-4111-8111-111111111111' }],
-    [
-      '/api/task-locks/page',
-      { id: `task-${'a'.repeat(64)}`, expectedPermitSha256: 'b'.repeat(64) },
-    ],
-    ['/api/task-locks/preview', { id: 'fixture' }],
-    ['/api/task-locks/apply', { previewId: 'fixture' }],
-    ['/api/task-locks/access/preview', { id: 'fixture' }],
-    ['/api/task-locks/access/issue', { previewId: 'fixture' }],
-    [`/api/task-locks/access/task-${'a'.repeat(64)}/${'b'.repeat(64)}`],
-    ['/api/incidents/task', { id: 'fixture' }],
     ['/api/hook-checks'],
     ['/api/hook-checks/preview', { agent: 'claude-code' }],
     ['/api/hook-checks/start', { previewId: 'fixture' }],
@@ -128,43 +119,30 @@ test('the actual client can reach implemented task, hook-check and incident oper
     assert.equal(call.cache, 'no-store');
     assert.equal(call.body, input === undefined ? undefined : JSON.stringify(input));
   }
-  assert.equal(f.calls.length, operations.length);
+  assert.equal(operationCalls(f).length, operations.length);
 });
 
 test('the actual client refuses unbounded paths without sending the private token', async (t) => {
   const f = await client(t);
   for (const path of [
-    'https://foreign.invalid/api/task-locks',
-    '//foreign.invalid/api/task-locks',
-    '/api/task-locks/access/issue?token=private',
-    '/api/task-locks/access/../issue',
-    '/api/task-locks/page?cursor=private',
-    '/api/task-locks/page/extra',
+    'https://foreign.invalid/api/hook-checks',
+    '//foreign.invalid/api/hook-checks',
+    '/api/task-locks',
+    '/api/task-locks/page',
+    '/api/task-locks/access/issue',
+    '/api/live/start',
+    '/api/credential-filters/apply',
+    '/api/threats',
     '/api/hook-checks/jobs/../../private',
     '/api/session-taint/clear?session=private',
     '/api/session-taint/../clear',
     '/api/session-taint/all',
   ])
     await assert.rejects(f.request(path), { message: 'Unsupported local operation.' });
-  assert.equal(f.calls.length, 0);
+  assert.equal(operationCalls(f).length, 0);
 });
 
-test('task page gaps use finite recovery messages without exposing private cursor details', async (t) => {
-  const f = await client(t);
-  for (const [code, expected] of [
-    ['task-page-stale', /catalog changed.*first page/],
-    ['task-page-expired', /page link expired.*first page/],
-    ['task-lookup-limit', /catalog limit.*absence/],
-  ]) {
-    f.fail(code);
-    await assert.rejects(
-      f.request('/api/task-locks/page', { cursor: '11111111-1111-4111-8111-111111111111' }),
-      expected,
-    );
-  }
-});
-
-test('task file controls use finite recovery errors without forwarding server text', async (t) => {
+test('workspace task file controls use finite recovery errors without forwarding server text', async (t) => {
   const f = await client(t);
   for (const [code, expected] of [
     ['recovery-full', /Recovery storage is full/],
@@ -218,23 +196,6 @@ test('only exact finite taint refusal codes and statuses carry a no-write error 
     await assert.rejects(
       f.request('/api/session-taint/clear', { previewId: 'fixture' }),
       (error) => error.code === undefined && error.status === undefined,
-    );
-  }
-});
-
-test('uncertain writes and unavailable signed evidence have fixed actionable errors', async (t) => {
-  const f = await client(t);
-  for (const [code, expected] of [
-    ['write-unconfirmed', /completion is unknown.*Recheck existing permissions/],
-    ['legacy-refusal', /No signed request is available/],
-    ['permission-active', /extension file already exists/],
-    ['signing-key-unavailable', /signing key is unavailable/],
-    ['task-unavailable', /current task permit is unavailable/],
-  ]) {
-    f.fail(code);
-    await assert.rejects(
-      f.request('/api/task-locks/access/issue', { previewId: 'fixture' }),
-      expected,
     );
   }
 });

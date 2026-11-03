@@ -157,9 +157,6 @@ function render(
           SessionTaintPanel: wrapper('session-taint-panel'),
           SessionTaintDialog: wrapper('session-taint-dialog'),
         };
-      if (name === './use-incident-task')
-        return { useIncidentTask: () => ({ getReport: () => null }) };
-      if (name === './use-task-access') return { useTaskAccess: () => ({}) };
       if (name === './use-incident-recorded-evidence')
         return { useIncidentRecordedEvidence: () => ({ getReport: () => null }) };
       if (name === './incident-recorded-evidence')

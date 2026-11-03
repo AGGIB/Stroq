@@ -7,10 +7,6 @@ import type { Incident, JournalVerification } from '@/lib/incidents';
 import type { IncidentComparison } from '@/lib/incident-comparison';
 import { IncidentComparisonPanel } from './incident-comparison';
 import { IncidentLink } from './incident-link';
-import { IncidentTask } from './incident-task';
-import { useIncidentTask } from './use-incident-task';
-import { useTaskAccess } from './use-task-access';
-import { TaskAccessDialog, TaskAccessTrigger } from './task-access';
 import { useSessionTaint } from './use-session-taint';
 import { SessionTaintDialog, SessionTaintPanel } from './session-taint';
 import { IncidentAssessmentDialog, IncidentAssessmentLine } from './incident-assessments';
@@ -48,8 +44,6 @@ export function IncidentDetailDialog({
   onCompare: (incident: Incident) => void;
   onReturnFocus: () => void;
 }) {
-  const taskRelation = useIncidentTask(selected);
-  const taskAccess = useTaskAccess(selected);
   const sessionTaint = useSessionTaint(selected);
   const recordedEvidence = useIncidentRecordedEvidence(selected);
   const clearingTaint = sessionTaint.busy === 'clear';
@@ -68,7 +62,6 @@ export function IncidentDetailDialog({
   }, [selected?.id]);
   return (
     <>
-      <TaskAccessDialog action={taskAccess} />
       <SessionTaintDialog action={sessionTaint} onReturnFocus={() => heading.current?.focus()} />
       <IncidentAssessmentDialog
         action={assessments}
@@ -114,17 +107,13 @@ export function IncidentDetailDialog({
                 <IncidentAssessmentLine action={assessments} disabled={locked} />
                 <div className="incident-detail-tools">
                   <IncidentLink href={href} />
-                  {selected.kind !== 'content-flag' && (
-                    <TaskAccessTrigger action={taskAccess} disabled={locked} />
-                  )}
                   <ExportButton
                     data={() => ({
-                      schema: 'stroq-investigation-export/4',
+                      schema: 'stroq-investigation-export/5',
                       source: 'local',
                       exportedAt: new Date().toISOString(),
                       incident: selected,
                       comparison,
-                      taskRelation: taskRelation.getReport(),
                       recordedEvidence: recordedEvidence.getReport(),
                       operatorAssessments: incidentAssessmentExport(
                         assessments.state,
@@ -161,7 +150,6 @@ export function IncidentDetailDialog({
                     </div>
                   )}
                 </dl>
-                <IncidentTask action={taskRelation} disabled={locked} />
                 <SessionTaintPanel action={sessionTaint} disabled={locked} />
                 {selected.kind !== 'content-flag' && (
                   <IncidentComparisonPanel

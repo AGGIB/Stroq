@@ -86,9 +86,6 @@ export function AgentsPage() {
             <Link href="/agents/hooks/" className="button subtle">
               Check history <ArrowRight size={16} />
             </Link>
-            <Link href="/agents/tasks/" className="button subtle">
-              Task permissions <ArrowRight size={16} />
-            </Link>
             {readAllowed && <SetupDialog scope={scope} onConfigured={refreshAll} />}
           </>
         }

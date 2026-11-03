@@ -1,9 +1,7 @@
 const JOB = '[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}';
-const TASK = 'task-[a-f0-9]{64}';
-const SHA = '[a-f0-9]{64}';
 const OPERATION = new RegExp(
   '^/api/(?:context|control|agents|(?:quarantine|mcp-containment)(?:/(?:preview|apply))?|' +
-    'incidents(?:/(?:review|verify|compare|task|evidence))?|' +
+    'incidents(?:/(?:review|verify|compare|evidence))?|' +
     'journal/(?:tail|summary|since)|posture|' +
     'incident-assessments(?:/(?:preview|apply|recheck))?|' +
     'session-taint(?:/(?:inspect|preview|clear|recheck))?|' +
@@ -15,7 +13,6 @@ const OPERATION = new RegExp(
     'mcp-call-controls(?:/(?:inspect|preview|apply|recheck))?|' +
     'mcp-governance(?:/(?:capture|preview|apply|recheck))?|' +
     `hook-checks(?:/(?:preview|start|cancel|jobs/${JOB}))?|` +
-    `task-locks(?:/(?:page|preview|apply|access/(?:preview|issue|${TASK}/${SHA})))?|` +
     `secrets(?:/(?:preview|start|cancel|jobs/${JOB}))?|runs(?:/(?:cancel|${JOB}))?|` +
     'inventory(?:/(?:review|inspect|compare|signals/(?:state|preview|apply)))?|agent-(?:setup|disconnect)(?:/(?:preview|apply))?|policy(?:/(?:preview|apply|try|history|restore/(?:preview|apply)|cases(?:/(?:save|remove))?))?)$',
 );

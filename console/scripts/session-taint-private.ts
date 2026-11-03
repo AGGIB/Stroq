@@ -1,6 +1,6 @@
 import { join, isAbsolute, resolve } from 'node:path';
 import { sessionKey, stableStringify } from '@stroq/core';
-import { hash, same } from './task-lock-files.ts';
+import { hash, same } from './session-taint-files.ts';
 import { validateSessionTaintInspection } from '../lib/session-taint.ts';
 import type { TaintOptions } from './session-taint-inspect.ts';
 

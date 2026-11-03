@@ -13,7 +13,7 @@ import {
   type SessionTaintInspection,
 } from '../lib/session-taint.ts';
 import { atomicWrite, rootIdentity, snapshotFile } from './agent-setup-files.mjs';
-import { hash, fail, same } from './task-lock-files.ts';
+import { hash, fail, same } from './session-taint-files.ts';
 import type { TaintBinding, TaintOptions } from './session-taint-inspect.ts';
 import { validTaintPrivate } from './session-taint-private.ts';
 

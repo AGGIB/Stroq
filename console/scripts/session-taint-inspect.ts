@@ -11,7 +11,7 @@ import {
   validateSessionTaintInspection,
   type SessionTaintInspection,
 } from '../lib/session-taint.ts';
-import { captureJournal } from './task-lock-inspect.ts';
+import { captureJournal } from './session-taint-journal.ts';
 import {
   directory,
   file,
@@ -26,7 +26,7 @@ import {
   type Location,
   type FileBinding,
   type FilePin,
-} from './task-lock-files.ts';
+} from './session-taint-files.ts';
 
 export interface TaintSelection {
   id: string;

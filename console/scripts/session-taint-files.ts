@@ -1,9 +1,8 @@
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { lstat, open, opendir, realpath } from 'node:fs/promises';
+import { lstat, open, realpath } from 'node:fs/promises';
 import { isAbsolute, join, resolve } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
-import { isTaskId } from '@stroq/core';
 
 export interface Pin {
   dev: string;
@@ -211,32 +210,4 @@ export async function marker(path: string): Promise<Marker> {
     if (missing(error)) return { kind: 'missing' };
     throw error;
   }
-}
-
-/** Only a bounded directory listing; no task ID from a browser ever becomes a path. */
-export async function taskNames(root: Location) {
-  if (root.tasksPin === null) return { names: [] as string[], limited: false };
-  const names: string[] = [];
-  let examined = 0,
-    limited = false;
-  const directory = await opendir(join(root.home, 'tasks'));
-  try {
-    for (;;) {
-      const entry = await directory.read();
-      if (entry === null) break;
-      if (++examined > 256) {
-        limited = true;
-        break;
-      }
-      if (!isTaskId(entry.name)) continue;
-      if (names.length === 64) {
-        limited = true;
-        break;
-      }
-      names.push(entry.name);
-    }
-  } finally {
-    await directory.close();
-  }
-  return { names: names.sort(), limited };
 }

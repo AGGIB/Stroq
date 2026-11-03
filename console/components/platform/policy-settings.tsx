@@ -192,9 +192,6 @@ export function PolicySettingsPage() {
             <Link className="inline-link" href={policyHistoryHref(receipt.receiptId)}>
               Review recovery options <ArrowRight size={14} aria-hidden="true" />
             </Link>
-            <Link className="inline-link" href="/agents/tasks/">
-              Review task permissions <ArrowRight size={14} />
-            </Link>
             {selection.incidentId && (
               <Link className="inline-link" href={returnHref}>
                 Recompare event

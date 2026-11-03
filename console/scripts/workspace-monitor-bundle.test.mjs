@@ -83,7 +83,7 @@ export const createWorkspaceReviewContext=async()=>{throw Error('must-use-suppli
     join(f.target, 'scripts/agent-configuration-lock.mjs'),
     'export const withAgentConfigurationLock=(_bound,action)=>action();',
   );
-  for (const name of ['runtime-layout.mjs', 'control-http.mjs', 'task-lock-runner.mjs'])
+  for (const name of ['runtime-layout.mjs', 'control-http.mjs', 'worker-runner.mjs'])
     await copyFile(join(scripts, name), join(f.target, 'scripts', name));
   const bytes = await readFile(join(f.target, '.local-engine/workspace-monitor-engine.js'), 'utf8');
   // Import statements only: a line that starts one, or the `}` that ends a multi-line one. A string in
@@ -97,7 +97,7 @@ export const createWorkspaceReviewContext=async()=>{throw Error('must-use-suppli
     'agent-configuration-lock',
     'runtime-layout',
     'control-http',
-    'task-lock-runner',
+    'worker-runner',
   ];
   assert.deepEqual(
     [...new Set(imports.filter((name) => !name.startsWith('node:')))].sort(),

@@ -10,7 +10,7 @@ New Activity event links retain `id=audit-N` and add `evidence=SHA`. The event v
 
 For a digest-bound local deny, approval requirement or suspect content observation, **Open investigation** in the page heading links to `status=all` and the exact `incident-SHA`. This also reaches an already Reviewed finding. Missing or rotated evidence remains unavailable rather than opening another finding. Allows have no incident handoff. Opening Activity adds no new scan or mutation. Local events do not show the illustrative Event trace or Next steps; the demo keeps its illustrative workflow.
 
-Local Activity no longer writes or reads its old browser-only Reviewed state, and local event export schema `stroq-activity-event-export/2` omits `reviewed`. Old source/sequence localStorage values are not migrated into durable review: they were not bound to a source version. Demo retains its separate synthetic browser review. Actual review and assessment remain in Investigations.
+Local Activity no longer writes or reads its old browser-only Reviewed state, and local event export schema `stroq-activity-event-export/2` omits `reviewed`. Old source/sequence localStorage values are not migrated into durable review: they were not bound to a source version. Actual review and assessment remain in Investigations.
 
 ## Recorded evidence
 
@@ -32,7 +32,7 @@ Each collection inspects at most **128 elements** and reports unsupported or exc
 
 Commands, content, tool names, source/excerpt text, arbitrary rule IDs/reasons, paths, raw session/call/task IDs and secret labels stay private. Origin counts describe recorded matches, not unique sources, proof of causation or why a model chose an action. A scanner score is not attack probability. Task labels establish neither a valid/current permit nor native enforcement. Historical taint, historical policy revision and host outcome are not reconstructed from current state.
 
-The compact panel shows classes and useful recorded counts; the detailed projection and limits are disclosed on demand. Current-policy simulation and current-session inspection keep their own labels and actions. Export schema `stroq-investigation-export/4` includes only the currently accepted recorded-evidence report, or null. Assessment history remains its separately scoped projection.
+The compact panel shows classes and useful recorded counts; the detailed projection and limits are disclosed on demand. Current-policy simulation and current-session inspection keep their own labels and actions. Export schema `stroq-investigation-export/5` includes only the currently accepted recorded-evidence report, or null. Assessment history remains its separately scoped projection.
 
 ## Lifecycle and retention
 

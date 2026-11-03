@@ -12,7 +12,6 @@ import { NOT_CONNECTED, type Snapshot } from '@/lib/connection';
 import { validateSnapshot } from '@/lib/snapshot';
 import { validateLocalContext, type LocalContext } from '@/lib/local-context';
 import { isLocalOperation } from '@/lib/local-operations';
-import { TASK_ACCESS_ERROR_MESSAGES } from '@/lib/task-access';
 import { WORKSPACE_REVIEW_ERROR_MESSAGES } from '@/lib/workspace-review-errors';
 import { WORKSPACE_MONITOR_ERROR_MESSAGES } from '@/lib/workspace-monitor-errors';
 import { WORKSPACE_TASK_ERROR_MESSAGES } from '@/lib/workspace-task-controls';
@@ -23,7 +22,6 @@ import { POLICY_HISTORY_ERROR_MESSAGES } from '@/lib/policy-history-errors';
 import { TRY_ERROR_MESSAGES } from '@/lib/try-action';
 import { JOURNAL_ERROR_MESSAGES } from '@/lib/journal-view';
 import { POSTURE_ERROR_MESSAGES } from '@/lib/posture';
-import { TASK_LOCK_PAGE_ERROR_MESSAGES } from '@/lib/task-lock-page';
 import { MCP_TOOL_CONTRACT_ERROR_MESSAGES } from '@/lib/mcp-tool-contracts';
 import { MCP_CALL_CONTROL_ERROR_MESSAGES } from '@/lib/mcp-call-controls';
 import { MCP_GOVERNANCE_ERROR_MESSAGES } from '@/lib/mcp-governance-client';
@@ -77,14 +75,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
         const errors: Record<string, string> = {
           'operation-unavailable':
             'Complete current evidence is unavailable. No result was accepted.',
-          'task-unavailable': 'This exact task permission is no longer available. Recheck tasks.',
-          'task-page-stale': 'The task catalog changed. Refresh the first page before continuing.',
-          'task-page-expired': 'This page link expired. Refresh the first page to continue.',
-          'task-lookup-limit':
-            "The task catalog limit was reached. The requested permission's absence is not established.",
-          'task-lock-busy': 'Another task permission change is running. Wait, then recheck.',
-          'task-lock-failed':
-            'Task permission state could not be verified. Recheck before another change.',
           'write-unconfirmed':
             'The write may have completed. Recheck current state before preparing another change.',
           'unsafe-source': 'A source or its file identity could not be verified. Recheck first.',
@@ -215,7 +205,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
           'write-failed':
             'The configuration could not be written. Recheck its state before retrying.',
         };
-        const accessErrors: Readonly<Record<string, string>> = TASK_ACCESS_ERROR_MESSAGES;
         const workspaceErrors: Readonly<Record<string, string>> = WORKSPACE_REVIEW_ERROR_MESSAGES;
         const workspaceTaskErrors: Readonly<Record<string, string>> = WORKSPACE_TASK_ERROR_MESSAGES;
         const policyHistoryErrors: Readonly<Record<string, string>> = POLICY_HISTORY_ERROR_MESSAGES;
@@ -242,7 +231,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
             (path === '/api/session-taint' || path.startsWith('/api/session-taint/')
               ? SESSION_TAINT_ERROR_MESSAGES[code as keyof typeof SESSION_TAINT_ERROR_MESSAGES]
               : undefined) ??
-            (path.startsWith('/api/task-locks/access/') ? accessErrors[code] : undefined) ??
             (path.startsWith('/api/mcp-tool-contracts')
               ? MCP_TOOL_CONTRACT_ERROR_MESSAGES[code]
               : undefined) ??
@@ -252,7 +240,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
             (path === '/api/mcp-governance' || path.startsWith('/api/mcp-governance/')
               ? MCP_GOVERNANCE_ERROR_MESSAGES[code as keyof typeof MCP_GOVERNANCE_ERROR_MESSAGES]
               : undefined) ??
-            (path === '/api/task-locks/page' ? TASK_LOCK_PAGE_ERROR_MESSAGES[code] : undefined) ??
             (path === '/api/policy/history' || path.startsWith('/api/policy/restore/')
               ? policyHistoryErrors[code]
               : undefined) ??

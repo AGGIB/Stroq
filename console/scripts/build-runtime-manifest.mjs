@@ -16,7 +16,7 @@ const ADAPTERS = [
   'policy-engine.js',
   'agent-status-engine.js',
   'hook-check-engine.js',
-  'task-lock-worker.js',
+  'session-taint-engine.js',
   'workspace-review-worker.js',
   'workspace-monitor-engine.js',
   'incidents-engine.js',
@@ -36,7 +36,7 @@ export function workspaceMonitorExternalPlugin() {
       build.onResolve(
         {
           filter:
-            /^\.\/(?:workspace-review-context|agent-setup-files|agent-configuration-lock|runtime-layout|control-http|task-lock-runner)\.mjs$/,
+            /^\.\/(?:workspace-review-context|agent-setup-files|agent-configuration-lock|runtime-layout|control-http|worker-runner)\.mjs$/,
         },
         (args) => {
           if (

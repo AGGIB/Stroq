@@ -148,10 +148,6 @@ function render(part: 'page' | 'detail', configure: (action: any) => void = () =
         ),
       IncidentAssessmentDialog: () => null,
     },
-    './use-incident-task': {
-      useIncidentTask: () => ({ getReport: () => ({ status: 'not-related' }) }),
-    },
-    './use-task-access': { useTaskAccess: () => ({}) },
     './use-session-taint': { useSessionTaint: () => ({ busy: action._taintBusy ?? null }) },
     './use-incident-recorded-evidence': {
       useIncidentRecordedEvidence: (value: unknown) => {
@@ -163,11 +159,9 @@ function render(part: 'page' | 'detail', configure: (action: any) => void = () =
       },
     },
     './incident-recorded-evidence': { IncidentRecordedEvidencePanel: () => null },
-    './task-access': { TaskAccessDialog: () => null, TaskAccessTrigger: () => null },
     './session-taint': { SessionTaintDialog: () => null, SessionTaintPanel: () => null },
     './incident-comparison': { IncidentComparisonPanel: () => null },
     './incident-link': { IncidentLink: () => null },
-    './incident-task': { IncidentTask: () => null },
   };
   const code = ts.transpileModule(
     readFileSync(
@@ -293,6 +287,7 @@ describe('joined operator assessment investigations', () => {
     expect(r.html).not.toContain('Risk accepted');
     const report = r.exports[0].props.data();
     expect(report.operatorAssessments.completionUnknown).toBe(true);
+    expect(report).not.toHaveProperty('taskRelation');
     expect(JSON.stringify(report)).not.toContain(assessmentPreview().id);
   });
   it('blocks finding/filter/close changes while an assessment is publishing', () => {
@@ -319,9 +314,10 @@ describe('joined operator assessment investigations', () => {
     });
     expect(r.html).toContain('Save unconfirmed');
     const report = r.exports[0].props.data();
-    expect(report.schema).toBe('stroq-investigation-export/4');
+    expect(report.schema).toBe('stroq-investigation-export/5');
     expect(report.operatorAssessments.records).toEqual([assessmentRecord()]);
     expect(report.operatorAssessments.completionUnknown).toBe(true);
+    expect(report).not.toHaveProperty('taskRelation');
     expect(JSON.stringify(report)).not.toContain(assessmentPreview().id);
   });
   it('selects recorded evidence for this exact finding and exports only currently accepted evidence', () => {

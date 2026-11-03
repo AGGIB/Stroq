@@ -53,7 +53,7 @@ export async function buildEngine() {
     ['policy-engine', 'policy-engine-entry.ts'],
     ['agent-status-engine', 'agent-status-engine.ts'],
     ['hook-check-engine', 'hook-check-engine.ts'],
-    ['task-lock-worker', 'task-lock-worker.ts'],
+    ['session-taint-engine', 'session-taint-engine.ts'],
     ['workspace-review-worker', 'workspace-review-worker.ts'],
     ['workspace-monitor-engine', 'workspace-monitor-engine.ts'],
     ['incidents-engine', 'incidents-engine-entry.ts'],

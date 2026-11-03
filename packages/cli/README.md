@@ -96,8 +96,6 @@ Open the private URL printed at startup. The server binds only to `127.0.0.1`; i
 
 **Agents → Check history → Stroq hook** connects setup receipts to a fresh check of the exact captured source, with no provider requests. Recorded results have durable workspace-bound links and remain separate from hook approval and native blocking. See [isolated hook checks](../../docs/platform/hook-checks.md).
 
-**Agents → Task permissions** pages through existing signed Task Lock records and opens exact permit links beyond the first 64 archived tasks. Inspect the scope, then explicitly revoke that permit; archives are preserved. The native gate denies later matching calls after revocation, while host termination remains unverified. See [task permissions](../../docs/platform/task-permissions.md).
-
 `npm pack` in `packages/cli` prepares a self-contained local tarball: the split CLI, static UI, local services, engine workers and required data all ship together. It installs the console's committed lockfile independently and builds the platform before packing. An installation of that tarball can run `stroq console` without the source checkout, Next.js or a separate frontend installation. Preparing a tarball does not publish it; this source feature has not been released to npm by this work.
 
 Windsurf note: `post_read_code` cannot scan a directory Cascade reads recursively (it scans the file it names, and a directory reads as empty), and a tainted `pre_read_code` of `~/.ssh` or `~/.aws` without a trailing slash is not classified as a secret path either — see the [Windsurf section of the full README](https://github.com/AGGIB/Stroq/blob/main/docs/AGENTS.md#windsurf) for this and every other documented limit.

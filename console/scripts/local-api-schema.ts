@@ -60,23 +60,6 @@ export {
   validateWorkspaceReviewReceipt,
 } from '../lib/workspace-review';
 export {
-  TASK_ACCESS_LIMITATIONS,
-  TASK_ACCESS_ERRORS,
-  validateTaskAccessPreview,
-  validateTaskAccessReceipt,
-  validateTaskAccessState,
-} from '../lib/task-access';
-export { INCIDENT_TASK_LIMITATIONS, validateIncidentTaskReport } from '../lib/incident-task';
-export {
-  TASK_LOCK_LIMITATIONS,
-  TASK_LOCK_ERRORS,
-  validateTaskLockRow,
-  validateTaskLockState,
-  validateTaskLockPreview,
-  validateTaskLockReceipt,
-} from '../lib/task-locks';
-export { validateTaskLockPage, validateTaskLockPageRequest } from '../lib/task-lock-page';
-export {
   HOOK_CHECK_AGENTS,
   HOOK_CHECK_ERRORS,
   validateHookCheckBinding,

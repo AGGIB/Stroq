@@ -117,17 +117,6 @@ describe('local API operation allowlist', () => {
     ])
       expect(isLocalOperation(path), path).toBe(false);
   });
-  it('admits only the fixed task page endpoint, keeping cursors and selectors out of URLs', () => {
-    expect(isLocalOperation('/api/task-locks/page')).toBe(true);
-    for (const path of [
-      '/api/task-locks/page?cursor=private',
-      '/api/task-locks/page/extra',
-      '/api/task-locks/pages',
-      '/api/task-locks/../page',
-      '//foreign.invalid/api/task-locks/page',
-    ])
-      expect(isLocalOperation(path)).toBe(false);
-  });
   it('permits only the fixed journal tail and summary reads', () => {
     expect(isLocalOperation('/api/journal/tail')).toBe(true);
     expect(isLocalOperation('/api/journal/summary')).toBe(true);
@@ -234,37 +223,34 @@ describe('local API operation allowlist', () => {
     ])
       expect(isLocalOperation(path), path).toBe(false);
   });
-  it('allows the implemented hook checks, permission controls and exact finding lookup', () => {
+  it('allows the implemented hook checks', () => {
     for (const path of [
       '/api/hook-checks',
       '/api/hook-checks/preview',
       '/api/hook-checks/start',
       '/api/hook-checks/cancel',
       '/api/hook-checks/jobs/11111111-1111-4111-8111-111111111111',
-      '/api/task-locks',
-      '/api/task-locks/preview',
-      '/api/task-locks/apply',
-      '/api/incidents/task',
-      '/api/task-locks/access/preview',
-      '/api/task-locks/access/issue',
-      `/api/task-locks/access/task-${'a'.repeat(64)}/${'b'.repeat(64)}`,
     ])
       expect(isLocalOperation(path), path).toBe(true);
   });
-  it('rejects ambiguous permission, access and hook-check paths before sending a token', () => {
+  it('rejects ambiguous hook-check paths before sending a token', () => {
     for (const path of [
-      '/api/task-locks/extend',
-      '/api/task-locks/access',
-      '/api/task-locks/access/issue/extra',
-      '/api/task-locks/access/issue?fingerprint=private',
-      '/api/task-locks/access/../issue',
-      `/api/task-locks/access/task-${'A'.repeat(64)}/${'b'.repeat(64)}`,
-      `/api/task-locks/access/task-${'a'.repeat(63)}/${'b'.repeat(64)}`,
-      `/api/task-locks/access/task-${'a'.repeat(64)}/${'b'.repeat(65)}`,
       '/api/hook-checks/jobs/../../private',
       '/api/hook-checks/run',
       '/api/hook-checks/jobs/' + '-'.repeat(36),
-      '/api/incidents/task/extra',
+    ])
+      expect(isLocalOperation(path), path).toBe(false);
+  });
+  it('no longer admits the removed task permission and finding lookup routes', () => {
+    for (const path of [
+      '/api/task-locks',
+      '/api/task-locks/page',
+      '/api/task-locks/preview',
+      '/api/task-locks/apply',
+      '/api/task-locks/access/preview',
+      '/api/task-locks/access/issue',
+      `/api/task-locks/access/task-${'a'.repeat(64)}/${'b'.repeat(64)}`,
+      '/api/incidents/task',
     ])
       expect(isLocalOperation(path), path).toBe(false);
   });

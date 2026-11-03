@@ -14,6 +14,7 @@ import {
   sessionTaintReceiptMatches,
   sameSessionTaintRecord,
   sessionTaintConfirmRecheck,
+  sessionTaintKey,
   sessionTaintPendingWrites,
 } from './session-taint-binding';
 const finding = () => ({
@@ -21,6 +22,24 @@ const finding = () => ({
   evidenceSha: taintHash('a'),
   sequence: 12,
   recordedAt: '2026-10-24T09:00:00.000Z',
+});
+describe('the key a session-taint request is fenced to', () => {
+  it('fences immutable selected evidence and workspace without accepting raw selectors', () => {
+    const incident = {
+      id: `incident-${taintHash('b')}`,
+      evidenceSha: taintHash('b'),
+      sequence: 7,
+      recordedAt: '2026-10-23T01:00:00.000Z',
+    };
+    expect(sessionTaintKey(incident, taintWs)).toBeTruthy();
+    expect(sessionTaintKey(null, taintWs)).toBeNull();
+    expect(sessionTaintKey(incident, null)).toBeNull();
+    expect(sessionTaintKey({ ...incident, id: 'private' }, taintWs)).toBeNull();
+    expect(sessionTaintKey({ ...incident, evidenceSha: taintHash('e') }, taintWs)).toBeNull();
+    expect(sessionTaintKey({ ...incident, sequence: 8 }, taintWs)).not.toBe(
+      sessionTaintKey(incident, taintWs),
+    );
+  });
 });
 describe('exact stored session taint action bindings', () => {
   it('binds every finding fact and workspace without using a public activity session alias', () => {

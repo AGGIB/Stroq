@@ -15,13 +15,11 @@
 @import './mcp-governance.css';
 @import './secret-controls.css';
 @import './incident-controls.css';
-@import './task-access.css';
 @import './workspace-review.css';
 @import './workspace-monitor.css';
 @import './inventory-monitor.css';
 @import './policy-history.css';
 @import './hook-check-history.css';
-@import './task-lock-pages.css';
 @import './mcp-tool-contracts.css';
 @import './try-action.css';
 @import './live-view.css';

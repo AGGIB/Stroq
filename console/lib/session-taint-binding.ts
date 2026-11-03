@@ -1,5 +1,5 @@
 import type { Incident } from './incidents';
-import { incidentTaskKey } from './incident-task-binding';
+import { stamp } from './local-guards';
 import {
   sameSessionTaintIdentity,
   validateSessionTaintInspection,
@@ -11,7 +11,27 @@ import {
   type SessionTaintRecord,
 } from './session-taint';
 type Finding = Pick<Incident, 'id' | 'evidenceSha' | 'sequence' | 'recordedAt'>;
-export const sessionTaintKey = incidentTaskKey;
+/** The exact finding and workspace a session-taint request is fenced to, or null when either is malformed. */
+export function sessionTaintKey(incident: Finding | null, workspaceId: string | null) {
+  if (
+    !incident ||
+    !workspaceId ||
+    !/^workspace-[a-f0-9]{24}$/.test(workspaceId) ||
+    !/^[a-f0-9]{64}$/.test(incident.evidenceSha) ||
+    incident.id !== `incident-${incident.evidenceSha}` ||
+    !Number.isSafeInteger(incident.sequence) ||
+    incident.sequence < 1 ||
+    !stamp(incident.recordedAt)
+  )
+    return null;
+  return JSON.stringify([
+    workspaceId,
+    incident.id,
+    incident.evidenceSha,
+    incident.sequence,
+    incident.recordedAt,
+  ]);
+}
 export function sessionTaintInspectionMatches(
   value: unknown,
   finding: Finding,

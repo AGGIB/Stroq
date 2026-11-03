@@ -12,7 +12,6 @@ import {
   type McpCallControlOverview,
 } from '@/lib/mcp-call-control-overview';
 import { validatePolicyCases, type PolicyCasesState } from '@/lib/policy-cases';
-import { validateTaskLockState, type TaskLockState } from '@/lib/task-locks';
 import { validateWorkspaceReviewState, type WorkspaceReviewState } from '@/lib/workspace-review';
 import { validateHookCheckState, type HookCheckState } from '@/lib/hook-checks';
 import { validateWorkspaceMonitorState, type WorkspaceMonitorState } from '@/lib/workspace-monitor';
@@ -46,7 +45,6 @@ interface QueueSnapshot {
   mcpGovernance: McpGovernanceState | null;
   mcpGovernanceUnresolved: McpGovernanceUnknownLedger;
   policyCases: PolicyCasesState | null;
-  taskLocks: TaskLockState | null;
   workspaceReview: WorkspaceReviewState | null;
   workspaceTasks: WorkspaceTaskState | null;
   workspaceMonitor: WorkspaceMonitorState | null;
@@ -80,7 +78,6 @@ const emptySnapshot = (key: string, workspaceId: string): QueueSnapshot => ({
   mcpGovernance: null,
   mcpGovernanceUnresolved: { records: [], limited: false },
   policyCases: null,
-  taskLocks: null,
   workspaceReview: null,
   workspaceTasks: null,
   workspaceMonitor: null,
@@ -176,7 +173,6 @@ export function useProtectionQueue(refreshKey?: string) {
             mcpCallControls: null,
             mcpGovernance: null,
             policyCases: null,
-            taskLocks: null,
             workspaceReview: null,
             workspaceTasks: null,
             workspaceMonitor: null,
@@ -193,7 +189,6 @@ export function useProtectionQueue(refreshKey?: string) {
         requestLocal('/api/secrets', undefined, controller.signal),
         requestLocal('/api/mcp-containment', undefined, controller.signal),
         requestLocal('/api/policy/cases', undefined, controller.signal),
-        requestLocal('/api/task-locks', undefined, controller.signal),
         requestLocal('/api/workspace-review', undefined, controller.signal),
         requestLocal('/api/hook-checks', undefined, controller.signal),
         requestLocal('/api/workspace-monitor', undefined, controller.signal),
@@ -212,7 +207,6 @@ export function useProtectionQueue(refreshKey?: string) {
         secretResult,
         mcpResult,
         caseResult,
-        taskResult,
         workspaceResult,
         hookResult,
         monitorResult,
@@ -297,11 +291,6 @@ export function useProtectionQueue(refreshKey?: string) {
           hookResult.value.workspaceId === workspaceId
         ) && 'Stroq hook history could not be refreshed.',
         !(
-          taskResult.status === 'fulfilled' &&
-          validateTaskLockState(taskResult.value) &&
-          taskResult.value.workspaceId === workspaceId
-        ) && 'Task permissions could not be read.',
-        !(
           mcpResult.status === 'fulfilled' &&
           validateMcpContainment(mcpResult.value) &&
           mcpResult.value.workspaceId === workspaceId
@@ -337,12 +326,6 @@ export function useProtectionQueue(refreshKey?: string) {
             ? mcpResult.value
             : null,
         policyCases,
-        taskLocks:
-          taskResult.status === 'fulfilled' &&
-          validateTaskLockState(taskResult.value) &&
-          taskResult.value.workspaceId === workspaceId
-            ? taskResult.value
-            : null,
         workspaceReview,
         workspaceTasks:
           taskControlsResult.status === 'fulfilled' &&
@@ -665,7 +648,6 @@ export function useProtectionQueue(refreshKey?: string) {
       (write) => write.preview.workspaceId === workspaceId,
     ),
     policyCases: evidence?.policyCases ?? null,
-    taskLocks: evidence?.taskLocks ?? null,
     workspaceReview: evidence?.workspaceReview ?? null,
     workspaceTasks: evidence?.workspaceTasks ?? null,
     workspaceMonitor: evidence?.workspaceMonitor ?? null,
