@@ -1,7 +1,7 @@
 import { readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { PLATFORM_PAGES, PLATFORM_SECTIONS, PLATFORM_WORDS, pagesIn } from './platform-map';
+import { PLATFORM_PAGES, PLATFORM_SECTIONS, pagesIn } from './platform-map';
 
 const APP = join(process.cwd(), 'app');
 
@@ -13,7 +13,7 @@ describe('the platform map', () => {
     }
   });
 
-  it('lists every top-level page of the app except settings and the guide itself', () => {
+  it('lists every top-level page of the app except settings', () => {
     const tops = readdirSync(APP, { withFileTypes: true })
       .filter((d) => d.isDirectory())
       .map((d) => d.name)
@@ -25,9 +25,9 @@ describe('the platform map', () => {
         }
       });
     const listed = new Set(PLATFORM_PAGES.map((p) => p.href.replace(/^\/|\/$/g, '')));
-    // `protection` is the home page's own route; settings and the guide sit outside the groups.
+    // `protection` is the home page's own route; settings sits outside the groups.
     const missing = tops.filter(
-      (name) => !listed.has(name) && !['settings', 'guide', 'protection'].includes(name),
+      (name) => !listed.has(name) && !['settings', 'protection'].includes(name),
     );
     expect(missing).toEqual([]);
   });
@@ -45,8 +45,6 @@ describe('the platform map', () => {
       expect(page.read.length, page.href).toBeGreaterThan(10);
       expect(`${page.when} ${page.read}`).not.toMatch(/\b(protect\w*|safe|secure|blocked)\b/i);
     }
-    for (const entry of PLATFORM_WORDS)
-      expect(entry.meaning).not.toMatch(/\b(protects|safe|secure)\b/i);
   });
 
   it('keeps the daily group short', () => {

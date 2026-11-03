@@ -1,7 +1,7 @@
 /**
  * One map of the console: every page, the group it sits in, when to open it and what to read on it.
- * The sidebar groups its links by it and the Guide page prints it, so the two cannot drift apart.
- * The words describe what each page shows; none of them says a page blocks, secures or protects.
+ * The sidebar groups its links by it. The words describe what each page shows; none of them says a
+ * page blocks, secures or protects.
  */
 
 export const PLATFORM_SECTIONS = [
@@ -106,36 +106,6 @@ export const PLATFORM_PAGES: readonly PlatformPage[] = [
     section: 'review',
     when: 'For a look back over a week or a month.',
     read: 'Counts and one chart for the period you pick.',
-  },
-];
-
-/** Plain meanings of the words the console uses for decisions and states. */
-export const PLATFORM_WORDS: readonly { readonly word: string; readonly meaning: string }[] = [
-  { word: 'Allowed', meaning: 'Stroq’s policy let the action run.' },
-  { word: 'Asked you', meaning: 'Stroq’s policy asked for a person to confirm the action.' },
-  {
-    word: 'Denied',
-    meaning:
-      'Stroq’s policy refused the action. The agent’s host is expected to refuse it too; Stroq does not see whether it did.',
-  },
-  {
-    word: 'Flagged',
-    meaning:
-      'Something the agent read looked like an instruction to it, and Stroq recorded that for the session.',
-  },
-  {
-    word: 'Connected',
-    meaning:
-      'Stroq’s hooks are in the agent’s settings. That is not proof the agent calls them; Test hook and Live show that.',
-  },
-  {
-    word: 'Not seen yet',
-    meaning: 'The hooks are in place, but Stroq has not been asked about any action yet.',
-  },
-  {
-    word: 'Recorded',
-    meaning:
-      'Written to the audit journal on this machine. Not proof that a host stopped anything.',
   },
 ];
 

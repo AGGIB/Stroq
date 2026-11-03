@@ -4,7 +4,7 @@ const SHA = '[a-f0-9]{64}';
 const OPERATION = new RegExp(
   '^/api/(?:context|control|agents|(?:quarantine|mcp-containment|credential-filters)(?:/(?:preview|apply))?|' +
     'incidents(?:/(?:review|verify|compare|task|evidence))?|' +
-    'journal/(?:tail|summary|since)|posture|threats|' +
+    'journal/(?:tail|summary|since)|posture|' +
     'incident-assessments(?:/(?:preview|apply|recheck))?|' +
     'session-taint(?:/(?:inspect|preview|clear|recheck))?|' +
     'workspace-review(?:/(?:check|cancel|review))?|' +

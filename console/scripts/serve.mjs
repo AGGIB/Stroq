@@ -51,10 +51,8 @@ import {
   routeSessionTaint,
   createJournalViewService,
   createPostureService,
-  createThreatFeedService,
   routeJournalView,
   routePosture,
-  routeThreatFeed,
 } from './workspace-monitor-bridge.mjs';
 import { createSecretScanService } from './secret-scan-service.mjs';
 import { createIncidentRecheckService } from './incident-recheck.mjs';
@@ -196,7 +194,6 @@ export async function startServer({
   inventoryMonitor: suppliedInventoryMonitor,
   journalView: suppliedJournalView,
   posture: suppliedPosture,
-  threatFeed: suppliedThreatFeed,
   secrets: suppliedSecrets,
   comparisons: suppliedComparisons,
   port = 47815,
@@ -405,8 +402,6 @@ export async function startServer({
           response = await routeJournalView(req, parsed.path, origin, journalView);
         } else if (parsed.path.startsWith('/api/posture')) {
           response = await routePosture(req, parsed.path, origin, posture);
-        } else if (parsed.path === '/api/threats') {
-          response = await routeThreatFeed(req, parsed.path, origin, threatFeed);
         } else if (parsed.path.startsWith('/api/inventory-monitor')) {
           response = await routeInventoryMonitor(req, parsed.path, origin, inventoryMonitor);
         } else if (parsed.path.startsWith('/api/workspace-monitor')) {
@@ -580,14 +575,6 @@ export async function startServer({
       project: selectedProject,
       codexHome: process.env.CODEX_HOME ?? null,
     }));
-  // Downloads pwn.watch's list only when the page asks, which it does only once you turn the feed on.
-  const threatFeed =
-    suppliedThreatFeed ??
-    (await createThreatFeedService({
-      userHome: selectedUserHome,
-      project: selectedProject,
-      codexHome: process.env.CODEX_HOME ?? null,
-    }));
   return {
     server,
     token,
@@ -624,7 +611,6 @@ export async function startServer({
           policyCases,
           journalView,
           posture,
-          threatFeed,
         ].map((service) => Promise.resolve().then(() => service.close())),
       );
       return new Promise((resolveClose, reject) => {

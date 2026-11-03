@@ -67,7 +67,7 @@ npx @stroq/cli init           # hook into your agent and guard the next session
 </tr>
 </table>
 
-**Live** follows recorded decisions as they happen and **Activity** keeps them. Connected means Stroq's hooks are in the agent's settings, not that the agent calls them: **Test hook** and **Live** show that. Skills & MCP, investigations, sessions and secret exposure are under **When you need it**; the **Guide** page says what each page is for.
+**Live** follows recorded decisions as they happen and **Activity** keeps them. Connected means Stroq's hooks are in the agent's settings, not that the agent calls them: **Test hook** and **Live** show that. Skills & MCP, investigations, sessions and secret exposure are under **When you need it**.
 
 ```sh
 npx @stroq/cli console                            # a private page on 127.0.0.1
@@ -76,7 +76,7 @@ npx @stroq/cli console --workspace /path/to/repo  # the project it should look a
 
 Open the whole link it prints: it carries a key that is new each time the console starts. The console reads what Stroq already records on this machine. It changes an agent's settings or Stroq's policy only after you confirm a preview of that change; checks you run are saved under `~/.stroq`.
 
-It listens only on 127.0.0.1, needs no account and has no telemetry. With the optional threat feed turned on in Settings, it downloads [pwn.watch](https://pwn.watch/)'s public list of incidents; nothing about your project is sent. One action starts your real agent: **Test in agent** runs it against a throwaway project, with a cap on requests, and uses your agent's own subscription. Adding hooks from the console needs macOS or Linux; on Windows use `stroq init`. Details and limits: [console guide](console/README.md).
+It listens only on 127.0.0.1, needs no account and has no telemetry. One action starts your real agent: **Test in agent** runs it against a throwaway project, with a cap on requests, and uses your agent's own subscription. Adding hooks from the console needs macOS or Linux; on Windows use `stroq init`. Details and limits: [console guide](console/README.md).
 
 From a source checkout:
 

@@ -3,8 +3,6 @@ import Link from 'next/link';
 import { RefreshCw, ShieldAlert, ShieldCheck, ShieldOff } from 'lucide-react';
 import { AgentGlyph, Badge } from '@/components/platform-ui';
 import { useProtectionVerdict, useSinceLastVisit } from './use-protection-verdict';
-import { useThreatFeed } from './use-threat-feed';
-import { ThreatList } from './threat-list';
 import { WeekStrip } from './week-strip';
 import { protectionVerdict } from '@/lib/agent-summary';
 import type { JournalSummary } from '@/lib/journal-view';
@@ -34,7 +32,6 @@ export function ProtectionVerdict() {
       ? weekView(journal)
       : null;
   const since = useSinceLastVisit(agents !== null && week !== null);
-  const threats = useThreatFeed();
   if (!localAccess) return null;
   if (agents === null)
     return (
@@ -90,7 +87,7 @@ export function ProtectionVerdict() {
           </li>
         ) : null}
       </ul>
-      <WeekStrip view={week} since={since} steps={steps} extra={<ThreatList state={threats} />} />
+      <WeekStrip view={week} since={since} steps={steps} />
       <div className="verdict-foot">
         <JournalLine journal={journal} />
         <span className="verdict-links">

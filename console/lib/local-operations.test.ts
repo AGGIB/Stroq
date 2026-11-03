@@ -160,17 +160,8 @@ describe('local API operation allowlist', () => {
     ])
       expect(isLocalOperation(path), path).toBe(false);
   });
-  it('permits the fixed threat feed read and nothing shaped like it', () => {
-    expect(isLocalOperation('/api/threats')).toBe(true);
-    for (const path of [
-      '/api/threats/',
-      '/api/threats/fetch',
-      '/api/threats?url=https://x',
-      '/api/threats#x',
-      '/api/threat',
-      '/api/../threats',
-      'https://pwn.watch/api/threats',
-    ])
+  it('no longer admits the removed threat feed route', () => {
+    for (const path of ['/api/threats', '/api/threats/fetch', '/api/threats?url=https://x'])
       expect(isLocalOperation(path), path).toBe(false);
   });
   it('permits the fixed try-an-action operation and nothing shaped like it', () => {

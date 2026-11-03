@@ -2,7 +2,6 @@
 import {
   Activity,
   ArrowDownLeft,
-  BookOpen,
   ArrowUpRight,
   ChevronRight,
   Command as CommandIcon,
@@ -56,7 +55,7 @@ const NAV = PLATFORM_PAGES.map((page) => ({
   section: page.section,
   icon: ICONS[page.href] ?? ShieldCheck,
 }));
-const SEARCHABLE = [...NAV, { href: '/guide/', label: 'Guide', section: null, icon: BookOpen }];
+const SEARCHABLE = NAV;
 export function Logo() {
   return (
     <Link href="/" className="brand" aria-label="Stroq protection">
@@ -121,15 +120,6 @@ function Navigation({ close }: { close?: () => void }) {
         })}
       </nav>
       <div className="sidebar-bottom">
-        <Link
-          className={`nav-item ${path.startsWith('/guide') ? 'active' : ''}`}
-          href="/guide/"
-          aria-current={path.startsWith('/guide') ? 'page' : undefined}
-          onClick={close}
-        >
-          <BookOpen size={17} aria-hidden="true" />
-          <span>Guide</span>
-        </Link>
         <Link
           className={`nav-item ${path === '/settings/' ? 'active' : ''}`}
           href="/settings/"

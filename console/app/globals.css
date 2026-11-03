@@ -3,7 +3,7 @@
  * structural: printed, not rebuilt (24b spacing off the 4px scale, 39b tall option tiles, 49 long labels, F25 tables at 375px, F19 four weights)
  * note: 48 on the .dark block is a token declaration the linter does not read as one (it reads :root and [data-theme] only); 56 compares two dialogs that never open together
  * reworded: "What your agents are doing" to "Live" and "Settings that weaken your agents" to "Settings check" · 54 names the eyebrow; "The last N recorded actions · since T" to "... since T" · 63 names the dot
- * recomposed: Protection (the answer first), the sidebar groups, the agent cards; new: Guide · see docs/platform/design-audit.md
+ * recomposed: Protection (the answer first), the sidebar groups, the agent cards; see docs/platform/design-audit.md
  * built: the project · redesign: polish · v2.0.0 */
 @import 'tailwindcss';
 @import 'tw-animate-css';

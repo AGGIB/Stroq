@@ -1,5 +1,4 @@
 'use client';
-import type { ReactNode } from 'react';
 import Link from 'next/link';
 import { ArrowRight } from 'lucide-react';
 import { CopyCommand } from '@/components/copy-command';
@@ -81,15 +80,12 @@ export function WeekStrip({
   view,
   since,
   steps,
-  extra = null,
 }: {
   view: WeekView | null;
   since: JournalSince | null;
   steps: readonly NextStep[];
-  /** What goes between the week and the steps (the threat feed). */
-  extra?: ReactNode;
 }) {
-  if (view === null && steps.length === 0 && extra === null) return null;
+  if (view === null && steps.length === 0) return null;
   return (
     <section
       className="verdict-week"
@@ -122,7 +118,6 @@ export function WeekStrip({
           <Bars view={view} />
         </div>
       ) : null}
-      {extra}
       <Steps steps={steps} />
     </section>
   );

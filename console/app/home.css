@@ -1,4 +1,4 @@
-/* The home screen's answer, the grouped sidebar and the guide. Prefixes: verdict-, nav-section, guide-. */
+/* The home screen's answer and the grouped sidebar. Prefixes: verdict-, nav-section. */
 .verdict {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -133,67 +133,6 @@
   font-size: 14px;
   font-weight: 500;
 }
-/* Guide */
-.guide-start {
-  display: grid;
-  gap: 12px;
-  margin: 0;
-  list-style: decimal;
-  padding: 20px 24px 20px 44px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  max-width: 80ch;
-}
-.guide-section {
-  display: grid;
-  gap: 12px;
-}
-.guide-section-head {
-  display: grid;
-  gap: 2px;
-}
-.guide-section-head h2 {
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-}
-.guide-section-head p {
-  margin: 0;
-  color: var(--ink-2);
-  font-size: var(--text-secondary);
-}
-.guide-pages {
-  margin: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-}
-.guide-page {
-  display: grid;
-  grid-template-columns: 12rem minmax(0, 1fr);
-  gap: 4px 24px;
-  padding: 12px 20px;
-  border-top: 1px solid var(--border);
-}
-.guide-page:first-child {
-  border-top: 0;
-}
-.guide-page dt {
-  font-weight: 600;
-}
-.guide-page dd {
-  display: grid;
-  gap: 2px;
-  margin: 0;
-}
-.guide-when {
-  color: var(--card-foreground);
-}
-.guide-read {
-  color: var(--ink-2);
-  font-size: var(--text-secondary);
-}
 @media (max-width: 760px) {
   .verdict {
     padding: 16px;
@@ -203,9 +142,6 @@
   }
   .verdict-agent-line {
     grid-column: 2 / -1;
-  }
-  .guide-page {
-    grid-template-columns: minmax(0, 1fr);
   }
 }
 .inventory-summary-empty {
@@ -242,10 +178,6 @@
   }
 }
 
-.guide-start li::marker {
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-}
 .verdict-agents li.verdict-agents-rest {
   grid-template-columns: max-content max-content minmax(0, 1fr);
 }
@@ -416,84 +348,4 @@
   .next-steps-list {
     grid-template-columns: minmax(0, 1fr);
   }
-}
-
-/* Threats that match this project, from pwn.watch: off until turned on in Settings. */
-.threats {
-  display: grid;
-  gap: 10px;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-}
-.threats-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 4px 12px;
-}
-.threats-title {
-  margin: 0;
-  font-size: var(--text-ui);
-  font-weight: 600;
-}
-.threats-source {
-  font-size: 13px;
-}
-.threat-list {
-  display: grid;
-  gap: 14px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-.threat {
-  display: grid;
-  gap: 4px;
-  min-width: 0;
-}
-.threat-head {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 6px 10px;
-  min-width: 0;
-}
-.threat-title {
-  min-width: 0;
-  overflow-wrap: anywhere;
-  color: var(--foreground);
-  font-weight: 600;
-}
-/* The arrow follows the last word of a title that wraps. */
-.threat-title svg {
-  display: inline;
-  margin-left: 4px;
-  vertical-align: -2px;
-}
-a.threat-title:hover {
-  color: var(--brand);
-}
-.threat-why,
-.threats-note,
-.threats-compared {
-  margin: 0;
-  max-width: 80ch;
-  color: var(--ink-2);
-  font-size: var(--text-secondary);
-}
-.threats-compared {
-  color: var(--ink-3);
-  font-size: 13px;
-}
-.threats-off {
-  margin: 0;
-  padding-top: 16px;
-  border-top: 1px solid var(--border);
-  color: var(--ink-3);
-  font-size: var(--text-secondary);
-}
-.threat-patch {
-  color: var(--ink-3);
-  font-size: 13px;
 }

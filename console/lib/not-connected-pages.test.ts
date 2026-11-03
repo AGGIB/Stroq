@@ -240,41 +240,12 @@ describe('the example banner', () => {
   });
 });
 
-describe('the source picker in Settings', () => {
-  it('selects nothing by default and never starts the example by itself', () => {
-    const showExample = vi.fn();
-    seen.platform = platform(NOT_CONNECTED, { showExample });
-    const html = renderToStaticMarkup(createElement(SettingsPage));
-    expect(html.match(/is-selected/g) ?? []).toHaveLength(0);
-    expect(showExample).not.toHaveBeenCalled();
-    expect(text(html)).toContain('No snapshot loaded');
-  });
-
-  it('starts the example only from the explicit example button', () => {
-    const showExample = vi.fn();
-    const connectLocal = vi.fn();
-    seen.platform = platform(NOT_CONNECTED, { showExample, connectLocal });
-    render(SettingsPage);
-    const choice = button(/Example data/);
-    expect(choice).toBeDefined();
-    expect(choice!.props['aria-pressed']).toBe(false);
-    choice!.props.onClick();
-    expect(showExample).toHaveBeenCalledTimes(1);
-    expect(connectLocal).not.toHaveBeenCalled();
-  });
-
-  it('marks the example as chosen only while it is on, and says it is not the user data', () => {
-    seen.platform = platform(EXAMPLE);
+describe('Settings', () => {
+  it('holds the theme switch and nothing else', () => {
     const out = render(SettingsPage);
-    expect(button(/Example data/)!.props['aria-pressed']).toBe(true);
-    expect(button(/Local machine/)!.props['aria-pressed']).toBe(false);
-    expect(out).toMatch(/Made-up events/);
-  });
-
-  it('marks the local machine as chosen only when real data is loaded', () => {
-    seen.platform = platform(LOCAL);
-    render(SettingsPage);
-    expect(button(/Local machine/)!.props['aria-pressed']).toBe(true);
-    expect(button(/Example data/)!.props['aria-pressed']).toBe(false);
+    expect(out).toContain('Appearance');
+    for (const label of ['Dark', 'Light', 'System']) expect(out).toContain(label);
+    expect(seen.elements.filter((e) => e.type === 'button')).toHaveLength(3);
+    expect(out).not.toMatch(/Example data|Local machine|Data source|threat|pwn\.watch/i);
   });
 });
