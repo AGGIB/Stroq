@@ -15,7 +15,7 @@ import {
   withArguments,
   withInlinedFunctions,
 } from '../../src/actions/inlined-functions.js';
-import { withDeadline } from '../../src/actions/deadline.js';
+import { READING_DEADLINE_MS, withDeadline } from '../../src/actions/deadline.js';
 import { evaluateForm, newFormBudget } from '../../src/actions/parameter-forms.js';
 import { NO_NAMES, functionBodies, mergeNames } from '../../src/actions/program-names.js';
 import { lex } from '../../src/actions/shell-lex.js';
@@ -792,7 +792,9 @@ describe('the time that the forms of a parameter and the words of a call take', 
     const made = functionsDefinedIn(text);
     const out = classifyTool('Bash', { command: text }, CWD);
 
-    expect((cpuNow() - started) / 1000).toBeLessThan(5);
+    // The reading's own deadline: under coverage on a loaded runner this takes about five seconds, and a reading
+    // that grew with the square of the lines would take minutes.
+    expect((cpuNow() - started) / 1000).toBeLessThan(READING_DEADLINE_MS / 1000);
     expect(made.crowded).toBe(true);
     expect(out.classes).toEqual(['shell.unparsed']);
   });

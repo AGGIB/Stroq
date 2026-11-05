@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.30.0] - 2026-11-05
+
 ### Added
 
 - **`npx @stroq/cli` shows what your agents did, as a card.** Run with no command, Stroq reads the last 30 days of Claude Code and Codex sessions on this machine, replays them through the policy in a throwaway home (nothing runs, nothing is sent), and prints plain counts: the commands your agent ran, how many of them came from text it read (a README, page, issue or tool result), the keys that left this machine, and the repositories that run code as soon as an agent opens them. Under the counts are the few moments worth a look, each with `stroq show N`, which prints the call behind it with every traced key replaced by `[NAME]` and the rule that linked them. `--days N` (1 to 365), `--json`, `--share` (one line to paste) and `--plain`. It is a report and not a gate: it exits 0 whatever it finds, and writes only a small cache under `~/.stroq` that the next run reads. On a machine with about 2,000 sessions the first run took about 30 s and the next about 4 s.
