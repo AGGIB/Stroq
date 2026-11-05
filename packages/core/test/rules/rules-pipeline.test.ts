@@ -495,6 +495,109 @@ detection:
       ]);
     });
 
+    it('reads a pattern of its own on a fetched page and leaves every other surface as it was', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: documentation names the path in a sentence\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: upstream-pattern\n' +
+          '      local: local-pattern\n' +
+          '      web: web-pattern\n',
+      );
+      const { rules } = applyRuleOverrides(loadOne(), loadRuleOverrides(file));
+      const conditions = rules[0]?.detection.conditions ?? [];
+      expect(conditions).toHaveLength(4);
+      expect(conditions[0]).toMatchObject({
+        value: 'upstream-pattern',
+        stroq_surfaces: ['tool_description', 'tool_result', 'instruction_file'],
+      });
+      expect(conditions[2]).toMatchObject({
+        value: 'local-pattern',
+        stroq_surfaces: ['repo_content', 'command_output'],
+      });
+      expect(conditions[3]).toMatchObject({
+        value: 'web-pattern',
+        stroq_surfaces: ['web_content'],
+      });
+    });
+
+    it('takes a fetched page out of a condition with only web, which keeps the pattern everywhere else', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: only a fetched page is documentation\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: upstream-pattern\n' +
+          '      web: web-pattern\n',
+      );
+      const { rules } = applyRuleOverrides(loadOne(), loadRuleOverrides(file));
+      const conditions = rules[0]?.detection.conditions ?? [];
+      expect(conditions).toHaveLength(3);
+      expect(conditions[0]).toMatchObject({
+        value: 'upstream-pattern',
+        stroq_surfaces: [
+          'tool_description',
+          'tool_result',
+          'instruction_file',
+          'repo_content',
+          'command_output',
+        ],
+      });
+      expect(conditions[2]).toMatchObject({
+        value: 'web-pattern',
+        stroq_surfaces: ['web_content'],
+      });
+    });
+
+    it('keeps `surfaces` for the broad pattern and drops a fetched page from it', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: broad on some\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: upstream-pattern\n' +
+          '      local: local-pattern\n' +
+          '      surfaces: [tool_description, web_content, instruction_file]\n' +
+          '      web: web-pattern\n',
+      );
+      const { rules } = applyRuleOverrides(loadOne(), loadRuleOverrides(file));
+      const conditions = rules[0]?.detection.conditions ?? [];
+      expect(conditions[0]?.stroq_surfaces).toEqual(['tool_description', 'instruction_file']);
+      expect(conditions[2]?.stroq_surfaces).toEqual([
+        'tool_result',
+        'repo_content',
+        'command_output',
+      ]);
+      expect(conditions[3]?.stroq_surfaces).toEqual(['web_content']);
+    });
+
+    it('drops a condition on a fetched page with web: off', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: documentation\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: upstream-pattern\n' +
+          '      web: "off"\n',
+      );
+      const { rules } = applyRuleOverrides(loadOne(), loadRuleOverrides(file));
+      expect(rules[0]?.detection.conditions).toHaveLength(2);
+      expect(rules[0]?.detection.conditions[0]?.stroq_surfaces).not.toContain('web_content');
+    });
+
+    it('rejects an empty web pattern', () => {
+      const file = tempOverrides(
+        'ATR-2099-00002:\n' +
+          '  reason: x\n' +
+          '  conditions:\n' +
+          '    - index: 0\n' +
+          '      from: upstream-pattern\n' +
+          '      web: ""\n',
+      );
+      expect(() => loadRuleOverrides(file)).toThrow(/"web" must be a pattern/);
+    });
+
     it('rejects a condition entry with neither to nor local', () => {
       const file = tempOverrides(
         'ATR-2099-00002:\n' +

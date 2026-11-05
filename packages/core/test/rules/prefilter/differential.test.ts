@@ -45,7 +45,7 @@ function variantsOf(texts: Iterable<string>): string[] {
 
 describe('the prefilter against the files the bench scans', () => {
   it('has a prefilter for most of the bundled regexes', () => {
-    expect(BUNDLED_REGEXES.length).toBe(2621);
+    expect(BUNDLED_REGEXES.length).toBe(2633);
     expect(PREFILTERED.length / BUNDLED_REGEXES.length).toBeGreaterThanOrEqual(0.8);
   });
 
