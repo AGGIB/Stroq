@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { classifyCommand } from '../../src/actions/classify-bash.js';
 import { classifyTool } from '../../src/actions/classify-tool.js';
 import { decodePrograms } from '../../src/actions/shell-input.js';
@@ -111,6 +111,15 @@ describe('a program handed to a shell on another machine', () => {
 describe('a command too costly to be read before a host stops waiting for it', () => {
   // `echo x; ` is three places a reading stops at: two words and a separator.
   const unit = 'echo x; ';
+
+  // These are about the estimate, and the clock is stopped for them: under coverage on a loaded runner the
+  // reading below the bound took 8.3 s, past the deadline it does not mean to test (`deadline.ts` has its own tests).
+  beforeEach(() => {
+    vi.spyOn(performance, 'now').mockReturnValue(0);
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
 
   it('is asked about, and not read', () => {
     const padded = unit.repeat(Math.ceil(MAX_READING_COST_US / 80));
