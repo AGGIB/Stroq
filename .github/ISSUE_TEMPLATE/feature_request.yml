@@ -34,10 +34,10 @@ body:
         - Policy and rules
         - Secrets and egress
         - Checking skills and MCP servers (vet)
-        - Live check (prove)
-        - Hardening host settings (harden)
+        - The card (npx @stroq/cli) and stroq show
+        - The console
         - MCP proxy
-        - Reports, attack and bench
+        - stroq attack and reports
         - Documentation or site
         - Something else
     validations:
