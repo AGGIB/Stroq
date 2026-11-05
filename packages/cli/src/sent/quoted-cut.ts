@@ -23,8 +23,17 @@ import { firstProgram, isDataHeredoc } from './heredoc-programs.js';
 const RUNS_TEXT =
   /(?:\|&?\s*(?:sudo\s+(?:-\S+\s+)*)?(?:env\s+(?:[^\s=]*=\S*\s+)*)?(?:\/\S*\/)?(?:sh|bash|zsh|dash|ksh|fish|csh|tcsh|python[\d.]*|node|nodejs|deno|bun|perl|ruby|php|lua|tclsh|osascript|xargs|parallel|source|eval|exec)\b)|<<<|(?<![\w.-])(?:eval|source)(?![\w-])/;
 
-/** Whether a command hands text to a program that runs it (see `RUNS_TEXT`). */
-export const runsQuotedText = (command: string): boolean => RUNS_TEXT.test(command);
+/**
+ * Whether a command hands text to a program that runs it (see `RUNS_TEXT`). The pattern of a `grep` is not read for
+ * that: a review of code greps for `|eval\(` and `|http`, and read as a pipe into `eval` the first made every quote of
+ * the command code, and so the second a program. A quote that does not close, or a `grep` in any other spelling, is
+ * read as before.
+ */
+export function runsQuotedText(command: string): boolean {
+  if (!RUNS_TEXT.test(command)) return false;
+  const scan = scanQuotes(command);
+  return scan.unclosedAt !== null || RUNS_TEXT.test(scan.withoutPatterns);
+}
 
 /** Programs that run the text they are given: a stage of one is code, and so is the text piped into it. */
 const RUNNERS =
@@ -40,6 +49,16 @@ const FIRST = 0xe000;
 
 const hide = (c: string): string => String.fromCharCode(FIRST + SEPARATORS.indexOf(c));
 
+/**
+ * A stage up to its first quote that runs a `grep`, whose quotes are patterns: text it reads and cannot run. Only the
+ * plain spellings, with a wrapper that takes no option: `rg` and `ag` can start a program of their own, and a word
+ * after `sudo -u` need not be the program.
+ */
+const PATTERN_STAGE = /^\s*(?:(?:sudo|command|time)\s+)?(?:\/[\w./-]*\/)?(?:grep|egrep|fgrep)\s/;
+
+/** A quoted text the shell still runs a part of. */
+const EXPANDS_TO_CODE = /\$\(|`/;
+
 /** A heredoc opened on the line being read: its delimiter, and whether leading tabs are allowed before it. */
 const HEREDOC = /^<<(-?)\s*(?:'([^'\n]+)'|"([^"\n]+)"|(\\?)([A-Za-z0-9_.-]+))/;
 
@@ -47,6 +66,8 @@ const HEREDOC = /^<<(-?)\s*(?:'([^'\n]+)'|"([^"\n]+)"|(\\?)([A-Za-z0-9_.-]+))/;
 export interface QuoteScan {
   /** The command with the separators inside quotes hidden. */
   readonly masked: string;
+  /** The command as written, without the quoted patterns of a `grep` (see `PATTERN_STAGE`). */
+  readonly withoutPatterns: string;
   /** Where the quote that is never closed was opened, or null when every quote closes. */
   readonly unclosedAt: number | null;
 }
@@ -71,6 +92,16 @@ export function scanQuotes(command: string): QuoteScan {
   const pending: PendingHeredoc[] = [];
   // Where the stage being read began: the heredoc it opens is text or code by the program it runs.
   let stageStart = 0;
+  // Spans of `out` that are quoted patterns, as [first, end). The stage's program is read once, at its first quote.
+  const patterns: (readonly [number, number])[] = [];
+  let quoteOut = -1;
+  let readStage = -1;
+  let inPatternStage = false;
+  const closeQuote = (end: number): void => {
+    if (inPatternStage && !EXPANDS_TO_CODE.test(command.slice(quoteAt, end)))
+      patterns.push([quoteOut, out.length]);
+    quote = '';
+  };
   let i = 0;
   while (i < command.length) {
     const c = command[i] as string;
@@ -105,7 +136,7 @@ export function scanQuotes(command: string): QuoteScan {
     }
     if (quote === "'") {
       out.push(c === "'" ? c : SEPARATORS.includes(c) ? hide(c) : c);
-      if (c === "'") quote = '';
+      if (c === "'") closeQuote(i);
       i += 1;
       continue;
     }
@@ -117,13 +148,18 @@ export function scanQuotes(command: string): QuoteScan {
     }
     if (quote === '"') {
       out.push(c === '"' ? c : SEPARATORS.includes(c) ? hide(c) : c);
-      if (c === '"') quote = '';
+      if (c === '"') closeQuote(i);
       i += 1;
       continue;
     }
     if (c === "'" || c === '"') {
       quote = c;
       quoteAt = i;
+      quoteOut = out.length;
+      if (readStage !== stageStart) {
+        readStage = stageStart;
+        inPatternStage = PATTERN_STAGE.test(command.slice(stageStart, i));
+      }
     } else if (c === '<' && command[i + 1] === '<' && command[i + 2] !== '<') {
       const open = HEREDOC.exec(command.slice(i));
       if (open !== null) {
@@ -148,7 +184,18 @@ export function scanQuotes(command: string): QuoteScan {
     i += 1;
     if (SEPARATORS.includes(c)) stageStart = i;
   }
-  return { masked: out.join(''), unclosedAt: quote === '' ? null : quoteAt };
+  let kept = '';
+  let from = 0;
+  for (const [first, end] of patterns) {
+    kept += out.slice(from, first).join('');
+    from = end;
+  }
+  kept += out.slice(from).join('');
+  return {
+    masked: out.join(''),
+    withoutPatterns: unmaskSeparators(kept),
+    unclosedAt: quote === '' ? null : quoteAt,
+  };
 }
 
 /**

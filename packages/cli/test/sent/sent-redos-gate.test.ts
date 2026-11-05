@@ -125,6 +125,8 @@ const SHELL_SHAPES: readonly (readonly [string, (size: number) => string])[] = [
   // tried every way (CodeQL js/redos on the reader of a command that hands text to a shell).
   ['env assignments after a pipe', (size: number) => `|env\t${repeat('a==\t')(size)}`],
   ['env assignments after sudo', (size: number) => `| sudo -u a env ${repeat('b=c= ')(size)}`],
+  ['grep patterns that look like a pipe', repeat('grep "a|eval" | ')],
+  ['many patterns of one grep', (size: number) => `grep ${repeat('"a|eval" ')(size)}| sh`],
   ['gh token expansions', repeat('$GH_TOKE')],
   ['wget input files', repeat('wget -i')],
   ['addresses with a path', repeat('https://a.example/')],
