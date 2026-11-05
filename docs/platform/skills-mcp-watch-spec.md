@@ -1,5 +1,7 @@
 # Skills & MCP watch
 
+> **Removed from the console.** The server no longer creates or starts this watch, and no screen offers it: Skills & MCP is read when it opens and when you press **Check again** (see `skills-mcp.md`). The text below is kept as the record of what the watch was.
+
 Skills & MCP watch records changes in the selected local workspace and user
 sources while the local console service runs. It is an independent, explicit
 opt-in under **Protection → Skills & MCP watch**. Enabling the existing Workspace

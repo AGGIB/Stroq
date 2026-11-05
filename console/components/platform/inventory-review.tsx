@@ -1,4 +1,5 @@
 'use client';
+import { skillsPartHref } from '@/lib/skills-navigation';
 import { Dialog } from 'radix-ui';
 import Link from 'next/link';
 import { useState } from 'react';
@@ -22,6 +23,7 @@ import {
 import { InventorySource } from './inventory-source';
 import { useInventorySignals } from './use-inventory-signals';
 import { InventorySignalControls } from './inventory-signal-controls';
+import { ActionSteps } from './action-steps';
 
 const supportsMcpContainment = (
   agent: InventoryItem['agent'],
@@ -159,6 +161,26 @@ export function InventoryReview({
                     </button>
                   )}
                 </div>
+                {((selected.kind === 'mcp' && mcpAgent !== null) || quarantineArtifact) &&
+                selected.sha256 &&
+                workspaceId ? (
+                  <ActionSteps
+                    undoWhere={
+                      selected.kind === 'mcp'
+                        ? 'Under “Undo: MCP changes” on this screen.'
+                        : 'Under “Undo: skills moved aside” on this screen.'
+                    }
+                  />
+                ) : null}
+                {selected.kind === 'skill' && (
+                  <p className="control-meta">
+                    To check what this skill’s text says, use{' '}
+                    <Link className="inline-link" href={skillsPartHref('check')}>
+                      Check a skill’s text
+                    </Link>
+                    , or run <code>stroq vet</code> on its folder.
+                  </p>
+                )}
                 {selected.kind === 'mcp' && mcpAgent !== null && selected.sha256 && workspaceId && (
                   <McpCallControl
                     target={{ kind: 'source', id: selected.id, expectedSha256: selected.sha256 }}
@@ -303,7 +325,7 @@ export function InventoryReview({
                   </p>
                 )}
                 {selected.kind === 'mcp' && selected.mcp?.strict && (
-                  <Link className="button" href="/skills/mcp/contracts/">
+                  <Link className="button" href={skillsPartHref('tools')}>
                     Tool contract records
                   </Link>
                 )}

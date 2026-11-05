@@ -26,6 +26,12 @@ export interface SurfaceReadContext {
   skipDirectory?(path: string): boolean;
   /** Record a `.git` below the root of a repository, whose configuration and hooks are not read. */
   nestedRepository?(path: string): void;
+  /**
+   * True when every read here is a plain read of the disk. Only then may the `.git` file of a
+   * linked worktree or a submodule be followed to the folder it names, which is outside the
+   * folder being read; a bound capture answers for its root alone and leaves it unset.
+   */
+  plainDisk?: boolean;
   /** Internal captures need repeatable comparisons; legacy CLI output remains run-keyed. */
   stableDigest?(text: string): string;
   gitMetadata?: {
@@ -38,6 +44,7 @@ export interface SurfaceReadContext {
 
 /** Legacy callers retain their original read and fallback behavior. */
 export const LEGACY_SURFACE_IO: SurfaceReadContext = {
+  plainDisk: true,
   exists: existsSync,
   stat: statSync,
   lstat: lstatSync,

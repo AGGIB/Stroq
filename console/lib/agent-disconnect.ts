@@ -4,7 +4,7 @@ import { closed, count, hash, member, stamp } from './local-guards';
 export const DISCONNECT_BACKUP_ROOT = '~/.stroq/backups/console-disconnect/';
 export const DISCONNECT_LIMITATIONS = [
   'Only exact hook registrations for the current Stroq runtime in the selected file are removed; other commands and sources remain unchanged.',
-  'Removal affects new agent sessions. It does not stop a running agent or server, revoke access, remove native file filters or change policy.',
+  'Removal affects new agent sessions. It does not stop a running agent or server, revoke access or change policy.',
   'A private full copy of these settings, including other entries, is retained locally without automatic expiry. At most 32 recovery records are accepted.',
 ] as const;
 export const DISCONNECT_REASONS = [

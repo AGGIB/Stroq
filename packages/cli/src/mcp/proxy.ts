@@ -6,7 +6,7 @@ import { childEnv } from './child-env.js';
 import { PendingTable, createLineSplitter, type SplitLine } from './framing.js';
 import type { McpContext } from './judge.js';
 import { killChildTree } from './kill-child.js';
-import { BIND_PHRASES, PIN_SANDBOX_PHRASES, reconfirmCommand } from './pin-argument.js';
+import { BIND_PHRASES, PIN_SANDBOX_PHRASES, unpinCommand } from './pin-argument.js';
 import type { Launch } from './pin-binding.js';
 import { OrderedQueue, createPump, type StrictPumpDeps } from './proxy-pump.js';
 import { StrictLedger } from './strict-ledger.js';
@@ -203,9 +203,9 @@ function pinRefusal(error: unknown, server: string): string {
   if (message === 'cannot verify a bounded regular pin record') return message;
   if (message === 'cannot verify all files of the pinned tree') return message;
   if (message === 'cannot use a runtime folder owned by another user') return message;
-  // A wrapper that is not the one confirmed: the phrase, and the command that confirms the wrapper as it stands.
+  // A wrapper that is not the one confirmed: the phrase, and the command that takes the pin out.
   if (BIND_PHRASES.includes(message))
-    return `${message} (to confirm it again run: ${reconfirmCommand(server)})`;
+    return `${message} (to take the pin out run: ${unpinCommand()})`;
   if (PIN_SANDBOX_PHRASES.some((phrase) => phrase === message)) return message;
   return 'pinned server cannot be verified';
 }

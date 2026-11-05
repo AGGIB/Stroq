@@ -3,7 +3,7 @@
 // "Went to" means the call that ran held the key, not that the host kept it. Each route has
 // one phrase, so the same finding always reads the same way.
 import type { Finding } from './findings.js';
-import { TIERS, type Cut, type Place, type Tier } from './place.js';
+import { TIERS, type Cut, type Place, type Tier, type Via } from './place.js';
 import { TOOL_RUNNERS } from './where.js';
 
 /** `2026-10-11 14:02 UTC`, or `an unknown time`. */
@@ -63,6 +63,15 @@ function resultPhrase(place: Place): string {
   return `the output of ${article(place.tool ?? 'tool')} call${saved}`;
 }
 
+/** What links a request to a key it does not hold, said after "a command made a request there, and". */
+const VIA_WORDS: Readonly<Record<Via, string>> = {
+  variable: 'used a variable this key was put in earlier',
+  environment: 'ran where the environment was printed',
+  folder: "named a folder this key's file is in",
+  pattern: "named files by a pattern or `.` that may take in this key's file",
+  'earlier-step': "ran after a step that named this key's file or printed the environment",
+};
+
 /** What is printed for a host no reader could read. */
 const UNREAD_HOST = 'a host Stroq could not read';
 
@@ -96,6 +105,8 @@ function routeWords(place: Place): string {
       return `${local}, in ${article(word)} command${stopped}`;
     case 'command-near':
       return `${host}? It was in a command that also made a request there${stopped}`;
+    case 'linked':
+      return `${host}? ${article(word)} command made a request there, and ${VIA_WORDS[place.via ?? 'earlier-step']}; Stroq cannot tell whether it carried this key${stopped}`;
     case 'command-ran':
       // A tool that runs what it is given (`js`, a skill, a slash command), not a shell's program.
       if (place.detail === undefined && place.tool !== undefined && TOOL_RUNNERS.has(place.tool))
@@ -135,6 +146,10 @@ function routeWords(place: Place): string {
       const file = place.detail ?? 'a file';
       if (then?.route === 'command-unread')
         return `${file}, written by the AI, past the files and commands Stroq follows, so it may have been sent${stopped}`;
+      if (then?.route === 'linked') {
+        const to = place.host === undefined ? '' : ` to ${local}`;
+        return `${file}, written by the AI; then ${article(program)} command made a request${to} at ${at} that named the file's folder: check whether the file went${stopped}`;
+      }
       if (then?.route === 'command-near') {
         const to = place.host === undefined ? '' : ` to ${local}`;
         return `${file}, written by the AI; then ${article(program)} command uploaded files${to} at ${at}: check whether it was one of them${stopped}`;
@@ -204,6 +219,8 @@ export function doLine(f: Finding): string {
         return `check whether ${f.place.detail ?? 'that file'} was run; if it was, rotate it`;
       if (f.place.route === 'write-sent')
         return `check where ${f.place.detail ?? 'that file'} went; rotate it if it left this machine`;
+      if (f.place.route === 'linked')
+        return 'check what that command sent; rotate the key if it carried it';
       if (f.place.route === 'ssh')
         return `check what ${f.place.host ?? 'the server'} kept; rotate it if the server is not yours`;
       if (f.place.route === 'mcp')

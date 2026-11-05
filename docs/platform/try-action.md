@@ -1,6 +1,6 @@
 # Try an action
 
-**Try an action** (`/try/`) answers one question without touching anything: _what would my policy do
+**Try an action** (the top of Rules, `/policies/#try`) answers one question without touching anything: _what would my policy do
 with this?_ Type a command, a file to read or write, or a page to fetch, and the real Stroq engine
 judges it twice: in a clean session, and in the same session after the agent has read a file that
 hides an instruction. The two answers side by side show what no list of rules can: the same action
@@ -26,7 +26,7 @@ action, at most 1000 characters>" }`. No other field is accepted, so a path, wor
   the request to the policy engine in a worker thread with a 4 s deadline and a 256 MiB heap cap. The worker's temporary folder is a
   private scratch folder that the service removes once the worker has stopped, so a run that is cut off
   cannot leave its throwaway folders behind.
-- The worker runs the same step runner as `stroq attack` and `stroq bench --actions`
+- The worker runs the same step runner as `stroq attack` and `pnpm dev:bench -- --actions`
   (`runActionScenario`) twice, each in a throwaway project and home that the runner removes
   afterwards. The tainted run first replays one fixed made-up README with a hidden instruction, and
   the row says so if the engine did not actually reach the suspect state.

@@ -1,5 +1,7 @@
 # Stored session taint
 
+> **No screen of the console shows this any more.** The console has five screens (Check, Live, Agents, Rules, Skills & MCP: see `check.md`, `live-view.md`, `skills-mcp.md`). The service described here is still in `console/scripts/` with its tests and is not reached from any screen; it is to be removed.
+
 An investigation can inspect the current stored taint of the session referenced
 by its exact recorded finding. **Clear stored session taint** changes only that
 session's native taint value to `null`. It preserves learned-origin provenance,

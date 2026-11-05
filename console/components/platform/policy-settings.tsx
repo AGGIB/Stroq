@@ -1,6 +1,5 @@
 'use client';
 import Link from 'next/link';
-import { useSearchParams } from 'next/navigation';
 import {
   ArrowRight,
   Check,
@@ -11,9 +10,9 @@ import {
   ShieldCheck,
 } from 'lucide-react';
 import { usePlatform } from '@/components/platform-provider';
-import { Badge, EmptyState, PageHeading, Panel } from '@/components/platform-ui';
+import { Badge, Panel } from '@/components/platform-ui';
 import { ACTION_LABELS, type RecordedActionClass } from '@/lib/incident-comparison';
-import { policyEventReturnHref, policySelection } from '@/lib/policy-navigation';
+import { policySelection } from '@/lib/policy-navigation';
 import { policyHistoryHref } from '@/lib/policy-history-navigation';
 import { mcpGovernanceHref } from '@/lib/mcp-governance-navigation';
 import type { PolicyEffect } from '@/lib/policy-control';
@@ -46,8 +45,12 @@ const ACTION_GROUPS: { label: string; classes: RecordedActionClass[] }[] = [
 const actionLabel = (value: string) =>
   Object.hasOwn(ACTION_LABELS, value) ? ACTION_LABELS[value as RecordedActionClass] : value;
 
-export function PolicySettingsPage() {
-  const selection = policySelection(useSearchParams());
+/** No recorded event is being drafted from: the rules are changed from what is on screen. */
+const NO_EVENT = policySelection(new URLSearchParams());
+
+/** The rules that can be turned on, with a preview and a test before anything is written. A section of Rules. */
+export function PolicySettings() {
+  const selection = NO_EVENT;
   const { localAccess } = usePlatform();
   const {
     workspaceId,
@@ -81,103 +84,32 @@ export function PolicySettingsPage() {
     apply,
     loadEventDraft,
   } = usePolicySettings(selection);
-  const blockedLink =
-    selection.invalid ||
-    (selection.requested && workspaceId !== null && selection.workspaceId !== workspaceId);
-  const returnHref = policyEventReturnHref(selection);
   return (
-    <div className="page-stack">
-      <PageHeading
-        title="Policies"
-        actions={
-          <>
-            <Link className="button" href={mcpGovernanceHref()}>
-              MCP governance <ArrowRight size={15} aria-hidden="true" />
-            </Link>
-            <Link className="button" href={policyHistoryHref()}>
-              Change history <ArrowRight size={15} aria-hidden="true" />
-            </Link>
-            <Link className="button" href="/policies/checks/">
-              Saved checks <ArrowRight size={15} aria-hidden="true" />
-            </Link>
-            <Link className="button" href="/policies/reference/">
-              Rule reference <ArrowRight size={15} aria-hidden="true" />
-            </Link>
-            <button
-              className="icon-button"
-              aria-label="Refresh active policy"
-              disabled={!localAccess || !readAllowed || Boolean(busy) || eventBusy}
-              onClick={() => void load()}
-            >
-              <RefreshCw
-                size={18}
-                className={busy === 'load' ? 'spin' : undefined}
-                aria-hidden="true"
-              />
-            </button>
-          </>
-        }
-      />
-      {blockedLink && (
-        <div className="control-error" role="alert">
-          {selection.invalid
-            ? 'This recorded-event link is invalid.'
-            : 'This event link belongs to another workspace.'}
-          <Link className="inline-link" href="/policies/">
-            Open current Policies
+    <section id="rules" className="rules-section" aria-labelledby="rules-title">
+      <div className="rules-section-head">
+        <h2 id="rules-title">Rules you can change</h2>
+        <div className="rules-section-actions">
+          <Link className="button" href="/policies/checks/">
+            Saved checks <ArrowRight size={15} aria-hidden="true" />
           </Link>
+          <button
+            className="icon-button"
+            aria-label="Refresh active policy"
+            disabled={!localAccess || !readAllowed || Boolean(busy)}
+            onClick={() => void load()}
+          >
+            <RefreshCw
+              size={18}
+              className={busy === 'load' ? 'spin' : undefined}
+              aria-hidden="true"
+            />
+          </button>
         </div>
-      )}
+      </div>
       {error && (
         <div className="control-error" role="alert">
           {error}
         </div>
-      )}
-      {selection.requested && !blockedLink && (
-        <section className="policy-event-draft" aria-label="Recorded event draft">
-          <div>
-            <Badge tone="orange">Recorded event draft</Badge>
-            <p>Review recorded actions before changing protection.</p>
-          </div>
-          <div className="policy-event-actions">
-            <button
-              className="button"
-              disabled={
-                !localAccess ||
-                !readAllowed ||
-                !state?.editable ||
-                Boolean(busy) ||
-                eventBusy ||
-                needsRecheck
-              }
-              onClick={() => void loadEventDraft()}
-            >
-              {eventBusy ? (
-                <LoaderCircle size={16} className="spin" aria-hidden="true" />
-              ) : (
-                <ClipboardCheck size={16} aria-hidden="true" />
-              )}
-              {eventComparison ? 'Reload recorded actions' : 'Load recorded actions'}
-            </button>
-            <Link className="inline-link" href={returnHref}>
-              {receipt ? 'Recompare event' : 'Return to event'}
-              <ArrowRight size={14} />
-            </Link>
-            <Link className="inline-link" href="/policies/">
-              Clear event
-            </Link>
-          </div>
-          {eventError && (
-            <p className="control-error" role="alert">
-              {eventError}
-            </p>
-          )}
-          {eventMessage && (
-            <p className="control-meta" role="status">
-              {eventMessage}
-            </p>
-          )}
-        </section>
       )}
       {receipt && (
         <div className="policy-receipt" role="status">
@@ -192,35 +124,21 @@ export function PolicySettingsPage() {
             <Link className="inline-link" href={policyHistoryHref(receipt.receiptId)}>
               Review recovery options <ArrowRight size={14} aria-hidden="true" />
             </Link>
-            <Link className="inline-link" href="/agents/tasks/">
-              Review task permissions <ArrowRight size={14} />
-            </Link>
-            {selection.incidentId && (
-              <Link className="inline-link" href={returnHref}>
-                Recompare event
-                <ArrowRight size={14} />
-              </Link>
-            )}
           </div>
           <Badge tone="green">Saved</Badge>
         </div>
       )}
       {!localAccess ? (
         <Panel>
-          <EmptyState
-            title="Connect your local engine"
-            description="Open the private local server link to inspect and update the active policy."
-          />
-          <div className="panel-body">
-            <Link href="/settings/" className="button">
-              Connection settings <ArrowRight size={15} aria-hidden="true" />
-            </Link>
-          </div>
+          <p className="panel-body control-meta">
+            Not connected to Stroq on this machine. Run <code>npx @stroq/cli console</code> to open
+            this page with your data.
+          </p>
         </Panel>
-      ) : blockedLink ? null : !state ? (
+      ) : !state ? (
         <Panel>
           <div className="control-empty">
-            {busy || (selection.requested && workspaceId === null) ? (
+            {busy ? (
               <>
                 <LoaderCircle size={28} className="spin" aria-hidden="true" />
                 <p>Reading current policy…</p>
@@ -247,8 +165,8 @@ export function PolicySettingsPage() {
           </div>
           <div className="policy-workbench">
             <Panel
-              title="Protection settings"
-              subtitle="All agents using this Stroq data directory."
+              title="Turn rules on"
+              subtitle="Changes apply to all agents using this Stroq data directory."
             >
               <div className="panel-body">
                 <div className="policy-rules-heading">
@@ -392,6 +310,13 @@ export function PolicySettingsPage() {
           </div>
         </>
       )}
-    </div>
+      <p className="control-meta">
+        MCP calls are judged on{' '}
+        <Link className="inline-link" href={mcpGovernanceHref()}>
+          Skills &amp; MCP
+        </Link>
+        .
+      </p>
+    </section>
   );
 }

@@ -14,7 +14,7 @@ export async function runCoverageCommand(args: readonly string[]): Promise<numbe
   }
   if (values.format !== undefined && values.format !== 'table') {
     process.stderr.write(
-      `stroq coverage: unknown --format "${values.format}" (table, navigator)\n`,
+      `pnpm dev:coverage: unknown --format "${values.format}" (table, navigator)\n`,
     );
     return 1;
   }

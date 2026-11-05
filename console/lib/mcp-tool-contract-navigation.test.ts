@@ -62,7 +62,7 @@ describe('exact MCP tool contract navigation', () => {
       mcpToolContractSelection(new URL(href, 'http://local.test').searchParams).toolId,
     ).toBeNull();
     expect(mcpToolContractHref({ workspaceId, registrationId, bindingId, toolId })).toBe(
-      '/skills/mcp/contracts/',
+      '/skills/?part=tools',
     );
   });
 });

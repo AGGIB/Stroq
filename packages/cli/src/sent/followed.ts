@@ -55,6 +55,8 @@ interface Followed {
   readonly at: string;
   /** The file's own name: a later write to a file by that name adds to its text. */
   readonly base: string;
+  /** The name of the folder the file is in: a name a call may share with a text that is no file. */
+  readonly folder: string;
   names: string[];
   text: string;
   script: Place | null | undefined;
@@ -107,6 +109,26 @@ const cutPlace = (write: Place, at: string): Place => ({
   route: 'write-sent',
   then: { route: 'command-unread', host: null, at },
 });
+
+/**
+ * Whether a call's text names a folder as a path: a word that is the folder (`/w/data`, `data/`), or a
+ * pattern in it (`/w/data/*.txt`). A word with an address in it (`https://news.example/…`) does not; nor
+ * does a word that is another file in the folder.
+ */
+function namesFolderAsPath(text: string, folder: string): boolean {
+  for (const word of text.split(/[\s;&|()<>'"`,]+/)) {
+    if (word === '' || word.includes('://')) continue;
+    const parts = word.split('/').filter((part) => part !== '');
+    const last = parts.at(-1) ?? '';
+    if (last === folder) return true;
+    if (parts.at(-2) === folder && /[*?[{]/.test(last)) return true;
+  }
+  return false;
+}
+
+/** Whether a call that can send uploads files or archives and names the folder of a file as a path. */
+const sendsFolder = (c: CallFacts, folder: string): boolean =>
+  (c.uploads || c.archives) && namesFolderAsPath(c.text, folder);
 
 export function createFollower(ctx: FollowContext): Follower {
   const later = new Map<number, Place>();
@@ -220,6 +242,7 @@ export function createFollower(ctx: FollowContext): Follower {
       write,
       at: call.at,
       base: names[0] ?? '',
+      folder: names[1] ?? '',
       names: [],
       text,
       script: undefined,
@@ -256,24 +279,41 @@ export function createFollower(ctx: FollowContext): Follower {
   /**
    * The followed files a call names, by any of their names: those named by their own name first,
    * the longest name first, so the report names the file the call named over one whose name is a
-   * part of it or that is only in the same folder.
+   * part of it or that is only in the same folder. `folderOnly` are the files the call names by their
+   * folder alone: a folder's name is a part of many texts (a project called `news` is in a news
+   * site's host), so a request that names it only may have sent the file.
    */
-  function named(c: CallFacts, at: string): Set<number> | null {
+  function named(
+    c: CallFacts,
+    at: string,
+  ): { readonly all: Set<number>; readonly folderOnly: ReadonlySet<number> } | null {
     const own = new Set<number>();
     const rest = new Set<number>();
+    const byFolder = new Set<number>();
     for (const [name, ids] of byName) {
       if (spend(c.text.length, at)) return null;
-      if (c.text.includes(name))
-        for (const id of ids) (followed[id]?.base === name ? own : rest).add(id);
+      if (!c.text.includes(name)) continue;
+      for (const id of ids) {
+        const f = followed[id];
+        // Its folder's name and no other of its names: a text that is no file may hold it.
+        if (f !== undefined && name === f.folder && name !== f.base) byFolder.add(id);
+        else (f?.base === name ? own : rest).add(id);
+      }
     }
     const length = (id: number): number => followed[id]?.base.length ?? 0;
-    return new Set([...[...own].sort((a, b) => length(b) - length(a)), ...rest]);
+    const named = new Set([...own, ...rest]);
+    const folderOnly = new Set([...byFolder].filter((id) => !named.has(id)));
+    return {
+      all: new Set([...[...own].sort((a, b) => length(b) - length(a)), ...rest, ...folderOnly]),
+      folderOnly,
+    };
   }
 
   function onCall(c: CallFacts, command: string, call: CallSeen): void {
     if (live.size === 0) return;
-    const matched = named(c, call.at);
-    if (matched === null) return;
+    const found = named(c, call.at);
+    if (found === null) return;
+    const matched = found.all;
     const own = new Map<number, boolean>();
     /**
      * Whether the strict proof of a key's own use holds for this call: never after an earlier call
@@ -293,7 +333,7 @@ export function createFollower(ctx: FollowContext): Follower {
       ...(c.host === undefined ? {} : { host: c.host }),
       ...(c.local === true ? { local: true as const } : {}),
     };
-    const then = (route: 'command' | 'command-near'): Then => ({
+    const then = (route: 'command' | 'command-near' | 'linked'): Then => ({
       route,
       host: c.host ?? null,
       at: call.at,
@@ -307,6 +347,18 @@ export function createFollower(ctx: FollowContext): Follower {
         // strict proof of the key's own use holds for it, which leaves no way to send a file.
         if (c.sends) {
           if (ownFor(f.key)) continue;
+          if (found.folderOnly.has(id) && !sendsFolder(c, f.folder)) {
+            // The request holds the file's folder's name as a part of a text (a host, a word) and not
+            // as the folder or files in it that it uploads: it may have sent the file.
+            raise(f.held, {
+              ...f.write,
+              tier: 'maybe',
+              route: 'write-sent',
+              ...where,
+              then: then('linked'),
+            });
+            continue;
+          }
           raise(f.held, {
             ...f.write,
             tier: 'third_party',

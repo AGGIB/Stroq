@@ -1,3 +1,4 @@
+import { skillsPartHref } from './skills-navigation';
 export type McpContainmentFilter = 'all' | 'removed' | 'configured' | 'attention';
 const RECORD = /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/;
 const WORKSPACE = /^workspace-[a-f0-9]{24}$/;
@@ -42,7 +43,7 @@ export function mcpContainmentHref(
     params.set('workspace', workspaceId);
     params.set('record', recordId);
   }
-  return '/skills/mcp/' + (params.size ? '?' + params : '');
+  return skillsPartHref('registrations', params);
 }
 export function mcpContainmentReadAllowed(
   selection: McpContainmentSelection,

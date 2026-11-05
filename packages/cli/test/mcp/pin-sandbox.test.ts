@@ -8,7 +8,7 @@ import { runMcpProxy } from '../../src/mcp/proxy.js';
 import { fixture, roots } from './pin-fixture.js';
 
 /**
- * Inside `stroq run --sandbox` the folder for the verified copy is denied on purpose, so a pinned server
+ * Inside a sandbox that protects the Stroq home the folder for the verified copy is denied on purpose, so a pinned server
  * cannot start there. The refusal says so, in a fixed phrase, and the sandbox phrase is used only when the
  * run is a sandboxed one. The disk is made to say "no" with a Stroq home that cannot be written.
  */
@@ -156,7 +156,7 @@ describe('a linked Stroq home or store folder', () => {
 });
 
 describe('doctor and the sandbox', () => {
-  it('notes, among its checks, that a pinned server cannot start inside stroq run --sandbox', async () => {
+  it('notes, among its checks, that a pinned server cannot start inside a sandbox that protects the Stroq home', async () => {
     const { doctorReport } = await import('../../src/commands/doctor.js');
     const f = await fixture();
 
@@ -165,7 +165,8 @@ describe('doctor and the sandbox', () => {
 
     expect(check).toMatchObject({ ok: true });
     expect(check?.detail).toMatch(/1 pinned MCP server \("demo"\)/);
-    expect(check?.detail).toMatch(/cannot start inside `stroq run --sandbox`/);
+    expect(check?.detail).toMatch(/cannot start inside one/);
+    expect(check?.detail).not.toContain('stroq run');
     expect(check?.detail).toMatch(/not measured with a real srt/);
   });
 

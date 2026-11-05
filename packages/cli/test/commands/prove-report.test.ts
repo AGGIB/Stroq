@@ -206,7 +206,7 @@ describe('adviceFor', () => {
     });
 
     it('does not tell the person to run it again for a probe that is optional', () => {
-      expect(withDeclined('verified', proved).join(' ')).not.toMatch(/run stroq prove again/i);
+      expect(withDeclined('verified', proved).join(' ')).not.toMatch(/run the check again/i);
     });
 
     it('does not hide what really blocks a host that is not verified', () => {

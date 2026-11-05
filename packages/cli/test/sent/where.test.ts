@@ -128,8 +128,8 @@ describe('a key in a shell command', () => {
   });
 
   // A request in a shell command is another company's unless the strict proof of the key's own
-  // use holds; this machine's own address is no such proof. The report still says it was this
-  // machine. Another machine on the local network is another company's too.
+  // use holds. A request to this machine is not another company: a local program may send the key
+  // on, which is a maybe and no more. Another machine on the local network is another company's.
   it.each([
     'http://localhost:3000/x',
     'http://127.0.0.1:8080',
@@ -138,7 +138,7 @@ describe('a key in a shell command', () => {
     'http://0x7f000001/',
   ])('sent to this machine: %s', (url) => {
     expect(bash(`curl -d "k=${STRIPE.value}" ${url}`)).toMatchObject({
-      tier: 'third_party',
+      tier: 'maybe',
       local: true,
     });
   });

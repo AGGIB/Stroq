@@ -11,5 +11,3 @@ export { createJournalViewService } from './journal-view-service.ts';
 export { routeJournalView } from './journal-view-http.ts';
 export { createPostureService } from './posture-service.ts';
 export { routePosture } from './posture-http.ts';
-export { createThreatFeedService } from './threat-feed-service.ts';
-export { routeThreatFeed } from './threat-feed-http.ts';

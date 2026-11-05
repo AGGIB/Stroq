@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { harness } from './codex-skill-sources-ui-harness.mjs';
+import { harness } from './agents-ui-harness.mjs';
 const ids = ['claude-code', 'cursor', 'codex', 'windsurf'];
 const agent = (id, patch = {}) => ({
   id,
@@ -32,18 +32,7 @@ test('Agents presents all four branded rows without the three large inspection m
   for (const id of ids) assert(html.includes(`id="${id}"`));
   assert.deepEqual(h.calls, []);
 });
-test('Codex controls remain outside Details with real component state and no capture on render', () => {
-  const h = harness({}, agent('codex')),
-    html = h.render();
-  const details = html.indexOf('<details class="agent-row-details"'),
-    actions = html.indexOf('class="agent-row-controls"');
-  assert(actions >= 0 && details > actions);
-  for (const text of ['Network guard', 'Credential paths', 'Skill sources'])
-    assert(html.indexOf(text) < details);
-  assert.equal(h.button('Manage').props.disabled, false);
-  assert.deepEqual(h.calls, []);
-});
-test('each agent offers its scoped offline hook check before the separate in-agent subscription test', () => {
+test('each agent offers its scoped offline hook check, and no check that starts the agent', () => {
   const descendants = (value) => {
     if (Array.isArray(value)) return value.flatMap(descendants);
     if (!value || typeof value !== 'object') return [];
@@ -65,7 +54,7 @@ test('each agent offers its scoped offline hook check before the separate in-age
     assert.equal(offline.props.scope, 'project');
     assert.equal(typeof offline.props.onChanged, 'function');
     assert(!descendants(primary).some((e) => e.props?.label === 'Test in agent'));
-    assert(descendants(details).some((e) => e.props?.label === 'Test in agent'));
+    assert(!descendants(details).some((e) => e.props?.label === 'Test in agent'));
     assert(!descendants(details).some((e) => e.props?.label === 'Test hook'));
     assert.deepEqual(h.calls, []);
   }
@@ -90,10 +79,10 @@ test('native Details preserves approval, hook evidence, native gap, observation 
   for (const text of [
     'Hook approval',
     'Not verified',
-    'Stroq hook',
+    'Last test of the hook',
     'In-agent check',
     'Needs a fresh check',
-    'Last hook on this machine',
+    'Last hook call',
     'PreToolUse',
     'Current host version unverified',
   ])
@@ -110,14 +99,12 @@ test('agent anchor and selected scope remain exact while presentation compacts',
     html = h.render();
   assert.match(html, /<article id="cursor"[^>]*tabindex="-1"/);
   assert.match(html, /Workspace/);
-  assert.equal((html.match(/Credential paths/g) ?? []).length, 0);
   assert.deepEqual(h.calls, []);
 });
 test('scoped row layout keeps a single desktop list and 44px controls without shrinking body type', async () => {
   const { readFileSync } = await import('node:fs');
   const css = readFileSync(new URL('../app/agents.css', import.meta.url), 'utf8');
   assert(/\.agent-grid\.agent-rows\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/.test(css));
-  assert(/\.agent-row-controls button\s*\{[^}]*min-height:\s*44px/.test(css));
   assert(/\.agent-row \.agent-brand\s*\{[^}]*width:\s*30px/.test(css));
   assert(!/font-size:\s*(?:1[0-5]|[0-9])px/.test(css));
 });
@@ -145,7 +132,7 @@ test('44px row button declarations beat the later global small-button cascade', 
     specificity(small.selector),
     'old action selector ties the late small-button rule',
   );
-  for (const region of ['agent-row-actions', 'agent-row-detail-actions', 'agent-row-controls']) {
+  for (const region of ['agent-row-actions', 'agent-row-detail-actions']) {
     const candidates = rules(own).filter(
       (r) => r.selector.includes('.' + region) && /(?:\.button|\bbutton)$/.test(r.selector),
     );

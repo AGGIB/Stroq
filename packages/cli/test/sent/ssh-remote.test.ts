@@ -53,8 +53,8 @@ describe('the command ssh runs on the other end', () => {
   // What ssh runs is not read: even `cat` at this machine's own address may hand it on.
   it('only reads it, on this machine: never only seen by the AI', () => {
     expect(bash(`echo ${K} | ssh localhost cat`).tier).not.toBe('seen');
-    // This machine's own address is no strict proof of the key's own use.
-    expect(bash(`echo ${K} | ssh u@127.0.0.1`)).toMatchObject({ tier: 'third_party', local: true });
+    // This machine's own address is not another company: a maybe, on this machine.
+    expect(bash(`echo ${K} | ssh u@127.0.0.1`)).toMatchObject({ tier: 'maybe', local: true });
   });
 
   it('with an option that routes the connection: another company, at a host it cannot read', () => {

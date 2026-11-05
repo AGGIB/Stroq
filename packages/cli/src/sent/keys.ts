@@ -34,6 +34,7 @@ import {
   decoyFiles,
   isCanaryValue,
 } from './canaries.js';
+import { judgeValue } from './key-quality.js';
 import { keyName } from './names.js';
 import { keyForms, textMatcher } from './needles.js';
 import { pieceTable } from './pieces.js';
@@ -74,6 +75,13 @@ export interface KeySet {
   readonly skippedFiles: number;
   /** Lines named like a key whose value is not compared: too short, a placeholder, a path. */
   readonly rejectedLines: number;
+  /**
+   * Distinct values read from key files or the environment that look like examples or placeholders
+   * (`key-quality.ts`): not looked for, and counted so that the report says so.
+   */
+  readonly placeholders: number;
+  /** The names those values were read under, as they are printed: each once, in the order read. */
+  readonly placeholderNames?: readonly string[];
   /** Env files one folder below a project folder read, which are not read. */
   readonly subfolderEnvFiles: number;
   /** Canaries `stroq canary` planted whose value is in no file read: not looked for. */
@@ -187,6 +195,19 @@ interface Reading {
   unreadable: number;
   skippedFiles: number;
   rejected: number;
+  /**
+   * The values not traced because they look like examples, each with the name it was first read under;
+   * held here only to count them once and to name them. A value is never kept past the run.
+   */
+  readonly examples: Map<string, string>;
+}
+
+/** Whether a value is traced; one that looks like an example is counted, once, and is not. */
+function traced(value: string, name: string, reading: Reading): boolean {
+  // A canary is planted to be found, whatever it looks like, and in whichever file it was pasted.
+  if (isCanaryValue(value) || judgeValue(value).traced) return true;
+  if (!reading.examples.has(value)) reading.examples.set(value, keyName(name));
+  return false;
 }
 
 /**
@@ -215,8 +236,12 @@ function readFile(
         extractSourceSecretsWhole(path, text, { urlPasswords: true });
   reading.rejected += found.rejected;
   let whole = !cut && !found.cut;
-  for (const secret of found.secrets)
+  for (const secret of found.secrets) {
+    // A canary is a decoy planted to be found, whatever it looks like; any other value must look like
+    // a secret to be traced.
+    if (origin !== 'decoy' && !traced(secret.value, secret.name, reading)) continue;
     whole = pool.add({ name: secret.name, source, value: secret.value }, origin, room) && whole;
+  }
   if (!whole) reading.partial.add(source);
   return Buffer.byteLength(text, 'utf8');
 }
@@ -296,13 +321,15 @@ export function loadKeys(sources: KeySources): KeySet {
     unreadable: 0,
     skippedFiles: 0,
     rejected: 0,
+    examples: new Map(),
   };
   const homeFiles = HOME_SECRET_SOURCES.map((rel) => join(sources.home, rel));
   for (const path of homeFiles) readFile(path, 'home', pool, reading, sources.home);
   const decoys = sources.stroqHome === undefined ? [] : decoyFiles(sources.stroqHome);
   for (const path of decoys) readFile(path, 'decoy', pool, reading, sources.home);
   for (const found of extractEnv(sources.env))
-    pool.add({ name: found.name, source: 'env', value: found.value }, 'env', () => true);
+    if (traced(found.value, found.name, reading))
+      pool.add({ name: found.name, source: 'env', value: found.value }, 'env', () => true);
   const folders = new Set(sources.projectDirs);
   for (const dir of folders) readFolder(dir, pool, reading, sources.home);
   let subfolderFiles = 0;
@@ -323,6 +350,8 @@ export function loadKeys(sources: KeySources): KeySet {
     partial: [...reading.partial],
     skippedFiles: reading.skippedFiles,
     rejectedLines: reading.rejected,
+    placeholders: reading.examples.size,
+    placeholderNames: [...new Set(reading.examples.values())],
     subfolderEnvFiles: subfolderFiles,
     canariesNotFound:
       sources.stroqHome === undefined ? 0 : canariesNotFound(sources.stroqHome, canaries),
@@ -352,26 +381,66 @@ export interface KeyFinder {
    * for a host, a path or a program name about to be printed (`pieces.ts`).
    */
   hasPiece(text: string): boolean;
+  /**
+   * A name as it may be printed: null when it holds six characters of a key that guards names (the
+   * whole name is then hidden); otherwise the name with the value of every key that does not guard
+   * names (see `keyFinder`) cut out of it, in any case. The pieces are looked for in the name as it
+   * came, before any cut: a cut could split a piece and let it through.
+   */
+  shown(text: string): string | null;
   /** How many texts the search for keys was cut short in (`needles.ts`). */
   cuts(): number;
 }
 
-export function keyFinder(keys: readonly Key[]): KeyFinder {
+/** What a masked value is written as. */
+const MASKED = '[key]';
+
+const escapeRegExp = (text: string): string => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The finder for `keys`. Every key is looked for in a text. `guardsNames` says which of them hide a
+ * whole name that holds a piece of them (`hasPiece`): all of them unless a caller names fewer. The
+ * others (the card names the keys whose value is an ordinary word, `card/ordinary-value.ts`) are
+ * cut out of a name instead (`shown`), so no value is printed either way.
+ */
+export function keyFinder(
+  keys: readonly Key[],
+  guardsNames: (key: Key) => boolean = () => true,
+): KeyFinder {
   const matcher = textMatcher(keys.map((k) => k.value));
   let lower: ReturnType<typeof textMatcher> | null = null;
+  const plain = keys.filter((k) => !guardsNames(k));
+  let plainLower: ReturnType<typeof textMatcher> | null = null;
   // A canary's prefix is the same for every one, and documented: only the letters drawn after it
   // are its secret.
   const pieces = pieceTable(
-    keys.map((k) =>
-      k.canary === true && k.value.startsWith(CANARY_PREFIX)
-        ? k.value.slice(CANARY_PREFIX.length)
-        : k.value,
-    ),
+    keys
+      .filter(guardsNames)
+      .map((k) =>
+        k.canary === true && k.value.startsWith(CANARY_PREFIX)
+          ? k.value.slice(CANARY_PREFIX.length)
+          : k.value,
+      ),
   );
+  /** `text` with the value of every key that does not guard names cut out of it, in any case. */
+  const mask = (text: string): string => {
+    if (plain.length === 0 || text.length === 0) return text;
+    plainLower ??= textMatcher(plain.map((k) => k.value.toLowerCase()));
+    const found = [...plainLower.find(text.toLowerCase())]
+      .map((i) => (plain[i] as Key).value)
+      .sort((a, b) => b.length - a.length);
+    let out = text;
+    for (const value of found)
+      for (const form of keyForms(value))
+        out = out.replace(new RegExp(escapeRegExp(form), 'gi'), MASKED);
+    return out;
+  };
   return {
     keys,
     hasPiece: (text) => pieces.has(text),
-    cuts: () => matcher.cuts() + (lower?.cuts() ?? 0),
+    // The pieces are looked for in the name as it came: a cut made first could split one.
+    shown: (text) => (pieces.has(text) ? null : mask(text)),
+    cuts: () => matcher.cuts() + (lower?.cuts() ?? 0) + (plainLower?.cuts() ?? 0),
     holds(text: string): boolean {
       if (text.length === 0) return false;
       lower ??= textMatcher(keys.map((k) => k.value.toLowerCase()));

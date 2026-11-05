@@ -3,7 +3,8 @@ import { useRef, useState } from 'react';
 import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { ArrowRight, RefreshCw, Server } from 'lucide-react';
-import { AgentGlyph, Badge, EmptyState, PageHeading, Panel } from '@/components/platform-ui';
+import { AgentGlyph, Badge, EmptyState, Panel } from '@/components/platform-ui';
+import { partParams, skillsPartHref } from '@/lib/skills-navigation';
 import { INVENTORY_AGENTS } from '@/lib/inventory';
 import type { McpContainmentRecord, McpContainmentReceipt } from '@/lib/mcp-containment';
 import {
@@ -12,7 +13,6 @@ import {
   resolveMcpContainmentSelection,
   type McpContainmentFilter,
 } from '@/lib/mcp-containment-navigation';
-import { SkillsTabs } from './inventory';
 import { useMcpContainment } from './use-mcp-containment';
 import { McpCallControls } from './mcp-call-controls';
 import {
@@ -29,8 +29,9 @@ const REASONS = {
   'storage-unavailable': 'Private recovery storage could not be read safely.',
   'runtime-unavailable': 'The local registration engine is unavailable.',
 };
-export function McpContainmentPage() {
-  const location = mcpContainmentSelection(useSearchParams());
+/** What was done to each MCP registration, with the undo of each, and which servers are paused. A part of Skills & MCP. */
+export function RegistrationHistory() {
+  const location = mcpContainmentSelection(partParams(useSearchParams(), 'registrations'));
   const { localAccess, workspaceId, allowed, state, loading, error, refresh } =
     useMcpContainment(location);
   const resolved = resolveMcpContainmentSelection(location, workspaceId, state?.records ?? null);
@@ -63,28 +64,25 @@ export function McpContainmentPage() {
   );
   const invalidLocation = resolved.status === 'invalid' || resolved.status === 'workspace-mismatch';
   return (
-    <div
-      className="page-stack"
+    <section
+      id="registrations"
+      className="skills-part"
       ref={page}
       tabIndex={-1}
-      role="region"
-      aria-label="MCP registration history"
+      aria-labelledby="registrations-title"
     >
-      <PageHeading
-        title="MCP registrations"
-        actions={
-          <button
-            ref={refreshButton}
-            className="button"
-            disabled={!allowed || loading}
-            onClick={() => void refresh()}
-          >
-            <RefreshCw size={16} className={loading ? 'spin' : undefined} />
-            {loading ? 'Rechecking…' : 'Recheck registrations'}
-          </button>
-        }
-      />
-      <SkillsTabs active="mcp" />
+      <div className="skills-part-head">
+        <h2 id="registrations-title">MCP changes</h2>
+        <button
+          ref={refreshButton}
+          className="button"
+          disabled={!allowed || loading}
+          onClick={() => void refresh()}
+        >
+          <RefreshCw size={16} className={loading ? 'spin' : undefined} />
+          {loading ? 'Rechecking…' : 'Recheck registrations'}
+        </button>
+      </div>
       <McpCallControls />
       {error && (
         <p className="control-error" role="alert">
@@ -114,16 +112,10 @@ export function McpContainmentPage() {
       )}
       {!localAccess ? (
         <Panel>
-          <EmptyState
-            title="Connect the local engine"
-            description="Use your private server link to inspect registration history and recovery copies."
-          />
-          <div className="panel-body">
-            <Link href="/settings/" className="button">
-              Connection settings
-              <ArrowRight size={16} />
-            </Link>
-          </div>
+          <p className="panel-body control-meta">
+            Not connected to Stroq on this machine. Run <code>npx @stroq/cli console</code> to open
+            this page with your data.
+          </p>
         </Panel>
       ) : invalidLocation ? (
         <Panel>
@@ -134,7 +126,7 @@ export function McpContainmentPage() {
             description="This link does not select a registration in the current workspace."
           />
           <div className="panel-body">
-            <Link href="/skills/mcp/" className="button">
+            <Link href={skillsPartHref('registrations')} className="button">
               Open local history
               <ArrowRight size={16} />
             </Link>
@@ -358,6 +350,6 @@ export function McpContainmentPage() {
         }}
         onNeedsRecheck={() => void refresh()}
       />
-    </div>
+    </section>
   );
 }

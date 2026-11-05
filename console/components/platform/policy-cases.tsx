@@ -180,7 +180,7 @@ export function PolicyCasesPage() {
           <>
             <Link href="/policies/" className="button">
               <ArrowLeft size={16} aria-hidden="true" />
-              Policies
+              Rules
             </Link>
             <button
               className="button"

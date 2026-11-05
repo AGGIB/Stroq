@@ -5,15 +5,41 @@
   <img src="docs/assets/logo.svg" alt="Stroq" width="340">
 </picture>
 
-### AI agent security platform
+### Who is really in charge of your agent?
 
 [![CI](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml/badge.svg)](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml)
 [![stroq attack: 0 of 36 passed through](https://img.shields.io/badge/stroq%20attack-0%20of%2036%20passed%20through-1f9d55)](docs/GUIDE.md#replay-thirty-six-attacks-from-public-reports-and-synthetic-cells)
 [![npm version](https://img.shields.io/npm/v/%40stroq%2Fcli?logo=npm&logoColor=white&label=npm&color=cb3837)](https://www.npmjs.com/package/@stroq/cli)
-[![npm downloads](https://img.shields.io/npm/d18m/%40stroq%2Fcli?label=downloads&color=0b7285)](https://www.npmjs.com/package/@stroq/cli)
 [![License: Apache 2.0](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 
 </div>
+
+Stroq reads your own Claude Code and Codex sessions and shows how many commands came from text your agent read, and which keys left your machine.
+
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/card-dark.png">
+  <img src="docs/assets/readme/card.png" alt="The Stroq card in a terminal, on an example machine: Hoo, an orange pixel owl, beside the counts for 30 days of agent sessions (105 commands your agent ran, 1 that came from text it read, 1 key that left the machine, 1 repo that runs code as soon as an agent opens it) and three moments worth a look, each with a stroq show line" width="800">
+</picture>
+
+<sub>An example: a made-up machine with made-up sessions, keys and hosts. Hoo is Stroq's owl. Your card shows your own sessions.</sub>
+
+```bash
+npx @stroq/cli
+```
+
+It reads your last 30 days of sessions, your key files and the folders your agent worked in; prints key names, never values; writes nothing but a small cache under `~/.stroq`; and sends nothing. No account, no telemetry.
+
+```text
+npx @stroq/cli            a card of your own sessions, like the one above
+npx @stroq/cli init       stop it next time: guard your agent
+npx @stroq/cli why        why an action was stopped
+npx @stroq/cli attack     watch Stroq stop 36 known attacks, in a sandbox
+npx @stroq/cli uninstall  remove Stroq
+```
+
+Every moment on the card has a `stroq show` line that prints the evidence behind it (`npx @stroq/cli show 1`). `stroq help --all` lists the other commands. Needs Node.js 22 or newer. Apache-2.0.
+
+## Beyond the card
 
 Stroq is a local security platform for AI coding agents: Claude Code, Cursor, Codex CLI and others. Its hooks judge every tool call before it runs. They deny `curl | sh` and outbound calls that carry a known secret from your machine, and they ask you first when a command repeats text the agent read, naming that text. The console shows which agents actually ask Stroq, and every decision with its reason. Sessions you already had can be checked too, without installing anything.
 
@@ -23,8 +49,6 @@ npx @stroq/cli replay --all   # your Claude Code sessions of the last 30 days ag
 npx @stroq/cli sent           # did your agent pass your keys on? key names, never values
 npx @stroq/cli init           # hook into your agent and guard the next session
 ```
-
-Needs Node.js 22 or newer. Runs on your machine: no account, no telemetry, Apache-2.0.
 
 <img src="docs/assets/readme/console-live.png" alt="Stroq console, Live page: the last 17 recorded actions, 11 allowed, 2 asked you, 3 denied, 1 flagged, and the feed with each action's decision and rule, such as a command denied by deny-encoded-exec and one asked about by ask-origin-untrusted" width="900">
 
@@ -43,7 +67,7 @@ Needs Node.js 22 or newer. Runs on your machine: no account, no telemetry, Apach
 </tr>
 </table>
 
-**Live** follows recorded decisions as they happen and **Activity** keeps them. Connected means Stroq's hooks are in the agent's settings, not that the agent calls them: **Test hook** and **Live** show that. Skills & MCP, investigations, sessions and secret exposure are under **When you need it**; the **Guide** page says what each page is for.
+**Live** follows recorded decisions as they happen and **Activity** keeps them. Connected means Stroq's hooks are in the agent's settings, not that the agent calls them: **Test hook** and **Live** show that. Skills & MCP, investigations, sessions and secret exposure are under **When you need it**.
 
 ```sh
 npx @stroq/cli console                            # a private page on 127.0.0.1
@@ -52,7 +76,7 @@ npx @stroq/cli console --workspace /path/to/repo  # the project it should look a
 
 Open the whole link it prints: it carries a key that is new each time the console starts. The console reads what Stroq already records on this machine. It changes an agent's settings or Stroq's policy only after you confirm a preview of that change; checks you run are saved under `~/.stroq`.
 
-It listens only on 127.0.0.1, needs no account and has no telemetry. With the optional threat feed turned on in Settings, it downloads [pwn.watch](https://pwn.watch/)'s public list of incidents; nothing about your project is sent. One action starts your real agent: **Test in agent** runs it against a throwaway project, with a cap on requests, and uses your agent's own subscription. Adding hooks from the console needs macOS or Linux; on Windows use `stroq init`. Details and limits: [console guide](console/README.md).
+It listens only on 127.0.0.1, needs no account and has no telemetry. Nothing in it starts your agent: **Test hook** runs the hook once, offline. Adding hooks from the console needs macOS or Linux; on Windows use `stroq init`. Details and limits: [console guide](console/README.md).
 
 From a source checkout:
 
@@ -110,7 +134,7 @@ Stroq names a send only when it sees the key in the command that sent it. A scri
 
 - **Before each action.** Native hooks for Claude Code, Cursor, Codex, Copilot CLI, Windsurf and Antigravity, a plugin for OpenClaw, and a stdio MCP proxy. Supported outbound calls containing a known secret can be denied; provenance ties later actions to the tool output they repeat. A question about a value copied from text the agent read is asked once per session in Claude Code, unless the session has started something in the background.
 - **After the fact.** `replay` and `sent` read local session records, including sessions from before Stroq was installed. Old, rotated or unknown values may be missed, and a key that did not show in a command may still have left in a script, a file or a variable. A local transcript match does not by itself prove delivery to a model provider.
-- **Local.** No outbound network calls from the hooks; Task Lock hooks speak only to their local parent controller. No telemetry.
+- **Local.** No outbound network calls from the hooks; the hook of an older Task Lock run speaks only to its local parent controller. No telemetry.
 - **Limits.** A hook sees only what the host sends it, and that differs by agent and version. Matching is text-level, so a command the model writes from scratch does not trace back to a source. It is a filter, not a sandbox. Read the [integration limits](docs/AGENTS.md) before relying on a live hook.
 
 ## Docs

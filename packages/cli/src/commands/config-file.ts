@@ -104,8 +104,8 @@ export function parseConfigJson<T>(file: string, text: string): T {
 }
 
 /**
- * Whether `path` is `root` or lies under it. Shared with the harden engine's writer, so that the
- * two writers of an agent config give one answer. A directory called `..x` is a directory, not a
+ * Whether `path` is `root` or lies under it. Shared with the atomic writer (`harden/atomic.ts`), so
+ * that the writers of an agent config give one answer. A directory called `..x` is a directory, not a
  * way out: only `..` itself, or `..` followed by a separator, leaves the root.
  */
 export const within = (path: string, root: string): boolean => {

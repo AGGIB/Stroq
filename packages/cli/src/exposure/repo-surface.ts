@@ -1,12 +1,17 @@
 import type { Dirent } from 'node:fs';
 import { LEGACY_SURFACE_IO, type SurfaceReadContext } from './surface-io.js';
-import { isAbsolute, join, relative, resolve, sep } from 'node:path';
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { isGitExecKey } from '@stroq/core';
 import { INSTALL_SCRIPT_NAMES } from './agent-editor.js';
 import { hookOutcome } from './hook-outcome.js';
 import type { Finding } from './findings.js';
-import { plainHookHits } from './plain-hook-folders.js';
+import { MAX_HOOK_FILES, plainHookHits } from './plain-hook-folders.js';
 import { FILE_NAMES, foldName, gitDirName, looksLikeGitDir } from './git-dir-names.js';
+import { MAX_CONFIG_BYTES, gitConfigEntries, parseGitConfig } from './git-config.js';
+import { linkedGit, ordinaryGitFolder, type LinkedGit } from './linked-git.js';
+import { isStockLfsHook } from './lfs-hooks.js';
+
+export { gitConfigEntries, parseGitConfig };
 
 /**
  * What a repository can make run on the machine that opens it.
@@ -30,6 +35,11 @@ export interface RepoExecHit {
   readonly file: string;
   /** The key, hook name or script this hit is about. */
   readonly what: string;
+  /**
+   * On a `core.hooksPath` key only: the folder it names was found and its hooks were judged one by
+   * one, each with a finding of its own. Absent when the folder could not be placed (`~`, a variable).
+   */
+  readonly hooksJudged?: true;
 }
 
 export type RepoExecKind =
@@ -64,7 +74,6 @@ export interface RepoSurface {
 
 /** A repository is a working tree, not a corpus; this is generous for one. */
 const MAX_DIRS = 4_000;
-const MAX_CONFIG_BYTES = 256 * 1024;
 /** Only `node_modules` is skipped: a bare repository under `vendor` or `build` runs as well. */
 const SKIP_DIRS = new Set(['node_modules']);
 
@@ -80,176 +89,6 @@ const readTextOr = (
     return fallback;
   }
 };
-
-/**
- * Parses git's INI into dotted keys, the way git reads it (see `parseGitConfig`): no tool's view of
- * the file but git's, and no shelling out to `git config`, which would read the repository's
- * configuration to read it.
- */
-export function gitConfigEntries(text: string): readonly { key: string; value: string }[] {
-  return parseGitConfig(text).entries;
-}
-
-const isSpace = (c: string): boolean => c === ' ' || c === '\t' || c === '\n' || c === '\r';
-const isAlpha = (c: string): boolean => /^[A-Za-z]$/.test(c);
-/** A character of a key or a section name as git takes it: a letter, a digit or `-`. */
-const isKeyChar = (c: string): boolean => /^[A-Za-z0-9-]$/.test(c);
-
-/** The escapes git takes in a value; any other one makes the file one git refuses. */
-const VALUE_ESCAPES: Readonly<Record<string, string>> = {
-  t: '\t',
-  b: '\b',
-  n: '\n',
-  '\\': '\\',
-  '"': '"',
-};
-
-/** A git config read one character at a time, with the line each one is on. */
-class ConfigReader {
-  private at: number;
-  private line = 1;
-  /** The line of the last character read. */
-  lineOfLast = 1;
-  constructor(private readonly text: string) {
-    this.at = text.startsWith('\uFEFF') ? 1 : 0;
-  }
-
-  get done(): boolean {
-    return this.at >= this.text.length;
-  }
-
-  /** The next character; `\r\n` and the end of the file read as a newline, as git reads them. */
-  next(): string {
-    this.lineOfLast = this.line;
-    if (this.done) return '\n';
-    let c = this.text[this.at] as string;
-    this.at += 1;
-    if (c === '\r' && this.text[this.at] === '\n') {
-      c = '\n';
-      this.at += 1;
-    }
-    if (c === '\n') this.line += 1;
-    return c;
-  }
-}
-
-/** A section header after its `[`: `[core]`, `[remote "a\"b"]`, `[a.b]`; undefined when git refuses it. */
-function readSection(r: ConfigReader): string | undefined {
-  let name = '';
-  for (;;) {
-    if (r.done) return undefined;
-    let c = r.next();
-    if (c === ']') return name === '' ? undefined : name;
-    if (isSpace(c)) {
-      // `[name "subsection"]`: blanks, a quoted name whose `\` takes the next character, then `]`.
-      for (; isSpace(c); c = r.next()) if (c === '\n' || r.done) return undefined;
-      if (c !== '"' || name === '') return undefined;
-      let sub = '';
-      for (;;) {
-        c = r.next();
-        if (c === '\n') return undefined;
-        if (c === '"') break;
-        if (c === '\\') {
-          c = r.next();
-          if (c === '\n') return undefined;
-        }
-        sub += c;
-      }
-      return r.next() === ']' ? `${name}.${sub}` : undefined;
-    }
-    if (!isKeyChar(c) && c !== '.') return undefined;
-    name += c.toLowerCase();
-  }
-}
-
-/** A value after its `=`, to the end of its line, as git reads it; undefined when git refuses it. */
-function readValue(r: ConfigReader): string | undefined {
-  let value = '';
-  let quote = false;
-  let comment = false;
-  let blanks = 0;
-  for (;;) {
-    let c = r.next();
-    if (c === '\n') return quote ? undefined : value;
-    if (comment) continue;
-    if (isSpace(c) && !quote) {
-      if (value !== '') blanks += 1;
-      continue;
-    }
-    if (!quote && (c === ';' || c === '#')) {
-      comment = true;
-      continue;
-    }
-    value += ' '.repeat(blanks);
-    blanks = 0;
-    if (c === '\\') {
-      c = r.next();
-      // A value goes on past the end of its line only here, never from a comment.
-      if (c === '\n') continue;
-      const escaped = VALUE_ESCAPES[c];
-      if (escaped === undefined) return undefined;
-      value += escaped;
-      continue;
-    }
-    if (c === '"') {
-      quote = !quote;
-      continue;
-    }
-    value += c;
-  }
-}
-
-/**
- * The entries of a git config, read as git reads them: comments and blanks between entries, a
- * section header with a quoted subsection whose `\` takes the next character, a key on the line of
- * its section, a value with quotes, comments and escapes, continued past the end of its line only
- * by a `\` inside the value. Keys and plain section names are in lower case, as git takes them.
- *
- * Git refuses a whole file it cannot read, and runs none of it; a reader that is wrong about a line
- * would skip a key git runs. So the first line git would refuse ends the reading and is reported in
- * `unplaced`, with what was read before it.
- */
-export function parseGitConfig(text: string): {
-  readonly entries: readonly { key: string; value: string }[];
-  readonly unplaced: readonly number[];
-} {
-  const entries: { key: string; value: string }[] = [];
-  const r = new ConfigReader(text);
-  const refused = () => ({ entries, unplaced: [r.lineOfLast] });
-  let section: string | undefined;
-  let comment = false;
-  while (!r.done) {
-    const c = r.next();
-    if (c === '\n') {
-      comment = false;
-      continue;
-    }
-    if (comment || isSpace(c)) continue;
-    if (c === '#' || c === ';') {
-      comment = true;
-      continue;
-    }
-    if (c === '[') {
-      section = readSection(r);
-      if (section === undefined) return refused();
-      continue;
-    }
-    if (!isAlpha(c) || section === undefined) return refused();
-    let name = c.toLowerCase();
-    let d = r.next();
-    for (; isKeyChar(d); d = r.next()) name += d.toLowerCase();
-    while (d === ' ' || d === '\t') d = r.next();
-    if (d === '\n') {
-      entries.push({ key: `${section}.${name}`, value: 'true' });
-      continue;
-    }
-    if (d !== '=') return refused();
-    const value = readValue(r);
-    if (value === undefined) return refused();
-    entries.push({ key: `${section}.${name}`, value });
-  }
-  return { entries, unplaced: [] };
-}
 
 /** What a hit names for a line of a git config that could not be read. */
 export const UNREAD_CONFIG_LINE = 'a line the check could not read';
@@ -271,8 +110,16 @@ function configText(file: string, io: SurfaceReadContext): string | 'missing' | 
   }
 }
 
-/** The keys of a git config that run something, `label` being how the report names the file. */
-function gitConfigHits(file: string, label: string, io: SurfaceReadContext): RepoExecHit[] {
+/**
+ * The keys of a git config that run something, `label` being how the report names the file. A key
+ * `skip` says is left out: it is read, and judged, by the caller.
+ */
+function gitConfigHits(
+  file: string,
+  label: string,
+  io: SurfaceReadContext,
+  skip: (key: string) => boolean = () => false,
+): RepoExecHit[] {
   const hits: RepoExecHit[] = [];
   const text = configText(file, io);
   if (text === 'missing') return hits;
@@ -290,7 +137,7 @@ function gitConfigHits(file: string, label: string, io: SurfaceReadContext): Rep
       what: `${UNREAD_CONFIG_LINE} (line ${line})`,
     });
   for (const { key, value } of config.entries) {
-    if (!isGitExecKey(key)) continue;
+    if (!isGitExecKey(key) || skip(key)) continue;
     if (/^core\.fsmonitor$/i.test(key) && isBoolean(value)) continue;
     const include = /^include(if)?\./i.test(key);
     if (include || (key === 'core.hookspath' && (isAbsolute(value) || /[~$`]/.test(value))))
@@ -356,17 +203,46 @@ function runsAsGitHook(file: string, plat: NodeJS.Platform, io: SurfaceReadConte
   }
 }
 
+/**
+ * How hooks are read in a `.git` folder in a folder that is not a repository (see `gitHookHit`).
+ * `lfsOk` says the scripts Git LFS writes may be let through, which they are only while nothing
+ * sets a git-lfs key that runs a program (see `lfsKeysSet`).
+ */
+interface StrictHooks {
+  readonly lfsOk: boolean;
+}
+
 /** What a hook file that could not be read as text holds: not known, so not ordinary either. */
 const UNREAD_HOOK = '\u0000';
 
 /**
  * A hook is ordinary only when it is one of the commit hooks, by its name as a forgiving disk
  * opens it, and its text was read and does not download and run code.
+ *
+ * `strict` is for a `.git` folder in a folder that is not a repository, which an extracted zip or
+ * tarball makes exactly as git does, with hooks of its own that run on the next git command. There
+ * every executable hook is a finding, a commit hook too, unless it is a file Git LFS wrote: the
+ * whole text of one of its scripts, in a regular file, under the name that script is for.
  */
-function gitHookHit(dir: string, name: string, io: SurfaceReadContext): RepoExecHit {
-  const file = io.label?.(join(dir, name)) ?? `.git/hooks/${name}`;
-  const text = readTextOr(join(dir, name), UNREAD_HOOK, io);
-  const outcome = hookOutcome(name, text === UNREAD_HOOK ? undefined : text);
+function gitHookHit(
+  root: string,
+  dir: string,
+  name: string,
+  io: SurfaceReadContext,
+  strict?: StrictHooks,
+): RepoExecHit | undefined {
+  const path = join(dir, name);
+  const file = labelOf(root, path, io);
+  const text = readTextOr(path, UNREAD_HOOK, io);
+  const known = text === UNREAD_HOOK ? undefined : text;
+  if (
+    strict?.lfsOk === true &&
+    known !== undefined &&
+    isStockLfsHook(name, known) &&
+    isRegularFile(path, io)
+  )
+    return undefined;
+  const outcome = hookOutcome(name, known);
   if (outcome === 'routine') return { kind: 'git-hook-routine', file, what: name };
   if (outcome === 'unsafe')
     return {
@@ -374,20 +250,50 @@ function gitHookHit(dir: string, name: string, io: SurfaceReadContext): RepoExec
       file,
       what: `${name}, whose text downloads and runs code, sends a secret out, or could not be read`,
     };
+  if (strict !== undefined)
+    return {
+      kind: 'git-hook-routine',
+      file,
+      what: `${name}, a commit hook that nothing here shows git made`,
+    };
   return { kind: 'git-hook', file, what: name };
 }
 
-function gitHookHits(dir: string, plat: NodeJS.Platform, io: SurfaceReadContext): RepoExecHit[] {
+function gitHookHits(
+  root: string,
+  dir: string,
+  plat: NodeJS.Platform,
+  io: SurfaceReadContext,
+  strict?: StrictHooks,
+): RepoExecHit[] {
   if (!io.exists(dir)) return [];
   try {
-    return io
+    const names = io
       .entries(dir)
       .map((entry) => entry.name)
       .filter((name) => !name.endsWith('.sample'))
-      .filter((name) => runsAsGitHook(join(dir, name), plat, io))
-      .map((name) => gitHookHit(dir, name, io));
+      .filter((name) => runsAsGitHook(join(dir, name), plat, io));
+    // The folder a `core.hooksPath` names can hold anything: the first files are read, and the rest said.
+    const read = strict === undefined ? names : names.slice(0, MAX_HOOK_FILES);
+    const hits = read.flatMap((name) => gitHookHit(root, dir, name, io, strict) ?? []);
+    if (read.length < names.length)
+      hits.push({
+        kind: 'git-hook-routine',
+        file: labelOf(root, dir, io),
+        what: `${names.length - read.length} more hook files, which were not read`,
+      });
+    return hits;
   } catch {
-    return [];
+    // A folder of hooks that can be entered but not listed may hold any of them.
+    return strict !== undefined && mayHideRepository(dir, io)
+      ? [
+          {
+            kind: 'git-hook-routine',
+            file: labelOf(root, dir, io),
+            what: 'a folder of hooks the check could enter but not list',
+          },
+        ]
+      : [];
   }
 }
 
@@ -464,9 +370,12 @@ function envrcHits(root: string, io: SurfaceReadContext): RepoExecHit[] {
 /** Why a file that only points git elsewhere is reported. */
 const POINTS_ELSEWHERE = 'which points git at the folder of another repository';
 
-/** A path under `root`, with `/` between its parts, for a report: `.` for `root` itself. */
+/**
+ * A path under `root`, with `/` between its parts, for a report: `.` for `root` itself. One outside
+ * it (the config of the repository a linked worktree belongs to) is named by its real path.
+ */
 const labelOf = (root: string, abs: string, io: SurfaceReadContext): string =>
-  io.label?.(abs) ?? (relative(root, abs).split(sep).join('/') || '.');
+  io.label?.(abs) ?? (isWithin(abs, root) ? relative(root, abs).split(sep).join('/') || '.' : abs);
 
 /**
  * The commands of a folder git takes for a repository: its `config` and `config.worktree`, and,
@@ -480,12 +389,13 @@ function gitDirConfigHits(
   dir: string,
   names: ReadonlyMap<string, readonly string[]>,
   io: SurfaceReadContext,
+  skip?: (key: string) => boolean,
 ): RepoExecHit[] {
   const hits: RepoExecHit[] = [];
   const read = (folder: string, found: ReadonlyMap<string, readonly string[]>) => {
     for (const name of [...(found.get('config') ?? []), ...(found.get('config.worktree') ?? [])]) {
       const file = join(folder, name);
-      hits.push(...gitConfigHits(file, labelOf(root, file, io), io));
+      hits.push(...gitConfigHits(file, labelOf(root, file, io), io, skip));
     }
   };
   read(dir, names);
@@ -541,6 +451,233 @@ function namesIn(dir: string, io: SurfaceReadContext): Map<string, string[]> {
   }
 }
 
+/** The files and folder git reads from the git folder of a checkout. */
+interface GitHome {
+  /** The top of the working tree: where a relative `core.hooksPath` starts, and `.lfsconfig` is. */
+  readonly checkout: string;
+  /** The folder that holds the repository: the same for every worktree of it. */
+  readonly common: string;
+  readonly config: string;
+  /**
+   * The checkout's own `config.worktree`. Git reads it only when `extensions.worktreeConfig` is on,
+   * and what turns that on is any boolean git takes (`true`, `on`, any integer but 0, with a `k`,
+   * `m` or `g` after it). That is not worked out here: a file that is not there reports nothing,
+   * and one that is there is read, so no spelling of the flag hides it.
+   */
+  readonly worktreeConfig: string;
+  readonly hooks: string;
+  readonly attributes: readonly string[];
+}
+
+/** Where git reads its configuration, hooks and attributes for `checkout`, given its `.git`. */
+function gitHomeOf(checkout: string, linked: LinkedGit | undefined): GitHome {
+  const common = linked?.common ?? join(checkout, '.git');
+  return {
+    checkout,
+    common,
+    config: join(common, 'config'),
+    worktreeConfig: join(linked?.gitdir ?? common, 'config.worktree'),
+    hooks: join(common, 'hooks'),
+    attributes: [join(checkout, '.gitattributes'), join(common, 'info', 'attributes')],
+  };
+}
+
+/** Adds the hits not added before, by what they say and where. */
+function addOnce(hits: RepoExecHit[], seen: Set<string>, more: readonly RepoExecHit[]): void {
+  for (const hit of more) {
+    const key = `${hit.kind}\0${hit.file}\0${hit.what}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    hits.push(hit);
+  }
+}
+
+const isRegularFile = (path: string, io: SurfaceReadContext): boolean => {
+  try {
+    return io.lstat(path).isFile();
+  } catch {
+    return false;
+  }
+};
+
+const isFolderAt = (path: string, io: SurfaceReadContext): boolean => {
+  try {
+    return io.lstat(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+const tryRealpath = (path: string, io: SurfaceReadContext): string => {
+  try {
+    return io.realpath(path);
+  } catch {
+    return path;
+  }
+};
+
+/** Where a `core.hooksPath` leads from `checkout`; undefined for `~`, which the home folder decides. */
+function hooksFolder(value: string, checkout: string): string | undefined {
+  if (value.startsWith('~')) return undefined;
+  return isAbsolute(value) ? resolve(value) : resolve(checkout, value);
+}
+
+/** Whether two paths are one folder: by name, by real path, or by the file system's own identity. */
+function samePath(a: string, b: string, io: SurfaceReadContext): boolean {
+  if (a === b) return true;
+  const [x, y] = [tryRealpath(a, io), tryRealpath(b, io)];
+  if (x === y) return true;
+  try {
+    const [p, q] = [io.lstat(x), io.lstat(y)];
+    return p.ino !== 0 && p.ino === q.ino && p.dev === q.dev;
+  } catch {
+    return false;
+  }
+}
+
+/** A key of git-lfs that names a program to run (see `GIT_EXEC_KEY`), in the form a config gives it. */
+const isLfsExecKey = (key: string): boolean => /^lfs\./i.test(key) && isGitExecKey(key);
+
+/**
+ * Whether a key that makes Git LFS run a program may be set for this checkout: in the repository's
+ * config or `config.worktree`, or in the `.lfsconfig` at the top of the working tree. A file that
+ * cannot be read or parsed, or an include that brings in a file that is not read here, may set one,
+ * so it counts. A stock LFS hook runs `git lfs`, which obeys such a key, so it is let through only
+ * when this is false.
+ */
+function lfsKeysSet(home: GitHome, io: SurfaceReadContext): boolean {
+  return [home.config, home.worktreeConfig, join(home.checkout, '.lfsconfig')].some((file) => {
+    const text = configText(file, io);
+    if (text === 'missing') return false;
+    if (text === 'unread') return true;
+    const config = parseGitConfig(text);
+    return (
+      config.unplaced.length > 0 ||
+      config.entries.some(({ key }) => isLfsExecKey(key) || /^include(if)?\./i.test(key))
+    );
+  });
+}
+
+/**
+ * `core.hooksPath` sends git to a folder of hooks. In a folder that is not a repository that folder
+ * is the checkout's or the archive's own, so the key is a finding unless it names the repository's
+ * own `.git/hooks` (whatever way it spells it), and the executable hooks of the folder it names are
+ * judged as those of `.git/hooks` are. A relative path starts at the top of the working tree, so
+ * this is done for each checkout of a repository.
+ */
+function hooksPathHits(
+  root: string,
+  home: GitHome,
+  strict: StrictHooks,
+  plat: NodeJS.Platform,
+  io: SurfaceReadContext,
+): RepoExecHit[] {
+  const hits: RepoExecHit[] = [];
+  for (const file of [home.config, home.worktreeConfig]) {
+    for (const { key, value } of parseGitConfig(readTextOr(file, '', io)).entries) {
+      if (key !== 'core.hookspath') continue;
+      const folder = hooksFolder(value, home.checkout);
+      if (folder !== undefined && samePath(folder, home.hooks, io)) continue;
+      hits.push({
+        kind: 'git-config-exec',
+        file: labelOf(root, file, io),
+        what: key,
+        ...(folder === undefined ? {} : { hooksJudged: true as const }),
+      });
+      if (folder !== undefined) hits.push(...gitHookHits(root, folder, plat, io, strict));
+    }
+  }
+  return hits;
+}
+
+/**
+ * What git would run from the git folder of one checkout: the commands its configs name, the
+ * git-lfs keys that run a program (in the configs and in the `.lfsconfig` at the top of the working
+ * tree), the hooks a `core.hooksPath` names, the drivers its attributes route through them, and its
+ * executable hooks, all of them (`strict`, in `gitHookHit`: an archive makes a `.git` folder as git
+ * does). `judged` holds the real paths of the git folders whose shared `config` was read already,
+ * in this walk; that is not read again. Everything that depends on the checkout is: its
+ * `config.worktree`, its `.lfsconfig`, where a relative `core.hooksPath` leads, its attributes, and
+ * whether the scripts Git LFS wrote may be let through. Coverage is only what was read, never where
+ * a folder lies: a repository in a folder the walk does not enter, or past its cap, is not in
+ * `judged`, and is read here.
+ */
+function homeHits(
+  root: string,
+  home: GitHome,
+  judged: Set<string>,
+  plat: NodeJS.Platform,
+  io: SurfaceReadContext,
+): RepoExecHit[] {
+  const real = tryRealpath(home.common, io);
+  const first = !judged.has(real);
+  judged.add(real);
+  const strict: StrictHooks = { lfsOk: !lfsKeysSet(home, io) };
+  // `core.hooksPath` is judged by `hooksPathHits`, which knows where the checkout is.
+  const configHits = (file: string) =>
+    gitConfigHits(file, labelOf(root, file, io), io, (key) => key === 'core.hookspath');
+  const lfsconfig = join(home.checkout, '.lfsconfig');
+  return [
+    ...(first ? configHits(home.config) : []),
+    ...configHits(home.worktreeConfig),
+    ...gitConfigHits(lfsconfig, labelOf(root, lfsconfig, io), io, (key) => !isLfsExecKey(key)),
+    ...hooksPathHits(root, home, strict, plat, io),
+    ...gitAttributesHits(root, [home.config, home.worktreeConfig], home.attributes, io),
+    ...gitHookHits(root, home.hooks, plat, io, strict),
+  ];
+}
+
+/**
+ * What a `.git` file in a folder with no `.git` of its own is: a finding, because a cloned
+ * repository can commit one that points git at a bare repository it also commits, unless git made
+ * it here for a linked worktree or a submodule (see `linked-git.ts`). Such a file is not reported,
+ * and what it leads to is judged instead (`homeHits`), so an archive that carries a `.git` folder
+ * of its own is not trusted for looking like one.
+ */
+function gitFileHits(
+  root: string,
+  pointer: string,
+  judged: Set<string>,
+  plat: NodeJS.Platform,
+  io: SurfaceReadContext,
+): RepoExecHit[] {
+  const linked = linkedGit(pointer, io);
+  if (linked === undefined)
+    return [
+      {
+        kind: 'nested-bare-repo',
+        file: labelOf(root, pointer, io),
+        what: `a .git file, ${POINTS_ELSEWHERE}`,
+      },
+    ];
+  return homeHits(root, gitHomeOf(dirname(pointer), linked), judged, plat, io);
+}
+
+/** A name that is not there, to tell a folder that can be entered from one that cannot. */
+const PROBE = '.stroq-probe';
+
+/**
+ * Whether a folder the walk could not list may hold a repository. Git finds one by the names it
+ * looks for, and those need no listing, so a folder that can be entered but not listed (mode 0311)
+ * can hide one. One that cannot be entered is as closed to git as to the check. A capture says
+ * what it could not list as a gap of its own.
+ */
+function mayHideRepository(dir: string, io: SurfaceReadContext): boolean {
+  if (io.plainDisk !== true) return false;
+  try {
+    io.lstat(dir);
+  } catch {
+    return false;
+  }
+  try {
+    io.lstat(join(dir, PROBE));
+    return true;
+  } catch (err) {
+    const code = (err as { code?: unknown }).code;
+    return code !== 'EACCES' && code !== 'EPERM' && code !== 'ENOTDIR';
+  }
+}
+
 /**
  * A bare repository committed into an ordinary one as plain files. Git refuses to check out a path
  * named `.git`, but a bare repository needs only `HEAD`, `objects/` and `refs/`, or `HEAD` and a
@@ -548,15 +685,20 @@ function namesIn(dir: string, io: SurfaceReadContext): Map<string, string[]> {
  * makes this class of attack deliverable by pull request rather than by zip. Each one is reported
  * with the commands its config runs, and so is a lone `commondir` or `gitdir` file, which only
  * points git elsewhere. In a folder with no `.git` (`folder`), a `.git` folder or file deeper in
- * came with the folder too, and is read and reported the same way.
+ * came with the folder too, and is read and reported the same way, except a `.git` file git made
+ * here for a linked worktree or a submodule (`gitFileHits`).
  */
 function nestedBareRepos(
   root: string,
   withRoot = false,
   folder = false,
   io: SurfaceReadContext = LEGACY_SURFACE_IO,
+  plat: NodeJS.Platform = process.platform,
 ): { hits: RepoExecHit[]; capped: boolean } {
   const hits: RepoExecHit[] = [];
+  // The git folders whose config and hooks were read (by `homeHits`), and the hits already added.
+  const judged = new Set<string>();
+  const seen = new Set<string>();
   const queue: string[] = [root];
   let visited = 0;
   for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
@@ -570,18 +712,45 @@ function nestedBareRepos(
         .filter((entry) => !io.skipDirectory?.(join(dir, entry.name)))
         .sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     } catch {
+      if (mayHideRepository(dir, io))
+        addOnce(hits, seen, [
+          {
+            kind: 'nested-bare-repo',
+            file: labelOf(root, dir, io),
+            what: 'a folder the check could enter but not list, so a repository may be in it',
+          },
+        ]);
       continue;
     }
     // Links and other letter cases too: git opens `Objects` as `objects` on a disk that ignores case.
     const names = namesOf(entries);
     const isBare = looksLikeGitDir(new Set(names.keys()));
     if (isBare && (dir !== root || withRoot)) {
-      hits.push({
-        kind: 'nested-bare-repo',
-        file: labelOf(root, dir, io),
-        what: 'HEAD, objects, refs',
-      });
-      hits.push(...gitDirConfigHits(root, dir, names, io));
+      // A `.git` folder as git makes it is judged by what git would run from it, as a repository is:
+      // that a clone has one is no finding. A bare repository under any other name, or a `.git`
+      // that is not shaped as git makes it, is one by being there.
+      const ordinary = folder && ordinaryGitFolder(dir, io);
+      addOnce(hits, seen, [
+        ...(ordinary
+          ? []
+          : [
+              {
+                kind: 'nested-bare-repo' as const,
+                file: labelOf(root, dir, io),
+                what: 'HEAD, objects, refs',
+              },
+            ]),
+        // `core.hooksPath` of a `.git` folder as git makes it is judged where its checkout is known.
+        ...gitDirConfigHits(
+          root,
+          dir,
+          names,
+          io,
+          ordinary ? (key) => key === 'core.hookspath' : undefined,
+        ),
+      ]);
+      if (ordinary)
+        addOnce(hits, seen, homeHits(root, gitHomeOf(dirname(dir), undefined), judged, plat, io));
       // The root is walked on: what is under it is all this check reads.
       if (dir !== root) continue;
     }
@@ -602,13 +771,8 @@ function nestedBareRepos(
         continue;
       }
       if (folder && folded === '.git') {
-        if (!isDir)
-          hits.push({
-            kind: 'nested-bare-repo',
-            file: labelOf(root, join(dir, entry.name), io),
-            what: `a .git file, ${POINTS_ELSEWHERE}`,
-          });
-        else queue.push(join(dir, entry.name));
+        if (isDir) queue.push(join(dir, entry.name));
+        else addOnce(hits, seen, gitFileHits(root, join(dir, entry.name), judged, plat, io));
         continue;
       }
       if (!isDir || SKIP_DIRS.has(entry.name)) continue;
@@ -651,19 +815,22 @@ export function repoSurface(
     (io.gitMetadata === undefined && !io.exists(join(cwd, '.git')))
   )
     return { isRepo: false, preTrust: [], onOpen: [], capped: false };
-  const bare = nestedBareRepos(cwd, false, false, io);
-  const configs = io.gitMetadata?.configs ?? [join(cwd, '.git', 'config')];
-  const hooks =
-    io.gitMetadata?.hooks === undefined ? join(cwd, '.git', 'hooks') : io.gitMetadata.hooks;
-  const attributes = io.gitMetadata?.attributes ?? [
-    join(cwd, '.gitattributes'),
-    join(cwd, '.git', 'info', 'attributes'),
-  ];
+  const bare = nestedBareRepos(cwd, false, false, io, plat);
+  // A linked worktree's or a submodule's `.git` is a file: git reads the config of the folder it
+  // leads to, so that is what is read, once the file is shown to be git's own. A file that is not
+  // stays unread as a config, which is reported.
+  const own = io.gitMetadata === undefined ? linkedGit(join(cwd, '.git'), io) : undefined;
+  const home = gitHomeOf(cwd, own);
+  // A `.git` that is neither a folder nor a verified file is reported once, as an unread `config`.
+  const reads = own !== undefined || isFolderAt(join(cwd, '.git'), io);
+  const configs = io.gitMetadata?.configs ?? [home.config, ...(reads ? [home.worktreeConfig] : [])];
+  const hooks = io.gitMetadata?.hooks === undefined ? home.hooks : io.gitMetadata.hooks;
+  const attributes = io.gitMetadata?.attributes ?? home.attributes;
   const all = [
     ...configs.flatMap((config) => gitConfigHits(config, labelOf(cwd, config, io), io)),
     ...gitAttributesHits(cwd, configs, attributes, io),
     ...bare.hits,
-    ...(hooks === null ? [] : gitHookHits(hooks, plat, io)),
+    ...(hooks === null ? [] : gitHookHits(cwd, hooks, plat, io)),
     ...workingTreeHits(
       cwd,
       configs.flatMap((config) =>
@@ -708,7 +875,7 @@ export const WHY: Readonly<Record<string, string>> = {
   'devcontainer-host-command':
     'initializeCommand runs on this machine before the container exists, so the container gives it no isolation',
   'git-hook-routine':
-    'git runs this hook during routine use (a `git status` or `git add`, a checkout, a fetch, a merge, any ref update), which an agent does by itself, before any approval; a commit hook is here when its text downloads and runs code, and any other file here may be one a hook sources',
+    'git runs this hook during routine use (a `git status` or `git add`, a checkout, a fetch, a merge, any ref update), which an agent does by itself, before any approval; a commit hook is here when its text downloads and runs code, and any other file here may be one a hook sources; in a folder that came as an archive or a download, any executable hook is here, a commit hook too, since it runs on the next git command',
 };
 
 export function repoFindings(surface: RepoSurface): readonly Finding[] {

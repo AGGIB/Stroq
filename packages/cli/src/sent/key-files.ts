@@ -52,12 +52,8 @@ const LOOKS_ONLY: ReadonlySet<string> = new Set([
   'dirname',
 ]);
 
-/**
- * A key file sent to this machine's own address is no strict proof of the key's own use: another
- * company's, as a key in such a request is, though the report says it was this machine.
- */
-const asSent = (place: Place): Place =>
-  place.tier === 'maybe' && place.local === true ? { ...place, tier: 'third_party' } : place;
+/** The index of a finder, by home: a finder's keys do not change, so many sessions share one. */
+const INDEXES = new WeakMap<KeyFinder, Map<string | undefined, KeyFileIndex>>();
 
 /**
  * The key files keys were read from, by path, and the names they and their folders go by. A path
@@ -65,6 +61,16 @@ const asSent = (place: Place): Place =>
  * is the home folder this machine gave (`USERPROFILE` on Windows).
  */
 export function keyFileIndex(finder: KeyFinder, home: string | undefined): KeyFileIndex {
+  let byHome = INDEXES.get(finder);
+  if (byHome === undefined) INDEXES.set(finder, (byHome = new Map()));
+  const known = byHome.get(home);
+  if (known !== undefined) return known;
+  const built = buildKeyFileIndex(finder, home);
+  byHome.set(home, built);
+  return built;
+}
+
+function buildKeyFileIndex(finder: KeyFinder, home: string | undefined): KeyFileIndex {
   const keysOf = new Map<string, number[]>();
   const environment: number[] = [];
   finder.keys.forEach((key, i) => {
@@ -91,6 +97,10 @@ export function keyFileIndex(finder: KeyFinder, home: string | undefined): KeyFi
 export interface KeyFileUse {
   readonly place: Place;
   readonly keys: readonly number[];
+  /** What in the command linked it to the keys, when that is known: for the evidence. */
+  readonly how?: 'file' | 'folder' | 'pattern' | 'near' | 'environment';
+  /** The word of the command that named the file, folder or pattern. */
+  readonly word?: string;
 }
 
 /** A place cut short by a bound of the check: what it dropped may have sent the key. */
@@ -116,12 +126,12 @@ export function keyFileUses(
   lost = false,
 ): KeyFileUse[] {
   if (index.keysOf.size === 0 && index.environment.length === 0) return [];
-  const named = namedEnds(command);
+  const named = namedEnds(command, where.home);
   const paths = new Set<string>();
   for (const end of named.ends)
     for (const path of index.byName.get(end.toLowerCase()) ?? []) paths.add(path);
   const cut: KeyFileUse[] = [];
-  if (named.wild) {
+  if (named.wild || named.broad) {
     // Past the run's time for reading commands, every key file is checked: none is read.
     const checked = readBudgetLeft() ? index.all.slice(0, MAX_WILD_KEY_FILES) : index.all;
     for (const path of checked) paths.add(path);
@@ -139,12 +149,17 @@ export function keyFileUses(
   for (const path of paths) {
     const use = fileUse(command, path, NO_KEY, where, LOOKS_ONLY);
     if (use !== null && use.place.tier !== 'seen')
-      uses.push({ place: asSent(use.place), keys: index.keysOf.get(path) ?? [] });
+      uses.push({
+        place: use.place,
+        keys: index.keysOf.get(path) ?? [],
+        ...(use.how === undefined ? {} : { how: use.how }),
+        ...(use.word === undefined || use.word === '' ? {} : { word: use.word }),
+      });
   }
   // Placed after what was read, so a key file a command did send is reported as sent.
   uses.push(...cut);
   if (index.environment.length === 0) return uses;
   const sent = environmentUse(command, where);
-  if (sent !== null) uses.push({ place: asSent(sent), keys: index.environment });
+  if (sent !== null) uses.push({ place: sent, keys: index.environment, how: 'environment' });
   return uses;
 }

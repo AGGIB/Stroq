@@ -156,7 +156,7 @@ async function checkAndShow(
       ids: deps.ids,
     });
   } catch (err) {
-    io.err(`stroq prove: the check stopped: ${outsideLine(describeFailure(err))}\n`);
+    io.err(`pnpm dev:prove: the check stopped: ${outsideLine(describeFailure(err))}\n`);
     return EXIT_NOT_VERIFIED;
   }
   const kept = keep(result);
@@ -166,7 +166,8 @@ async function checkAndShow(
     reportOf(result),
     kept.kept ? `Result kept in ${outsideLine(kept.file)}\n` : '',
   );
-  if (!kept.kept) io.err(`stroq prove: could not keep the result: ${outsideLine(kept.problem)}\n`);
+  if (!kept.kept)
+    io.err(`pnpm dev:prove: could not keep the result: ${outsideLine(kept.problem)}\n`);
   return code;
 }
 
@@ -179,7 +180,7 @@ async function spend(
 ): Promise<number> {
   const ready = prepare(options, deps.env ?? process.env);
   if (typeof ready === 'string') {
-    io.err(`stroq prove: ${outsideLine(ready)}\n`);
+    io.err(`pnpm dev:prove: ${outsideLine(ready)}\n`);
     return EXIT_NOT_VERIFIED;
   }
   const notice = noticeText({
@@ -191,7 +192,7 @@ async function spend(
   const consent = await consentOf(options, deps);
   if (consent === 'not-asked') {
     io.err(
-      'stroq prove: this is not a terminal, so it will not make requests on your login without --yes.\nRun: stroq prove --yes\n',
+      'pnpm dev:prove: this is not a terminal, so it will not make requests on your login without --yes.\nRun: pnpm dev:prove -- --yes\n',
     );
     return EXIT_USAGE;
   }

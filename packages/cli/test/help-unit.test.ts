@@ -12,37 +12,48 @@ import {
   usageError,
   wantsHelp,
 } from '../src/help.js';
+import { ATTACK_COUNT } from '../src/help-listing.js';
+import { SCENARIOS } from '../src/attack/scenarios/index.js';
 
 // help.test.ts runs these through the built CLI, which is what a user runs but not
 // what coverage sees; this file pins the same functions in-process.
 
-/** The commands on the first screen, in the order it lists them. */
-const CORE = ['sent', 'inspect', 'vet', 'init', 'doctor', 'why', 'uninstall'];
-/** What Stroq writes into an agent's config: no person runs these, so no list shows them. */
-const HIDDEN = ['hook', 'mcp'];
+/** The commands on the first screen, in the order it lists them. The bare `stroq` is above them. */
+const CORE = ['init', 'why', 'attack', 'uninstall'];
+/** What Stroq writes into an agent's config (no person runs these), and the card, which `stroq` runs. */
+const HIDDEN = ['hook', 'mcp', 'card', 'show'];
 
-/** The commands a screen lists: one per line that starts with `  stroq <name>`. */
+/** The commands a screen lists: one per line that starts with `stroq <name>`, indented or not. */
 const listed = (text: string): string[] =>
-  [...text.matchAll(/^ {2}stroq ([a-z][a-z-]*)/gm)].map((match) => match[1] ?? '');
+  [...text.matchAll(/^ {0,2}stroq ([a-z][a-z-]*)/gm)].map((match) => match[1] ?? '');
 
 const linesOf = (text: string): string[] => text.trimEnd().split('\n');
 
 describe('usage: the first screen', () => {
-  it('opens with what Stroq is for, in two lines', () => {
-    expect(usage()).toMatch(
-      /^stroq: see what your AI coding agent saw, ran and installed\.\nRuns on your machine, no telemetry\.\n\n/,
+  it('is the owner’s five lines and a pointer to the rest, and nothing else', () => {
+    expect(usage()).toBe(
+      [
+        'stroq            who is really in charge of your agent? A card of your sessions',
+        'stroq init       stop it next time: guard your agent',
+        'stroq why        why an action was stopped',
+        'stroq attack     watch Stroq stop 36 known attacks, in a sandbox',
+        'stroq uninstall  remove Stroq',
+        '',
+        'More commands: stroq help --all',
+        '',
+      ].join('\n'),
     );
   });
 
-  it('lists exactly the core commands: three that read under Check, four under Guard', () => {
+  it('lists exactly the core commands, after the bare `stroq`', () => {
     const text = usage();
     expect(listed(text)).toEqual(CORE);
-    const check = text.indexOf('\nCheck (reads only):\n');
-    const guard = text.indexOf('\nGuard (');
-    expect(check).toBeGreaterThan(0);
-    expect(guard).toBeGreaterThan(check);
-    expect(listed(text.slice(check, guard))).toEqual(['sent', 'inspect', 'vet']);
-    expect(listed(text.slice(guard))).toEqual(['init', 'doctor', 'why', 'uninstall']);
+    expect(linesOf(text)[0]).toMatch(/^stroq {2,}who is really in charge of your agent\?/);
+  });
+
+  it('says how many attacks `stroq attack` replays, and that is the corpus', () => {
+    expect(usage()).toContain(`stop ${SCENARIOS.length} known attacks`);
+    expect(ATTACK_COUNT).toBe(SCENARIOS.length);
   });
 
   it('stays under 20 lines, within 80 columns', () => {
@@ -51,20 +62,17 @@ describe('usage: the first screen', () => {
     for (const line of lines) expect(line.length, line).toBeLessThanOrEqual(80);
   });
 
-  it('ends by saying where the other commands and the options are', () => {
-    expect(usage()).toMatch(
-      /\n\nAll commands: +stroq help --all\nOne command: +stroq <command> --help\n$/,
-    );
+  it('ends by saying where the other commands are', () => {
+    expect(usage()).toMatch(/\n\nMore commands: stroq help --all\n$/);
   });
 });
 
 describe('usageAll: stroq help --all', () => {
   const TITLES = [
+    'Start here:',
     'Check past sessions:',
-    'Guard your agent:',
     'Check before you open or install:',
-    'Test Stroq itself:',
-    'Experimental:',
+    'Guard your agent:',
   ];
 
   it('lists every command but the hidden ones, each once', () => {
@@ -78,38 +86,32 @@ describe('usageAll: stroq help --all', () => {
     for (const name of HIDDEN) expect(names).not.toContain(name);
   });
 
-  it('groups them by job, in this order', () => {
+  it('groups them by job, in this order, the five of the first screen first', () => {
     const text = usageAll();
     const at = TITLES.map((title) => text.indexOf(`\n${title}\n`));
     for (const [i, where] of at.entries()) expect(where, TITLES[i]).toBeGreaterThan(0);
     expect([...at].sort((a, b) => a - b)).toEqual(at);
     const groups = at.map((start, i) => listed(text.slice(start, at[i + 1] ?? text.length)));
     expect(groups).toEqual([
+      CORE,
       ['sent', 'replay'],
-      [
-        'console',
-        'init',
-        'doctor',
-        'why',
-        'uninstall',
-        'untaint',
-        'trust',
-        'log',
-        'verify',
-        'policy',
-      ],
-      ['inspect', 'vet', 'add', 'remove', 'exposure', 'run'],
-      ['attack', 'bench', 'coverage', 'prove', 'canary'],
-      ['task', 'permit', 'harden'],
+      ['inspect', 'vet', 'exposure'],
+      ['console', 'doctor', 'untaint', 'trust', 'log', 'verify', 'policy', 'canary'],
     ]);
   });
 
-  it('opens like the first screen, keeps within 80 columns, and names --help and --version', () => {
+  it('opens with what Stroq is for, keeps within 80 columns, and names --help and --version', () => {
     const text = usageAll();
-    expect(text.startsWith(linesOf(usage()).slice(0, 2).join('\n'))).toBe(true);
+    expect(text).toMatch(
+      /^stroq: see what your AI coding agent saw, ran and installed\.\nRuns on your machine, no telemetry\.\n\n/,
+    );
     for (const line of linesOf(text)) expect(line.length, line).toBeLessThanOrEqual(80);
     expect(text).toMatch(/^One command: +stroq <command> --help$/m);
     expect(text).toMatch(/stroq --version/);
+  });
+
+  it('puts the bare `stroq` first under "Start here"', () => {
+    expect(usageAll()).toMatch(/\nStart here:\n {2}stroq {2,}A card from your own sessions/);
   });
 });
 
@@ -118,19 +120,33 @@ describe('tierOf', () => {
     for (const name of commandNames()) expect(tierOf(name), name).not.toBeNull();
   });
 
-  it('puts the first-screen commands in core and the plumbing in hidden', () => {
-    expect(commandNames().filter((n) => tierOf(n) === 'core')).toEqual(
-      expect.arrayContaining(CORE),
+  it('puts the first-screen commands in core, the rest of the list in more, the plumbing in hidden', () => {
+    const tier = (which: string): string[] => commandNames().filter((n) => tierOf(n) === which);
+    expect(tier('core')).toEqual(expect.arrayContaining(CORE));
+    expect(tier('core')).toHaveLength(CORE.length);
+    expect(tier('hidden')).toEqual(expect.arrayContaining(HIDDEN));
+    expect(tier('hidden')).toHaveLength(HIDDEN.length);
+    expect(tier('more').sort()).toEqual(
+      [
+        'sent',
+        'replay',
+        'inspect',
+        'vet',
+        'exposure',
+        'console',
+        'doctor',
+        'untaint',
+        'trust',
+        'log',
+        'verify',
+        'policy',
+        'canary',
+      ].sort(),
     );
-    expect(commandNames().filter((n) => tierOf(n) === 'core')).toHaveLength(CORE.length);
-    expect(commandNames().filter((n) => tierOf(n) === 'hidden')).toEqual(
-      expect.arrayContaining(HIDDEN),
-    );
-    expect(commandNames().filter((n) => tierOf(n) === 'hidden')).toHaveLength(HIDDEN.length);
   });
 
   it('is null for a name that is not a command, a property name included', () => {
-    for (const word of ['nope', 'help', 'constructor', '__proto__'])
+    for (const word of ['nope', 'help', 'stroq', 'constructor', '__proto__'])
       expect(tierOf(word)).toBeNull();
   });
 });
@@ -163,24 +179,8 @@ describe('commandHelp', () => {
     expect(commandHelp('mcp')).toMatch(/^stroq mcp --server <name>/);
   });
 
-  it('says how add is confirmed in plain words: a report, then 12 characters of a fingerprint', () => {
-    const text = commandHelp('add') ?? '';
-    expect(text).not.toMatch(/passport|hex digits/);
-    expect(text).toMatch(/report/);
-    expect(text).toMatch(/first 12 characters of (?:its|that) fingerprint/);
-  });
-
   it('leaves the Windows quoting of init to the guide', () => {
     expect(commandHelp('init')).not.toMatch(/cmd\.exe|quote/);
-  });
-
-  it('says what prove checks, what it costs and that it asks first', () => {
-    const text = commandHelp('prove') ?? '';
-    expect(text).toMatch(/^ {2}check that blocking really works/m);
-    expect(text).toContain('up to 3');
-    expect(text).toContain('asks first');
-    expect(text).toMatch(/Exit 0/);
-    expect(text).not.toContain('evidence the model does not write');
   });
 });
 
@@ -192,9 +192,8 @@ describe('wantsHelp', () => {
   });
 
   it('leaves a --help after `--` to the program run or wrapped', () => {
-    expect(wantsHelp('run', ['--', 'claude', '--help'])).toBe(false);
     expect(wantsHelp('mcp', ['--server', 'x', '--', 'node', 's.js', '-h'])).toBe(false);
-    expect(wantsHelp('run', ['--help', '--', 'claude'])).toBe(true);
+    expect(wantsHelp('mcp', ['--help', '--', 'node', 's.js'])).toBe(true);
   });
 });
 
@@ -209,14 +208,14 @@ describe('unknownOption', () => {
     expect(unknownOption('log', ['--count', '5', '--json'])).toBeNull();
     expect(unknownOption('log', ['--count=5'])).toBeNull();
     expect(unknownOption('trust', ['README.md', '--json'])).toBeNull();
-    expect(unknownOption('coverage', ['--format', 'navigator'])).toBeNull();
+    expect(unknownOption('policy', ['check', '--json'])).toBeNull();
     expect(unknownOption('sent', ['--help'])).toBeNull();
     expect(unknownOption('log', ['-'])).toBeNull();
   });
 
   it('does not read past `--` for a pass-through command', () => {
     expect(
-      unknownOption('run', ['--sandbox', '--', 'claude', '--dangerously-anything']),
+      unknownOption('mcp', ['--server', 'x', '--', 'node', 's.js', '--dangerously-anything']),
     ).toBeNull();
   });
 
@@ -274,7 +273,7 @@ describe('commandHint', () => {
   it('says what to run instead of install, in one line that names both commands', () => {
     const hint = commandHint('install');
     expect(hint).toBe(
-      'stroq has no install: `stroq init` guards an agent, `stroq add` adds a local skill after a check.',
+      'stroq has no install: `stroq init` guards an agent, `stroq vet` checks a skill or MCP server before you add it.',
     );
     expect(hint).not.toContain('\n');
   });

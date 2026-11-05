@@ -1,6 +1,6 @@
 # Third-party notices
 
-`dist/` bundles the following package. Its licence asks that this notice travel with copies of its code.
+`dist/` bundles the following package, and holds text copied from the second. Their licences ask that this notice travel with copies of their code.
 
 ## zod 4.6.6
 
@@ -10,6 +10,36 @@ https://github.com/colinhacks/zod
 MIT License
 
 Copyright (c) 2025 Colin McDonnell
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+```
+
+## Git LFS hook scripts (git-lfs v3.8.1)
+
+https://github.com/git-lfs/git-lfs
+
+`dist/` holds the text of the hook scripts that `git lfs install` writes, copied from `lfs/hook.go` (tag v3.8.1), so that `stroq inspect` can tell them from hooks someone else wrote. The licence of Git LFS:
+
+```
+MIT License
+
+Copyright (c) 2014- GitHub, Inc. and Git LFS contributors
 
 Permission is hereby granted, free of charge, to any person obtaining a copy
 of this software and associated documentation files (the "Software"), to deal

@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { DEV_COMMANDS, devHelp } from '../src/dev-help.js';
 import { commandHelp, usage, usageAll } from '../src/help.js';
 import {
   NAMES,
@@ -24,12 +25,12 @@ import {
  *
  * - Counts. A number in digits next to the word "scenarios" ("36 scenarios"), or the second
  *   number of an "<N> of the <M>" near that word, is read as the total of a suite and must be the
- *   length of the list the command replays (`attack`, or `bench --actions`). In both docs and in
- *   the help text.
+ *   length of the list the command replays (`attack`, or `bench --actions`, which is the developer
+ *   tool `pnpm dev:bench` now). In both docs and in the help text.
  * - Rows. The "## Commands" table of each doc has a row for every command in `COMMANDS`
  *   (help.ts) and none for a command that does not exist.
- * - Flags. No row names a flag its command does not have, and the `attack`, `bench` and
- *   `coverage` rows name every flag help.ts gives those three.
+ * - Flags. No row names a flag its command does not have, and the rows of the commands listed in
+ *   `ROWS_NAME_EVERY_FLAG` name every flag help.ts gives them.
  * - Agents. The `init` row names every agent help.ts lists for `init --agent`.
  *
  * What a row says beyond that is not checked: not its description, not the flags of the other
@@ -55,8 +56,6 @@ const DOCS = [GUIDE, CLI_README];
  */
 const ROWS_NAME_EVERY_FLAG = [
   'attack',
-  'bench',
-  'coverage',
   'doctor',
   'untaint',
   'trust',
@@ -64,20 +63,18 @@ const ROWS_NAME_EVERY_FLAG = [
   'log',
   'why',
   'inspect',
-  'prove',
   'init',
   'uninstall',
-  'task',
 ] as const;
 
 describe('reading the commands from help.ts', () => {
   it('finds each command once, and the commands, flags and agents this file relies on', () => {
     // A change to the shape of COMMANDS must not turn the table checks below into checks over nothing.
-    expect(NAMES).toEqual(expect.arrayContaining(['init', 'attack', 'bench', 'coverage']));
+    expect(NAMES).toEqual(expect.arrayContaining(['init', 'attack', 'doctor', 'inspect']));
     expect(new Set(NAMES).size).toBe(NAMES.length);
     expect(flagsOf('attack')).toContain('--fuzz');
-    expect(flagsOf('bench')).toContain('--actions');
-    expect(flagsOf('coverage')).toContain('--format');
+    expect(flagsOf('doctor')).toContain('--json');
+    expect(DEV_COMMANDS.map((c) => c.name)).toEqual(['prove', 'bench', 'coverage']);
     expect(
       initAgents(),
       '`stroq init --help` no longer opens its --agent line with "a, b or c."',
@@ -287,20 +284,24 @@ describe('the help text', () => {
       `stroq ${command} --help`,
       commandHelp(command) ?? '',
     ]),
+    ...DEV_COMMANDS.map(({ name }): [string, string] => [
+      `pnpm dev:${name} --help`,
+      devHelp(name) ?? '',
+    ]),
   ];
 
   it.each(HELP_TEXTS)('%s counts scenarios the way the code does', (where, text) => {
     expect(wrongCounts(where, text)).toEqual([]);
   });
 
-  it('states how many ordinary-work scenarios `bench --actions` replays', () => {
+  it('states how many ordinary-work scenarios `pnpm dev:bench --actions` replays', () => {
     // The docs copy this sentence. If it stops saying a number, look at what they say too.
-    const stated = scenarioClaims(commandHelp('bench') ?? '').filter(
+    const stated = scenarioClaims(devHelp('bench') ?? '').filter(
       (claim) => claim.suite === 'ordinary work',
     );
     expect(
       stated.length,
-      'stroq bench --help has no number this guard can read as the ordinary-work count: it reads ' +
+      'pnpm dev:bench --help has no number this guard can read as the ordinary-work count: it reads ' +
         'digits up to four plain words before "scenarios", and takes them for ordinary work only ' +
         'when the word "ordinary" is among those words or the 30 characters after them ' +
         '("75 scenarios of ordinary agent work"). Write the count that way, or the docs that ' +

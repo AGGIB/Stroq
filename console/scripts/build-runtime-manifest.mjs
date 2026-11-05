@@ -7,9 +7,7 @@ const ADAPTERS = [
   'inventory-worker.js',
   'skill-quarantine-worker.js',
   'skill-quarantine-schema.js',
-  'credential-filter-worker.js',
-  'credential-filter-engine.js',
-  'credential-filter-schema.js',
+  'agent-configuration-lock-engine.js',
   'mcp-containment-worker.js',
   'mcp-containment-schema.js',
   'inventory-schema.js',
@@ -17,14 +15,14 @@ const ADAPTERS = [
   'local-api-schema.js',
   'policy-engine.js',
   'agent-status-engine.js',
-  'live-proof-engine.js',
   'hook-check-engine.js',
-  'task-lock-worker.js',
+  'session-taint-engine.js',
   'workspace-review-worker.js',
   'workspace-monitor-engine.js',
   'incidents-engine.js',
   'secret-scan-engine.js',
   'incident-recheck-engine.js',
+  'card-view.js',
   'corpus.json',
   'atlas.json',
   'scope.json',
@@ -39,7 +37,7 @@ export function workspaceMonitorExternalPlugin() {
       build.onResolve(
         {
           filter:
-            /^\.\/(?:workspace-review-context|agent-setup-files|agent-configuration-lock|runtime-layout|control-http|task-lock-runner)\.mjs$/,
+            /^\.\/(?:workspace-review-context|agent-setup-files|agent-configuration-lock|runtime-layout|control-http|worker-runner)\.mjs$/,
         },
         (args) => {
           if (

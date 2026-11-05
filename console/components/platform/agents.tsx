@@ -1,19 +1,14 @@
 'use client';
 import { useCallback, useEffect, useRef, useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
-import { ArrowRight, RefreshCw } from 'lucide-react';
+import { RefreshCw } from 'lucide-react';
 import { SetupDialog } from './agent-setup';
 import { AgentCard } from './agent-card';
+import { useScrollToHash } from '@/hooks/use-scroll-to-hash';
+import { SettingsCheck } from './agent-settings';
 import { useHookCheckHistory } from './use-hook-check-history';
-import { useCredentialFilters } from './use-credential-filters';
-import {
-  credentialFilterHref,
-  credentialFilterSelection,
-  credentialFilterReadAllowed,
-  resolveCredentialFilterSelection,
-} from '@/lib/credential-filter-navigation';
-import type { CredentialFilterTarget } from '@/lib/credential-filters';
+import { usePosture } from './use-posture';
+import { agentScope, agentsHref } from '@/lib/agent-scope';
 import { hookCheckEvidence } from '@/lib/hook-check-evidence';
 import { usePlatform } from '@/components/platform-provider';
 import { AgentGlyph, Badge, EmptyState, PageHeading, Panel } from '@/components/platform-ui';
@@ -25,13 +20,9 @@ import {
 } from '@/lib/agent-status';
 export function AgentsPage() {
   const { localAccess, localContext, requestLocal } = usePlatform();
-  const selection = credentialFilterSelection(useSearchParams());
+  const scope = agentScope(useSearchParams());
   const workspaceId = localAccess ? (localContext?.workspace.id ?? null) : null;
-  const readAllowed = credentialFilterReadAllowed(selection, workspaceId);
-  const scope = selection.scope;
-  const filters = useCredentialFilters(readAllowed, `${scope}:${selection.target ?? ''}`);
-  const resolved = resolveCredentialFilterSelection(selection, workspaceId, filters.state);
-  const blocked = resolved.status === 'invalid' || resolved.status === 'workspace-mismatch';
+  const readAllowed = workspaceId !== null;
   const [captured, setCaptured] = useState<{
       workspaceId: string;
       report: AgentStatusState;
@@ -40,18 +31,12 @@ export function AgentsPage() {
     [error, setError] = useState<string | null>(null);
   const [refreshGeneration, setRefreshGeneration] = useState(0);
   const hookHistory = useHookCheckHistory({ enabled: readAllowed, generation: refreshGeneration });
+  const posture = usePosture({ track: true });
+  useScrollToHash(captured !== null);
   const active = useRef<AbortController | null>(null);
   const state = readAllowed && captured?.workspaceId === workspaceId ? captured.report : null;
-  const selectFilter = useCallback(
-    (target: CredentialFilterTarget | null) => {
-      const href = credentialFilterHref(target, workspaceId, scope);
-      if (target) window.history.pushState(null, '', href);
-      else window.history.replaceState(null, '', href);
-    },
-    [workspaceId, scope],
-  );
   const setScope = (value: 'project' | 'user') =>
-    window.history.pushState(null, '', credentialFilterHref(null, null, value));
+    window.history.pushState(null, '', agentsHref(value));
   const refresh = useCallback(async () => {
     if (!localAccess || !readAllowed || !workspaceId) return;
     active.current?.abort();
@@ -87,28 +72,23 @@ export function AgentsPage() {
   }, [refresh]);
   const refreshAll = () => {
     void refresh();
-    void filters.refresh();
+    void posture.reload();
   };
   return (
     <div className="page-stack">
       <PageHeading
         title="Agents"
+        description="Whether each agent has Stroq’s hooks, when Stroq was last asked, and which of its settings weaken them."
         actions={
           <>
             <button
               className="icon-button"
               aria-label="Refresh agent configuration and checks"
-              disabled={!readAllowed || loading || filters.loading || hookHistory.busy}
+              disabled={!readAllowed || loading || hookHistory.busy}
               onClick={refreshAll}
             >
               <RefreshCw size={18} className={loading ? 'spin' : undefined} />
             </button>
-            <Link href="/agents/hooks/" className="button subtle">
-              Check history <ArrowRight size={16} />
-            </Link>
-            <Link href="/agents/tasks/" className="button subtle">
-              Task permissions <ArrowRight size={16} />
-            </Link>
             {readAllowed && <SetupDialog scope={scope} onConfigured={refreshAll} />}
           </>
         }
@@ -124,19 +104,7 @@ export function AgentsPage() {
           Stroq hook history could not be rechecked.
         </p>
       )}
-      {blocked ? (
-        <Panel>
-          <EmptyState
-            title={resolved.status === 'invalid' ? 'Invalid filter link' : 'Different workspace'}
-            description="No filter was selected and no configuration action was started."
-          />
-          <div className="panel-body">
-            <Link href={credentialFilterHref(null, null)} className="button">
-              Open current Agents <ArrowRight size={16} />
-            </Link>
-          </div>
-        </Panel>
-      ) : !localAccess ? (
+      {!localAccess ? (
         <>
           <Panel>
             <EmptyState
@@ -144,9 +112,10 @@ export function AgentsPage() {
               description="Open the private server link to inspect the current installation in each scope."
             />
             <div className="panel-body">
-              <Link className="button" href="/settings/">
-                Connection settings <ArrowRight size={15} />
-              </Link>
+              <p className="control-meta">
+                Not connected to Stroq on this machine. Run <code>npx @stroq/cli console</code> to
+                open this page with your data.
+              </p>
             </div>
           </Panel>
           <div className="agent-grid agent-rows" aria-label="Supported agents">
@@ -173,14 +142,6 @@ export function AgentsPage() {
         </Panel>
       ) : (
         <>
-          {(resolved.status === 'missing' || (selection.requested && filters.error)) && (
-            <p className="control-error" role="status">
-              This exact filter could not be rechecked. No other source was selected.{' '}
-              <button className="inline-link" onClick={() => selectFilter(null)}>
-                Clear selection
-              </button>
-            </p>
-          )}
           <div className="toolbar">
             <div className="filter-tabs" aria-label="Agent configuration scope">
               <button
@@ -213,10 +174,6 @@ export function AgentsPage() {
                 agent={agent}
                 scope={scope}
                 onRefresh={refreshAll}
-                filters={filters}
-                onWorkspaceScope={() => setScope('project')}
-                selectedFilter={readAllowed ? selection.target : null}
-                onFilterSelection={selectFilter}
                 generation={refreshGeneration}
                 hookEvidence={hookCheckEvidence(
                   hookHistory.error ? null : hookHistory.state,
@@ -226,12 +183,21 @@ export function AgentsPage() {
                 )}
                 hookHistoryLoading={hookHistory.busy && !hookHistory.state}
                 onHookChanged={() => void hookHistory.refresh()}
+                settings={{ audit: posture.audit, changes: posture.changes, state: posture.state }}
               />
             ))}
           </div>
           <p className="control-meta">
             Recorded Stroq hook checks are offline. In-agent checks test the client separately.
           </p>
+          <SettingsCheck
+            audit={posture.audit}
+            changes={posture.changes}
+            state={posture.state}
+            error={posture.error}
+            shownAgents={state?.agents.map((agent) => agent.id) ?? []}
+            onReload={() => void posture.reload()}
+          />
         </>
       )}
     </div>

@@ -44,6 +44,11 @@ summary:hover .summary-meta { color: var(--ink); }
 .hero { padding: clamp(2rem, 1rem + 3.5vw, 4rem) 0 clamp(3rem, 2rem + 3vw, 5rem); }
 .hero-grid { display: grid; grid-template-columns: minmax(0, 1.05fr) minmax(0, 1fr); gap: 2.5rem clamp(2rem, 1rem + 3vw, 3.5rem); align-items: center; }
 .hero-copy { min-width: 0; }
+/* Hoo: a still drawing (scripts/render-owl-svg.ts), 20 pixels wide at a whole number of screen pixels
+   each (6 x 20 = 120, and 5 x 20 on a phone) so that the edges stay sharp. Nothing here moves.
+   The grid's first column is empty, so the drawing is pulled left by one pixel to meet the text's edge. */
+.hoo { width: 120px; margin: 0 0 1.4rem -6px; }
+.hoo svg { display: block; width: 100%; height: auto; }
 .hero h1 { max-width: 11ch; }
 .lead { max-width: 42ch; margin-top: 1.4rem; color: var(--ink-2); font-size: var(--text-lead); line-height: 1.5; }
 .lead em { font-style: normal; color: var(--ink); background: linear-gradient(transparent 58%, color-mix(in srgb, var(--signal) 42%, transparent) 58%); }
@@ -386,6 +391,7 @@ summary:hover .summary-meta { color: var(--ink); }
   .rerun li { flex-direction: column; gap: .2rem; }
 }
 @media (max-width: 480px) {
+  .hoo { width: 100px; margin: 0 0 1.1rem -5px; }
   .hero-cta .install-pill { width: 100%; }
   .hero-cta .install-cmd { font-size: .8rem; white-space: normal; overflow-wrap: anywhere; }
   .hero-cta .btn { flex: 1 1 100%; }

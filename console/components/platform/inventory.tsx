@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useMemo, useRef, useState, type ReactNode } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
@@ -25,6 +25,12 @@ import {
 } from '@/lib/inventory-navigation';
 import { InventoryBadge, InventoryReview } from './inventory-review';
 import { Badge, EmptyState, PageHeading, Panel } from '@/components/platform-ui';
+import { QuarantineHistory } from './skill-quarantine';
+import { RegistrationHistory } from './mcp-containment';
+import { ToolVersions } from './mcp-tool-contracts';
+import { CheckText } from './skills';
+import { useScrollToHash } from '@/hooks/use-scroll-to-hash';
+import { skillsPart, skillsPartHref, type SkillsPart } from '@/lib/skills-navigation';
 import { INVENTORY_AGENTS, type InventoryItem } from '@/lib/inventory';
 import {
   InventorySource,
@@ -33,29 +39,47 @@ import {
   inventorySourceSearchText,
 } from './inventory-source';
 import { InventorySignalBadge } from './inventory-signal-controls';
-import { InventoryMonitor } from './inventory-monitor';
-import { CodexSkillSources } from './codex-skill-sources';
 import { McpGovernanceControls } from './mcp-governance';
 
-export function SkillsTabs({ active }: { active: 'inventory' | 'scan' | 'quarantine' | 'mcp' }) {
+/** One of the parts under the list: closed until it is asked for, and reading nothing until then. */
+function Part({ part, title, children }: { part: SkillsPart; title: string; children: ReactNode }) {
+  const named = skillsPart(useSearchParams()) === part;
+  const [open, setOpen] = useState(named);
   return (
-    <nav className="local-tabs" aria-label="Skills views">
-      <Link className={active === 'inventory' ? 'active' : ''} href="/skills/">
-        Inventory
-      </Link>
-      <Link className={active === 'scan' ? 'active' : ''} href="/skills/scan/">
-        Scan content
-      </Link>
-      <Link className={active === 'quarantine' ? 'active' : ''} href="/skills/quarantine/">
-        Quarantine
-      </Link>
-      <Link className={active === 'mcp' ? 'active' : ''} href="/skills/mcp/">
-        MCP recovery
-      </Link>
-    </nav>
+    <details
+      className="skills-part-wrap"
+      open={open || undefined}
+      onToggle={(event) => setOpen(event.currentTarget.open)}
+    >
+      <summary>{title}</summary>
+      {open ? children : null}
+    </details>
   );
 }
-export function InventoryPage() {
+
+/** The undo of each change, the tool versions to approve, and the check of a skill's text. */
+function SkillsParts() {
+  useScrollToHash(true);
+  return (
+    <div className="skills-parts">
+      <Part part="quarantine" title="Undo: skills moved aside">
+        <QuarantineHistory />
+      </Part>
+      <Part part="registrations" title="Undo: MCP changes, and pause or resume">
+        <RegistrationHistory />
+      </Part>
+      <Part part="tools" title="Approve MCP tool versions">
+        <ToolVersions />
+      </Part>
+      <Part part="check" title="Check a skill’s text">
+        <CheckText />
+      </Part>
+    </div>
+  );
+}
+
+/** Every skill and MCP server by agent, what changed since you last looked, and the changes you can make. */
+export function SkillsMcpPage() {
   const { localAccess, data, loading, reviewing, error, refresh, review, needsRecheck } =
     useInventory();
   const location = inventorySelection(useSearchParams());
@@ -107,6 +131,13 @@ export function InventoryPage() {
       inventoryViewMatches(i, view) &&
       inventorySourceSearchText(i).toLowerCase().includes(query.toLowerCase()),
   );
+  const byAgent = useMemo(() => {
+    const groups = new Map<string, InventoryItem[]>();
+    for (const item of visible) groups.set(item.agent, [...(groups.get(item.agent) ?? []), item]);
+    return [...groups.entries()]
+      .sort(([a], [b]) => (INVENTORY_AGENTS[a] ?? a).localeCompare(INVENTORY_AGENTS[b] ?? b))
+      .map(([agent, rows]) => ({ agent, rows }));
+  }, [visible]);
   const changed = items.filter((i) => i.state === 'changed' || i.state === 'missing').length;
   const pending = items.filter((i) => i.state === 'unreviewed' || i.state === 'changed').length;
   return (
@@ -119,13 +150,10 @@ export function InventoryPage() {
     >
       <PageHeading
         title="Skills & MCP"
+        description="Every skill and MCP server your agents can load, by agent: where it came from, what the rules matched in it, and what changed since you last looked. Checked when you open this screen, and again when you ask."
         actions={
           <>
             <McpGovernanceControls />
-            <CodexSkillSources
-              disabled={!localAccess || loading || reviewing || !!selected || needsRecheck}
-              controlsReady={!loading && (!!data || !!error)}
-            />
             <button
               className="button"
               ref={refreshButton}
@@ -133,22 +161,11 @@ export function InventoryPage() {
               onClick={() => void refresh()}
             >
               <RefreshCw size={16} className={loading ? 'spin' : undefined} aria-hidden="true" />
-              {loading ? 'Inspecting…' : 'Refresh inventory'}
+              {loading ? 'Checking…' : 'Check again'}
             </button>
           </>
         }
       />
-      <SkillsTabs active="inventory" />
-      {localAccess && (
-        <InventoryMonitor
-          canRefresh={!loading && !reviewing && !selected && !needsRecheck}
-          onCheck={() => {
-            if (loading || reviewing || selected || needsRecheck) return false;
-            void refresh();
-            return true;
-          }}
-        />
-      )}
       {mcpResult && mcpResult.workspaceId === data?.workspace.id && (
         <div className="quarantine-outcome" role="status">
           <strong>
@@ -165,11 +182,11 @@ export function InventoryPage() {
             className="inline-link"
             href={mcpContainmentHref(mcpResult.recordId, mcpResult.workspaceId)}
           >
-            Recheck or restore
+            Undo this change
           </Link>
           {mcpResult.status === 'configured' && mcpResult.proxy?.toolApproval && (
-            <Link className="inline-link" href="/skills/mcp/contracts/">
-              Review tool contracts <ArrowRight size={14} aria-hidden="true" />
+            <Link className="inline-link" href={skillsPartHref('tools')}>
+              Review tool versions <ArrowRight size={14} aria-hidden="true" />
             </Link>
           )}
         </div>
@@ -182,7 +199,7 @@ export function InventoryPage() {
             className="inline-link"
             href={quarantineHref(quarantined.recordId, quarantined.workspaceId)}
           >
-            Recheck or restore
+            Undo this change
           </Link>
         </div>
       )}
@@ -225,15 +242,10 @@ export function InventoryPage() {
         )}
       {!localAccess ? (
         <Panel>
-          <EmptyState
-            title="Connect the local engine"
-            description="Open your private server link to inspect installed skills and MCP configurations."
-          />
-          <div className="panel-body">
-            <Link href="/settings/" className="button">
-              Connection settings <ArrowRight size={15} aria-hidden="true" />
-            </Link>
-          </div>
+          <p className="panel-body control-meta">
+            Not connected to Stroq on this machine. Run <code>npx @stroq/cli console</code> to open
+            this page with your data.
+          </p>
         </Panel>
       ) : (
         <>
@@ -252,7 +264,7 @@ export function InventoryPage() {
                 <strong>{data ? pending : '—'}</strong>
               </div>
               <div>
-                <span>Changed since review</span>
+                <span>Changed since you looked</span>
                 <strong>{data ? changed : '—'}</strong>
               </div>
             </div>
@@ -332,87 +344,97 @@ export function InventoryPage() {
                 }
               />
             ) : (
-              <div
-                className="table-wrap"
-                role="region"
-                aria-label="Installed skills and MCP servers"
-                tabIndex={0}
-              >
-                <table className="data-table inventory-table">
-                  <thead>
-                    <tr>
-                      <th>Artifact</th>
-                      <th>Source</th>
-                      <th>Scope</th>
-                      <th>Changes</th>
-                      <th>Inspection</th>
-                      <th aria-label="Open review" />
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {visible.map((item) => (
-                      <tr key={item.id}>
-                        <td>
-                          <button
-                            className="inventory-name"
-                            aria-label={`${item.name} · ${inventorySourceLabel(item)}`}
-                            onClick={(event) => select(item, event.currentTarget)}
-                          >
-                            {item.kind === 'skill' ? (
-                              <FileCode2 size={18} aria-hidden="true" />
-                            ) : (
-                              <Server size={18} aria-hidden="true" />
-                            )}
-                            <span>
-                              <strong>{item.name}</strong>
-                              <small>{item.kind === 'skill' ? 'Skill' : 'MCP server'}</small>
-                            </span>
-                          </button>
-                        </td>
-                        <td>
-                          <InventorySource item={item} />
-                        </td>
-                        <td>{item.scope === 'project' ? 'Workspace' : 'User'}</td>
-                        <td>
-                          <InventoryBadge item={item} />
-                        </td>
-                        <td>
-                          {item.scan.status === 'incomplete' ? (
-                            <Badge tone="orange">Incomplete</Badge>
-                          ) : item.scan.findings ? (
-                            <Badge tone={item.scan.status === 'suspect' ? 'orange' : 'muted'}>
-                              {item.scan.findings} signals
-                            </Badge>
-                          ) : item.kind === 'mcp' ? (
-                            <span className="muted">
-                              {item.mcp?.wrapper === 'configured'
-                                ? 'Wrapper configured'
-                                : 'No wrapper'}
-                            </span>
-                          ) : (
-                            <span className="muted">
-                              {item.scan.status === 'not-scanned'
-                                ? 'Not scanned'
-                                : item.capabilities?.length
-                                  ? `${item.capabilities.length} capabilities`
-                                  : 'No signals'}
-                            </span>
-                          )}
-                          <InventorySignalBadge decision={item.signalDecision} />
-                        </td>
-                        <td>
-                          <button
-                            className="icon-button"
-                            aria-label={`Review ${item.name} · ${inventorySourceLabel(item)}`}
-                            onClick={(event) => select(item, event.currentTarget)}
-                          >
-                            <ArrowRight size={16} aria-hidden="true" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+              <div className="skills-agents">
+                {byAgent.map(({ agent, rows }) => (
+                  <section
+                    key={agent}
+                    className="skills-agent"
+                    aria-label={`${INVENTORY_AGENTS[agent] ?? agent}: skills and MCP servers`}
+                  >
+                    <h3>
+                      {INVENTORY_AGENTS[agent] ?? agent}
+                      <Badge tone="muted">{rows.length}</Badge>
+                    </h3>
+                    <div className="table-wrap" tabIndex={0}>
+                      <table className="data-table inventory-table">
+                        <thead>
+                          <tr>
+                            <th>What</th>
+                            <th>Where from</th>
+                            <th>Rule hits</th>
+                            <th>Since you looked</th>
+                            <th aria-label="Open" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {rows.map((item) => (
+                            <tr key={item.id}>
+                              <td>
+                                <button
+                                  className="inventory-name"
+                                  aria-label={`${item.name} · ${inventorySourceLabel(item)}`}
+                                  onClick={(event) => select(item, event.currentTarget)}
+                                >
+                                  {item.kind === 'skill' ? (
+                                    <FileCode2 size={18} aria-hidden="true" />
+                                  ) : (
+                                    <Server size={18} aria-hidden="true" />
+                                  )}
+                                  <span>
+                                    <strong>{item.name}</strong>
+                                    <small>{item.kind === 'skill' ? 'Skill' : 'MCP server'}</small>
+                                  </span>
+                                </button>
+                              </td>
+                              <td>
+                                <InventorySource item={item} />
+                                <small className="muted">
+                                  {item.scope === 'project' ? 'Workspace' : 'User'}
+                                </small>
+                              </td>
+                              <td>
+                                {item.scan.status === 'incomplete' ? (
+                                  <Badge tone="orange">Incomplete</Badge>
+                                ) : item.scan.findings ? (
+                                  <Badge tone={item.scan.status === 'suspect' ? 'orange' : 'muted'}>
+                                    {item.scan.findings} signals
+                                  </Badge>
+                                ) : item.kind === 'mcp' ? (
+                                  <span className="muted">
+                                    {item.mcp?.wrapper === 'configured'
+                                      ? 'Wrapper configured'
+                                      : 'No wrapper'}
+                                  </span>
+                                ) : (
+                                  <span className="muted">
+                                    {item.scan.status === 'not-scanned'
+                                      ? 'Not scanned'
+                                      : item.capabilities?.length
+                                        ? `${item.capabilities.length} capabilities`
+                                        : 'No signals'}
+                                  </span>
+                                )}
+                                <InventorySignalBadge decision={item.signalDecision} />
+                              </td>
+                              <td>
+                                <InventoryBadge item={item} />
+                              </td>
+                              <td>
+                                <button
+                                  className="icon-button"
+                                  aria-label={`Review ${item.name} · ${inventorySourceLabel(item)}`}
+                                  onClick={(event) => select(item, event.currentTarget)}
+                                >
+                                  <ArrowRight size={16} />
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  </section>
+                ))}
               </div>
             )}
           </Panel>
@@ -455,6 +477,7 @@ export function InventoryPage() {
           )}
         </>
       )}
+      {localAccess ? <SkillsParts /> : null}
       <InventoryReview
         reviewNeedsRecheck={needsRecheck}
         selected={selected}

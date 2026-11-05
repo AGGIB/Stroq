@@ -192,7 +192,7 @@ function holds(machine: DisplayStateInput): void {
   expect(shownState.reason).toMatch(/^[\x20-\x7e]{1,400}$/);
   // The advice for a hook that does not work is never to prove again.
   if (!fine(machine) && r !== null && r.mode === 'live' && machine.capabilities?.headless === true)
-    expect(shownState.reason).not.toMatch(/stroq prove/);
+    expect(shownState.reason).not.toMatch(/run the live check again/);
   // A result's caveats are in the reason of a result that is shown as itself or as stale.
   if (
     r !== null &&

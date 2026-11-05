@@ -60,23 +60,6 @@ export {
   validateWorkspaceReviewReceipt,
 } from '../lib/workspace-review';
 export {
-  TASK_ACCESS_LIMITATIONS,
-  TASK_ACCESS_ERRORS,
-  validateTaskAccessPreview,
-  validateTaskAccessReceipt,
-  validateTaskAccessState,
-} from '../lib/task-access';
-export { INCIDENT_TASK_LIMITATIONS, validateIncidentTaskReport } from '../lib/incident-task';
-export {
-  TASK_LOCK_LIMITATIONS,
-  TASK_LOCK_ERRORS,
-  validateTaskLockRow,
-  validateTaskLockState,
-  validateTaskLockPreview,
-  validateTaskLockReceipt,
-} from '../lib/task-locks';
-export { validateTaskLockPage, validateTaskLockPageRequest } from '../lib/task-lock-page';
-export {
   HOOK_CHECK_AGENTS,
   HOOK_CHECK_ERRORS,
   validateHookCheckBinding,
@@ -151,12 +134,6 @@ export {
   incidentAssessmentMatchesPreview,
 } from '../lib/incident-assessments';
 export {
-  validateLiveState,
-  validateLivePreview,
-  validateLiveJob,
-  validateLiveReport,
-} from '../lib/live-proof';
-export {
   validateSecretScanState,
   validateSecretScanPreview,
   validateSecretScanJob,
@@ -170,48 +147,9 @@ export {
 } from '../lib/skill-quarantine';
 
 export {
-  validateCredentialFilters,
-  validateCredentialFilterPreview,
-  validateCredentialFilterReceipt,
-} from '../lib/credential-filters';
-
-export {
   validateInventorySignalState,
   validateInventorySignalPreview,
   validateInventorySignalReceipt,
 } from '../lib/inventory-signal-decision';
-export { validateCodexSkillSourcesReport } from '../lib/codex-skill-sources';
-export {
-  CODEX_SKILL_CONTROL_ERRORS,
-  validateCodexSkillControlState,
-  validateCodexSkillControlPreview,
-  validateCodexSkillControlReceipt,
-  validateCodexSkillControlRecord,
-  validateCodexSkillControlSelection,
-  validateCodexSkillControlRestoreSelection,
-  validateCodexSkillControlRecheckSelection,
-} from '../lib/codex-skill-controls';
-export {
-  validateCodexSkillControlPrivatePlan,
-  codexSkillControlPrivatePlanBytes,
-} from '../lib/codex-skill-controls-private';
-export * from '../lib/codex-network-guard';
-export * from '../lib/codex-path-guard';
-export {
-  validateCodexPathGuardPrivatePlan,
-  codexPathGuardPrivatePlanBytes,
-} from '../lib/codex-path-guard-private';
-export { createCodexPathGuardService } from './codex-path-service';
-export {
-  validateCodexNetworkGuardPrivatePlan,
-  codexNetworkGuardPrivatePlanBytes,
-} from '../lib/codex-network-guard-private';
-export {
-  validateCodexNetworkGuardCheckPreparation,
-  codexNetworkGuardCheckPreparationBytes,
-} from '../lib/codex-network-guard-check-private';
-export * from '../lib/codex-network-check';
-export { createCodexNetworkGuardService } from './codex-network-service';
-export { createCodexNetworkCheckService } from './codex-network-check-service';
 export * from '../lib/mcp-governance';
 export { createMcpGovernanceService } from './mcp-governance-service';

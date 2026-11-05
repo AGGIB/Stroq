@@ -99,27 +99,12 @@ test('fixed hook-check history namespace is isolated from diagnostic history', a
 
 test('arbitrary history namespaces cannot choose a filesystem path', async (t) => {
   const files = await fixture(t);
-  for (const namespace of ['../outside', '', 'other']) {
+  for (const namespace of ['../outside', '', 'other', 'codex-network-checks']) {
     const store = await createRunStore({ home: files.home, namespace });
     assert.deepEqual(store.state(), { status: 'error', error: 'unavailable' });
     assert.equal(await store.write([failed]), false);
   }
   await assert.rejects(lstat(files.home), { code: 'ENOENT' });
-});
-
-test('fixed network-check namespace has independent bounded private history', async (t) => {
-  const files = await fixture(t);
-  const options = { home: files.home, namespace: 'codex-network-checks' };
-  const store = await createRunStore(options);
-  assert.deepEqual(store.state(), { status: 'ready' });
-  await assert.rejects(lstat(files.home), { code: 'ENOENT' });
-  assert.equal(await store.write([failed]), true);
-  assert.deepEqual((await createRunStore(options)).runs, [failed]);
-  assert.deepEqual((await createRunStore({ home: files.home })).runs, []);
-  assert.equal(
-    (await lstat(join(files.directory, `codex-network-checks-${workspaceId}.json`))).mode & 0o777,
-    0o600,
-  );
 });
 
 test('passive refresh observes another writer without creating, repairing or changing history', async (t) => {
@@ -334,4 +319,25 @@ test('the namespace identifier cannot be a browser path or escape the private st
     assert.equal(await store.write([failed]), false);
   }
   await assert.rejects(lstat(files.home), { code: 'ENOENT' });
+});
+
+test('a read during a writer’s rename reads the new file: it is not taken for a replaced one', async (t) => {
+  const files = await fixture(t),
+    writer = await createRunStore({ home: files.home });
+  assert.equal(await writer.write([failed]), true);
+  let writing = true;
+  const writes = (async () => {
+    for (let i = 0; i < 400 && writing; i += 1) assert.equal(await writer.write([failed]), true);
+    writing = false;
+  })();
+  try {
+    for (let reads = 0; writing; reads += 1) {
+      const reader = await createRunStore({ home: files.home });
+      assert.deepEqual(reader.state(), { status: 'ready' }, `read ${reads}`);
+      assert.deepEqual(reader.runs, [failed]);
+    }
+  } finally {
+    writing = false;
+    await writes;
+  }
 });

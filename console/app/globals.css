@@ -3,7 +3,7 @@
  * structural: printed, not rebuilt (24b spacing off the 4px scale, 39b tall option tiles, 49 long labels, F25 tables at 375px, F19 four weights)
  * note: 48 on the .dark block is a token declaration the linter does not read as one (it reads :root and [data-theme] only); 56 compares two dialogs that never open together
  * reworded: "What your agents are doing" to "Live" and "Settings that weaken your agents" to "Settings check" · 54 names the eyebrow; "The last N recorded actions · since T" to "... since T" · 63 names the dot
- * recomposed: Protection (the answer first), the sidebar groups, the agent cards; new: Guide · see docs/platform/design-audit.md
+ * recomposed: Protection (the answer first), the sidebar groups, the agent cards; see docs/platform/design-audit.md
  * built: the project · redesign: polish · v2.0.0 */
 @import 'tailwindcss';
 @import 'tw-animate-css';
@@ -15,22 +15,17 @@
 @import './mcp-governance.css';
 @import './secret-controls.css';
 @import './incident-controls.css';
-@import './credential-filter-controls.css';
-@import './task-access.css';
 @import './workspace-review.css';
 @import './workspace-monitor.css';
 @import './inventory-monitor.css';
-@import './codex-skill-sources.css';
-@import './codex-network-guard.css';
-@import './codex-path-guard.css';
 @import './policy-history.css';
 @import './hook-check-history.css';
-@import './task-lock-pages.css';
 @import './mcp-tool-contracts.css';
 @import './try-action.css';
 @import './live-view.css';
 @import './posture.css';
 @import './home.css';
+@import './check.css';
 
 :root {
   --text-ui: 16px;
@@ -504,18 +499,31 @@ code,
   top: 10px;
 }
 .platform-shell {
+  --sidebar-width: 240px;
+  display: grid;
+  grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   min-height: 100vh;
 }
+/* The panel is a column of the page, so it is as tall as the page however the page is drawn (a
+   full-page screenshot included). What it holds sticks to the top of the window, and the menu in it
+   scrolls by itself when the window is shorter than the menu. */
 .desktop-sidebar {
-  position: fixed;
-  inset: 0 auto 0 0;
-  width: 240px;
+  position: relative;
   background: var(--sidebar);
   border-right: 1px solid var(--border);
+  z-index: 30;
+}
+.sidebar-sticky {
+  position: sticky;
+  top: 0;
+  box-sizing: border-box;
+  height: 100vh;
+  height: 100dvh;
   display: flex;
   flex-direction: column;
   padding: 27px 14px 0;
-  z-index: 30;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 .brand {
   display: flex;
@@ -687,7 +695,6 @@ code,
   margin-left: auto;
 }
 .workspace-main {
-  margin-left: 240px;
   min-width: 0;
 }
 .topbar {
@@ -744,6 +751,12 @@ code,
 }
 .source-indicator.local i {
   background: var(--st-green);
+}
+.source-indicator.none i {
+  background: var(--muted-foreground);
+}
+.not-connected code {
+  color: var(--foreground);
 }
 .topbar-divider {
   height: 17px;
@@ -2119,12 +2132,11 @@ code,
   }
 }
 @media (max-width: 1150px) {
-  .desktop-sidebar {
-    width: 216px;
-    padding-inline: 12px;
+  .platform-shell {
+    --sidebar-width: 216px;
   }
-  .workspace-main {
-    margin-left: 216px;
+  .sidebar-sticky {
+    padding-inline: 12px;
   }
   .brand {
     margin-left: 9px;
@@ -2264,11 +2276,11 @@ code,
   }
 }
 @media (max-width: 650px) {
+  .platform-shell {
+    display: block;
+  }
   .desktop-sidebar {
     display: none;
-  }
-  .workspace-main {
-    margin-left: 0;
   }
   .topbar {
     height: 55px;

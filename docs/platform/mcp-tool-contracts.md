@@ -17,7 +17,7 @@ The workflow is: select an eligible installed stdio registration → **Protect &
 
 ## Review and retention
 
-`/skills/mcp/contracts/` reads only current, exactly matched opted-in registrations. A changed runtime, declared environment, launch or registration cannot silently select another historical binding. A complete empty capture differs from no capture, invalidated capture and unavailable storage. The public projection has a 512 KiB bound; exceeding it reports unavailable rather than truncating a review.
+The part **Approve MCP tool versions** of Skills & MCP (`/skills/?part=tools`) reads only current, exactly matched opted-in registrations. A changed runtime, declared environment, launch or registration cannot silently select another historical binding. A complete empty capture differs from no capture, invalidated capture and unavailable storage. The public projection has a 512 KiB bound; exceeding it reports unavailable rather than truncating a review.
 
 Identical launches with the same client/name/context in multiple configuration scopes are ambiguous in this version. Review reports a context gap and refuses decisions; recover one registration explicitly or use distinguishable launches before reviewing. It never silently chooses a scope.
 

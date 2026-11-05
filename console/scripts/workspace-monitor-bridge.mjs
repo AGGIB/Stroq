@@ -307,35 +307,6 @@ export async function routePosture(req, path, origin, service) {
   }
 }
 
-/** The threat feed reads pwn.watch only on request. A missing adapter answers 503 and fetches nothing. */
-export async function createThreatFeedService(configuration = {}) {
-  try {
-    const engine = await adapter();
-    if (typeof engine.createThreatFeedService !== 'function') throw Error('runtime-unavailable');
-    return await engine.createThreatFeedService(configuration);
-  } catch {
-    return { read: async () => unavailable(), close: async () => {} };
-  }
-}
-
-export async function routeThreatFeed(req, path, origin, service) {
-  try {
-    const engine = await adapter();
-    if (typeof engine.routeThreatFeed !== 'function') throw Error('runtime-unavailable');
-    return await engine.routeThreatFeed(req, path, origin, service);
-  } catch {
-    if (req.url.includes('?') || req.url.includes('#')) {
-      req.resume();
-      return { status: 400, body: { error: 'invalid-request' } };
-    }
-    if (path === '/api/threats') {
-      req.resume();
-      return unavailable();
-    }
-    return { status: 404, body: { error: 'not-found' } };
-  }
-}
-
 export async function routeInventoryMonitor(req, path, origin, service) {
   try {
     const engine = await adapter();

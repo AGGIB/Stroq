@@ -17,7 +17,7 @@
 import { commandUrls } from '@stroq/core';
 import { valueHolds } from './key-text.js';
 import { authHeaderNames, isOwnHost } from './own-service.js';
-import { holdsPiece, isLoopback, type KeyOf, type Place } from './place.js';
+import { holdsPiece, isThisMachine, type KeyOf, type Place } from './place.js';
 import { authHeader, HEADER_NAME, SMUGGLES, strictHost, withoutAuthQuery } from './strict-own.js';
 
 /**
@@ -205,9 +205,10 @@ export function toolRequestPlace(
   if (hosts.length === 0 && !unread) return null;
   const own = unread ? null : strictOwnField(input, fields, key);
   if (own !== null) return { ...base, tier: 'own_service', host: own };
-  if (!unread && hosts.every(isLoopback))
+  if (!unread && hosts.every(isThisMachine))
     return { ...base, tier: 'maybe', host: hosts[0] as string, local: true };
   const host =
-    hosts.find((h) => !isLoopback(h) && !isOwnHost(key, h)) ?? hosts.find((h) => !isLoopback(h));
+    hosts.find((h) => !isThisMachine(h) && !isOwnHost(key, h)) ??
+    hosts.find((h) => !isThisMachine(h));
   return { ...base, tier: 'third_party', ...(host === undefined ? {} : { host }) };
 }

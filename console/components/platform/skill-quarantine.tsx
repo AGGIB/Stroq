@@ -1,22 +1,22 @@
 'use client';
 import { useRef, useState } from 'react';
-import Link from 'next/link';
 import { useSearchParams } from 'next/navigation';
 import { Archive, ArrowRight, RefreshCw } from 'lucide-react';
-import { Badge, EmptyState, PageHeading, Panel } from '@/components/platform-ui';
+import { Badge, EmptyState, Panel } from '@/components/platform-ui';
+import { partParams } from '@/lib/skills-navigation';
 import {
   quarantineHref,
   quarantineSelection,
   type QuarantineFilter,
 } from '@/lib/quarantine-navigation';
 import type { SkillQuarantineRecord, SkillQuarantineReceipt } from '@/lib/skill-quarantine';
-import { SkillsTabs } from './inventory';
 import { useSkillQuarantine } from './use-skill-quarantine';
 import { QUARANTINE_LABELS, QuarantineDetail, quarantineNeedsAttention } from './quarantine-detail';
 import { InventorySource, inventorySourceLabel } from './inventory-source';
-export function SkillQuarantinePage() {
+/** The skills moved out of discovery, with the undo of each. A part of Skills & MCP. */
+export function QuarantineHistory() {
   const { localAccess, workspaceId, state, loading, error, refresh } = useSkillQuarantine();
-  const location = quarantineSelection(useSearchParams());
+  const location = quarantineSelection(partParams(useSearchParams(), 'quarantine'));
   const [receipt, setReceipt] = useState<SkillQuarantineReceipt | null>(null);
   const returnFocus = useRef<HTMLElement | null>(null),
     refreshButton = useRef<HTMLButtonElement | null>(null),
@@ -47,28 +47,25 @@ export function SkillQuarantinePage() {
         : quarantineNeedsAttention(record)),
   );
   return (
-    <div
-      className="page-stack"
+    <section
+      id="quarantine"
+      className="skills-part"
       ref={page}
       tabIndex={-1}
-      role="region"
-      aria-label="Skill quarantine"
+      aria-labelledby="quarantine-title"
     >
-      <PageHeading
-        title="Skill quarantine"
-        actions={
-          <button
-            className="button"
-            ref={refreshButton}
-            disabled={!localAccess || loading}
-            onClick={() => void refresh()}
-          >
-            <RefreshCw size={16} className={loading ? 'spin' : undefined} />
-            {loading ? 'Rechecking…' : 'Recheck folders'}
-          </button>
-        }
-      />
-      <SkillsTabs active="quarantine" />
+      <div className="skills-part-head">
+        <h2 id="quarantine-title">Skills moved aside</h2>
+        <button
+          className="button"
+          ref={refreshButton}
+          disabled={!localAccess || loading}
+          onClick={() => void refresh()}
+        >
+          <RefreshCw size={16} className={loading ? 'spin' : undefined} />
+          {loading ? 'Rechecking…' : 'Recheck folders'}
+        </button>
+      </div>
       {error && (
         <p className="control-error" role="alert">
           {error}
@@ -100,15 +97,10 @@ export function SkillQuarantinePage() {
       )}
       {!localAccess ? (
         <Panel>
-          <EmptyState
-            title="Connect the local engine"
-            description="Open your private server link to inspect retained versions."
-          />
-          <div className="panel-body">
-            <Link className="button" href="/settings/">
-              Connection settings <ArrowRight size={16} />
-            </Link>
-          </div>
+          <p className="panel-body control-meta">
+            Not connected to Stroq on this machine. Run <code>npx @stroq/cli console</code> to open
+            this page with your data.
+          </p>
         </Panel>
       ) : (
         <>
@@ -288,6 +280,6 @@ export function SkillQuarantinePage() {
         }}
         onRechecked={() => void refresh(false)}
       />
-    </div>
+    </section>
   );
 }

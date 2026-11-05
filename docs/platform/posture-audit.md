@@ -1,6 +1,6 @@
 # Settings check
 
-**Settings check** (`/posture/`) lists settings in your agents' own files that switch off or loosen
+**Settings check** (`/agents/#settings`, with each agent's own findings in its row on Agents) lists settings in your agents' own files that switch off or loosen
 an agent's own checks: Claude Code hooks turned off, "run without asking" modes, allow rules for any shell
 command, a repository that points your prompts at another server, and similar. It reads files. It
 changes nothing, starts nothing and never shows a value from a file.

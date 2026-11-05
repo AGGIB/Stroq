@@ -12,7 +12,7 @@ import { cursorRowEvents } from './cursor.js';
 import type { SessionSightings } from './findings.js';
 import type { KeyFinder } from './keys.js';
 import type { McpServers } from './mcp-config.js';
-import { byteMatcher } from './needles.js';
+import { byteMatcher, type ByteMatcher } from './needles.js';
 import { baseName, isAbsolutePath } from './path-form.js';
 import type { SessionRef } from './sessions.js';
 import { spillReader, type SpillReader } from '../replay/spilled.js';
@@ -28,6 +28,10 @@ export interface ScanDeps {
   readonly progress?: (done: number, total: number) => void;
   /** Bytes of saved large outputs read into their calls over the whole scan (`SPILL_BUDGET_BYTES`). */
   readonly spillBudget?: number;
+  /** The matcher for these keys (`scanMatcher`), when one is kept between scans; else built here. */
+  readonly bytes?: ByteMatcher;
+  /** Keep the evidence of each place that says a key was sent, or may have been (`evidence.ts`). */
+  readonly evidence?: boolean;
 }
 
 export interface ScanResult {
@@ -71,6 +75,14 @@ function parseWords(finder: KeyFinder): string[] {
   return [...words, ...(environment ? ENVIRONMENT_WORDS : [])];
 }
 
+/** The fast pass for a finder's keys: what a scan builds once, and a worker keeps for many scans. */
+export function scanMatcher(finder: KeyFinder): ByteMatcher {
+  return byteMatcher(
+    finder.keys.map((k) => k.value),
+    parseWords(finder),
+  );
+}
+
 /** An output Claude Code saved to a file of its own: what a call printed, not the session's log. */
 const isSavedOutput = (file: string): boolean => basename(dirname(file)) === 'tool-results';
 
@@ -90,6 +102,7 @@ async function readSession(
     cwd: ref.cwd,
     gitRemote: deps.gitRemote,
     ...(deps.home === undefined ? {} : { home: deps.home }),
+    ...(deps.evidence === true ? { evidence: true } : {}),
   });
   if (ref.cursor !== undefined) {
     // Each row is one record: a key in a part of it no reader read (a prompt, a field) is maybe sent.
@@ -120,10 +133,7 @@ export async function scanSessions(
   refs: readonly SessionRef[],
   deps: ScanDeps,
 ): Promise<ScanResult> {
-  const bytes = byteMatcher(
-    deps.finder.keys.map((k) => k.value),
-    parseWords(deps.finder),
-  );
+  const bytes = deps.bytes ?? scanMatcher(deps.finder);
   // One reader for the whole scan: each saved output is read once, out of one budget.
   const spill = spillReader(deps.spillBudget);
   const found: SessionSightings[] = [];

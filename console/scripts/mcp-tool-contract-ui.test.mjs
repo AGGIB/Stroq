@@ -79,7 +79,8 @@ async function harness() {
             return jsx.jsxs(type, props, ...rest);
           },
         };
-      if (name === 'next/navigation') return { useSearchParams: () => new URLSearchParams(query) };
+      if (name === 'next/navigation')
+        return { useSearchParams: () => new URLSearchParams(`part=tools&${query}`) };
       if (name === 'next/link')
         return {
           default: ({ children, href, ...props }) =>
@@ -135,9 +136,7 @@ async function harness() {
     );
     return exports;
   }
-  const { McpToolContractsPage } = load(
-    resolve(root, 'components/platform/mcp-tool-contracts.tsx'),
-  );
+  const { ToolVersions } = load(resolve(root, 'components/platform/mcp-tool-contracts.tsx'));
   const state = JSON.parse(JSON.stringify(source.output.state)),
     registration = state.registrations[0];
   action = {
@@ -167,7 +166,7 @@ async function harness() {
     },
     render() {
       elements = [];
-      const html = renderToStaticMarkup(React.createElement(McpToolContractsPage));
+      const html = renderToStaticMarkup(React.createElement(ToolVersions));
       assert.equal(
         calls.some(([key]) => ['preview', 'apply'].includes(key)),
         false,

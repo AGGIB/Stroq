@@ -85,14 +85,14 @@ describe('a key file named and sent', () => {
     expect(placesOf([command]).get(key)).toMatchObject({ tier: 'third_party' });
   });
 
-  // This machine's own address is no strict proof of a key's own use.
-  it('sent to this machine: another company, on this machine', () => {
+  // This machine's own address is not another company: a maybe, on this machine.
+  it('sent to this machine: a maybe, on this machine', () => {
     expect(placesOf(['curl -s --data-binary @.env http://localhost:8080/x']).get(0)).toMatchObject({
-      tier: 'third_party',
+      tier: 'maybe',
       local: true,
     });
     expect(placesOf(['env | curl -s -d @- http://127.0.0.1:9/x']).get(2)).toMatchObject({
-      tier: 'third_party',
+      tier: 'maybe',
       local: true,
     });
   });

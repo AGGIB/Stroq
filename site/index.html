@@ -128,12 +128,160 @@
   <section class="hero" id="scan" aria-labelledby="hero-title">
     <div class="container hero-grid">
       <div class="hero-copy">
-        <h1 id="hero-title">Find secrets in past AI coding agent sessions.</h1>
-        <p class="lead">Stroq scans <em>recorded sessions</em> for known credentials, shows where they appeared without printing values, and guards supported future actions.</p>
+        <!-- Hoo, the owl. The drawing is written by scripts/render-owl-svg.ts from the grid and
+             palette the terminal uses (packages/cli/src/ui/mascot/sprites.ts); run `pnpm owl:svg`
+             to change it. It is still: nothing on it moves. -->
+        <div class="hoo">
+<!-- owl:begin (written by scripts/render-owl-svg.ts from sprites.ts; do not edit) -->
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" width="120" height="120" shape-rendering="crispEdges" role="img" aria-label="Hoo, the Stroq owl">
+<rect x="3" y="0" width="2" height="1" fill="#0d0e10"/>
+<rect x="15" y="0" width="2" height="1" fill="#0d0e10"/>
+<rect x="3" y="1" width="1" height="1" fill="#0d0e10"/>
+<rect x="4" y="1" width="1" height="1" fill="#fe4813"/>
+<rect x="5" y="1" width="1" height="1" fill="#0d0e10"/>
+<rect x="14" y="1" width="1" height="1" fill="#0d0e10"/>
+<rect x="15" y="1" width="1" height="1" fill="#fe4813"/>
+<rect x="16" y="1" width="1" height="1" fill="#0d0e10"/>
+<rect x="3" y="2" width="1" height="1" fill="#0d0e10"/>
+<rect x="4" y="2" width="2" height="1" fill="#fe4813"/>
+<rect x="6" y="2" width="8" height="1" fill="#0d0e10"/>
+<rect x="14" y="2" width="2" height="1" fill="#fe4813"/>
+<rect x="16" y="2" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="3" width="1" height="1" fill="#0d0e10"/>
+<rect x="3" y="3" width="14" height="1" fill="#fe4813"/>
+<rect x="17" y="3" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="4" width="1" height="1" fill="#0d0e10"/>
+<rect x="3" y="4" width="1" height="1" fill="#fe4813"/>
+<rect x="4" y="4" width="4" height="1" fill="#f1f2f0"/>
+<rect x="8" y="4" width="4" height="1" fill="#fe4813"/>
+<rect x="12" y="4" width="4" height="1" fill="#f1f2f0"/>
+<rect x="16" y="4" width="1" height="1" fill="#fe4813"/>
+<rect x="17" y="4" width="1" height="1" fill="#0d0e10"/>
+<rect x="1" y="5" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="5" width="1" height="1" fill="#fe4813"/>
+<rect x="3" y="5" width="6" height="1" fill="#f1f2f0"/>
+<rect x="9" y="5" width="2" height="1" fill="#fe4813"/>
+<rect x="11" y="5" width="6" height="1" fill="#f1f2f0"/>
+<rect x="17" y="5" width="1" height="1" fill="#fe4813"/>
+<rect x="18" y="5" width="1" height="1" fill="#0d0e10"/>
+<rect x="1" y="6" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="6" width="1" height="1" fill="#fe4813"/>
+<rect x="3" y="6" width="2" height="1" fill="#f1f2f0"/>
+<rect x="5" y="6" width="2" height="1" fill="#0d0e10"/>
+<rect x="7" y="6" width="6" height="1" fill="#f1f2f0"/>
+<rect x="13" y="6" width="2" height="1" fill="#0d0e10"/>
+<rect x="15" y="6" width="2" height="1" fill="#f1f2f0"/>
+<rect x="17" y="6" width="1" height="1" fill="#fe4813"/>
+<rect x="18" y="6" width="1" height="1" fill="#0d0e10"/>
+<rect x="1" y="7" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="7" width="1" height="1" fill="#fe4813"/>
+<rect x="3" y="7" width="1" height="1" fill="#f1f2f0"/>
+<rect x="4" y="7" width="1" height="1" fill="#0d0e10"/>
+<rect x="5" y="7" width="1" height="1" fill="#ffffff"/>
+<rect x="6" y="7" width="2" height="1" fill="#0d0e10"/>
+<rect x="8" y="7" width="4" height="1" fill="#f1f2f0"/>
+<rect x="12" y="7" width="1" height="1" fill="#0d0e10"/>
+<rect x="13" y="7" width="1" height="1" fill="#ffffff"/>
+<rect x="14" y="7" width="2" height="1" fill="#0d0e10"/>
+<rect x="16" y="7" width="1" height="1" fill="#f1f2f0"/>
+<rect x="17" y="7" width="1" height="1" fill="#fe4813"/>
+<rect x="18" y="7" width="1" height="1" fill="#0d0e10"/>
+<rect x="1" y="8" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="8" width="1" height="1" fill="#fe4813"/>
+<rect x="3" y="8" width="1" height="1" fill="#f1f2f0"/>
+<rect x="4" y="8" width="4" height="1" fill="#0d0e10"/>
+<rect x="8" y="8" width="4" height="1" fill="#f1f2f0"/>
+<rect x="12" y="8" width="4" height="1" fill="#0d0e10"/>
+<rect x="16" y="8" width="1" height="1" fill="#f1f2f0"/>
+<rect x="17" y="8" width="1" height="1" fill="#fe4813"/>
+<rect x="18" y="8" width="1" height="1" fill="#0d0e10"/>
+<rect x="1" y="9" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="9" width="1" height="1" fill="#fe4813"/>
+<rect x="3" y="9" width="2" height="1" fill="#f1f2f0"/>
+<rect x="5" y="9" width="2" height="1" fill="#0d0e10"/>
+<rect x="7" y="9" width="2" height="1" fill="#f1f2f0"/>
+<rect x="9" y="9" width="2" height="1" fill="#ffb627"/>
+<rect x="11" y="9" width="2" height="1" fill="#f1f2f0"/>
+<rect x="13" y="9" width="2" height="1" fill="#0d0e10"/>
+<rect x="15" y="9" width="2" height="1" fill="#f1f2f0"/>
+<rect x="17" y="9" width="1" height="1" fill="#fe4813"/>
+<rect x="18" y="9" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="10" width="1" height="1" fill="#0d0e10"/>
+<rect x="3" y="10" width="1" height="1" fill="#fe4813"/>
+<rect x="4" y="10" width="5" height="1" fill="#f1f2f0"/>
+<rect x="9" y="10" width="2" height="1" fill="#d18208"/>
+<rect x="11" y="10" width="5" height="1" fill="#f1f2f0"/>
+<rect x="16" y="10" width="1" height="1" fill="#fe4813"/>
+<rect x="17" y="10" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="11" width="1" height="1" fill="#0d0e10"/>
+<rect x="3" y="11" width="2" height="1" fill="#fe4813"/>
+<rect x="5" y="11" width="10" height="1" fill="#f1f2f0"/>
+<rect x="15" y="11" width="2" height="1" fill="#fe4813"/>
+<rect x="17" y="11" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="12" width="1" height="1" fill="#0d0e10"/>
+<rect x="3" y="12" width="14" height="1" fill="#fe4813"/>
+<rect x="17" y="12" width="1" height="1" fill="#0d0e10"/>
+<rect x="1" y="13" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="13" width="1" height="1" fill="#ff7a4d"/>
+<rect x="3" y="13" width="2" height="1" fill="#fe4813"/>
+<rect x="5" y="13" width="1" height="1" fill="#c93a0e"/>
+<rect x="6" y="13" width="2" height="1" fill="#fe4813"/>
+<rect x="8" y="13" width="1" height="1" fill="#c93a0e"/>
+<rect x="9" y="13" width="2" height="1" fill="#fe4813"/>
+<rect x="11" y="13" width="1" height="1" fill="#c93a0e"/>
+<rect x="12" y="13" width="2" height="1" fill="#fe4813"/>
+<rect x="14" y="13" width="1" height="1" fill="#c93a0e"/>
+<rect x="15" y="13" width="2" height="1" fill="#fe4813"/>
+<rect x="17" y="13" width="1" height="1" fill="#ff7a4d"/>
+<rect x="18" y="13" width="1" height="1" fill="#0d0e10"/>
+<rect x="1" y="14" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="14" width="1" height="1" fill="#ff7a4d"/>
+<rect x="3" y="14" width="3" height="1" fill="#fe4813"/>
+<rect x="6" y="14" width="1" height="1" fill="#c93a0e"/>
+<rect x="7" y="14" width="6" height="1" fill="#fe4813"/>
+<rect x="13" y="14" width="1" height="1" fill="#c93a0e"/>
+<rect x="14" y="14" width="3" height="1" fill="#fe4813"/>
+<rect x="17" y="14" width="1" height="1" fill="#ff7a4d"/>
+<rect x="18" y="14" width="1" height="1" fill="#0d0e10"/>
+<rect x="1" y="15" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="15" width="1" height="1" fill="#ff7a4d"/>
+<rect x="3" y="15" width="2" height="1" fill="#fe4813"/>
+<rect x="5" y="15" width="1" height="1" fill="#c93a0e"/>
+<rect x="6" y="15" width="2" height="1" fill="#fe4813"/>
+<rect x="8" y="15" width="1" height="1" fill="#c93a0e"/>
+<rect x="9" y="15" width="2" height="1" fill="#fe4813"/>
+<rect x="11" y="15" width="1" height="1" fill="#c93a0e"/>
+<rect x="12" y="15" width="2" height="1" fill="#fe4813"/>
+<rect x="14" y="15" width="1" height="1" fill="#c93a0e"/>
+<rect x="15" y="15" width="2" height="1" fill="#fe4813"/>
+<rect x="17" y="15" width="1" height="1" fill="#ff7a4d"/>
+<rect x="18" y="15" width="1" height="1" fill="#0d0e10"/>
+<rect x="2" y="16" width="1" height="1" fill="#0d0e10"/>
+<rect x="3" y="16" width="1" height="1" fill="#ff7a4d"/>
+<rect x="4" y="16" width="12" height="1" fill="#fe4813"/>
+<rect x="16" y="16" width="1" height="1" fill="#ff7a4d"/>
+<rect x="17" y="16" width="1" height="1" fill="#0d0e10"/>
+<rect x="3" y="17" width="1" height="1" fill="#0d0e10"/>
+<rect x="4" y="17" width="12" height="1" fill="#fe4813"/>
+<rect x="16" y="17" width="1" height="1" fill="#0d0e10"/>
+<rect x="4" y="18" width="2" height="1" fill="#0d0e10"/>
+<rect x="6" y="18" width="2" height="1" fill="#ffb627"/>
+<rect x="8" y="18" width="4" height="1" fill="#0d0e10"/>
+<rect x="12" y="18" width="2" height="1" fill="#ffb627"/>
+<rect x="14" y="18" width="2" height="1" fill="#0d0e10"/>
+<rect x="5" y="19" width="1" height="1" fill="#ffb627"/>
+<rect x="7" y="19" width="1" height="1" fill="#ffb627"/>
+<rect x="12" y="19" width="1" height="1" fill="#ffb627"/>
+<rect x="14" y="19" width="1" height="1" fill="#ffb627"/>
+</svg>
+<!-- owl:end -->
+        </div>
+        <h1 id="hero-title">Who is really in charge of your agent?</h1>
+        <p class="lead">Stroq reads your own Claude Code and Codex sessions and shows how many commands came from <em>text your agent read</em>, and which keys left your machine.</p>
         <div class="hero-cta">
           <div class="install-pill">
-            <code class="install-cmd" id="install-cmd"><span class="prompt-mark" aria-hidden="true">$ </span>npx @stroq/cli sent --last</code>
-            <button class="copy-btn" type="button" data-copy="npx @stroq/cli sent --last" data-select="install-cmd" aria-describedby="install-cmd">
+            <code class="install-cmd" id="install-cmd"><span class="prompt-mark" aria-hidden="true">$ </span>npx @stroq/cli</code>
+            <button class="copy-btn" type="button" data-copy="npx @stroq/cli" data-select="install-cmd" aria-describedby="install-cmd">
               <svg class="ic" width="16" height="16" aria-hidden="true" focusable="false"><use href="#i-copy"/></svg>
               <span class="copy-label">Copy</span>
             </button>
@@ -954,7 +1102,7 @@ npx @stroq/cli init --agent mcp --client claude-desktop</code></pre>
         <div class="rerun">
           <p class="rerun-title">The counts on this page come from commands you can re-run.</p>
           <ul>
-            <li><code>stroq bench</code> the false-positive rate</li>
+            <li><code>pnpm dev:bench</code> the false-positive rate</li>
             <li><code>stroq attack</code> the 36 incidents</li>
             <li><code>pnpm test</code> the suite</li>
           </ul>

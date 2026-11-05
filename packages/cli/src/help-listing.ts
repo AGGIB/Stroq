@@ -4,12 +4,12 @@
 // holds the two to each other: every command there has a tier here, and no other name does.
 
 /**
- * core: on the first screen. more: under `stroq help --all` too. hidden: in neither list; the
+ * core: on the first screen. more: under `stroq help --all` only. hidden: in neither list; the
  * command still works and still has its `--help`.
  */
 export type Tier = 'core' | 'more' | 'hidden';
 
-type Job = 'past' | 'guard' | 'before' | 'test' | 'experimental';
+type Job = 'start' | 'past' | 'before' | 'guard';
 
 interface Listed {
   readonly name: string;
@@ -40,14 +40,52 @@ const more = (name: string, brief: string, summary: string): Listed => ({
   summary,
 });
 
+/**
+ * `stroq` with no words after it. It is the first thing on the first screen, but it is not a
+ * command with a name: it has no tier, no `--help` and no entry in `COMMANDS`. Until the card of a
+ * person's own sessions is built, it prints the first screen.
+ */
+const BARE = {
+  brief: '',
+  summary: 'who is really in charge of your agent? A card of your sessions',
+};
+/** The same line for `stroq help --all`, whose column starts further right. */
+const BARE_ALL = { brief: '', summary: 'A card from your own sessions' };
+
+/**
+ * How many attacks `stroq attack` replays, as the first screen says it. The corpus is not read
+ * here, because this file is loaded by every hook call; `help-unit.test.ts` holds the number to
+ * the length of the corpus, so that adding an attack fails there until the screen says so.
+ */
+export const ATTACK_COUNT = 36;
+
 /** Every listed command, by job, in the order both screens print them. */
 const SECTIONS: readonly Section[] = [
+  {
+    job: 'start',
+    title: 'Start here',
+    commands: [
+      core('init', 'init', 'stop it next time: guard your agent'),
+      core('why', 'why', 'why an action was stopped'),
+      core('attack', 'attack', `watch Stroq stop ${ATTACK_COUNT} known attacks, in a sandbox`),
+      core('uninstall', 'uninstall', 'remove Stroq'),
+    ],
+  },
   {
     job: 'past',
     title: 'Check past sessions',
     commands: [
-      core('sent', 'sent --last', 'Did your agent see or send any of your keys?'),
+      more('sent', 'sent --last', 'Did your agent see or send any of your keys?'),
       more('replay', 'replay --last', 'Which commands came from what the agent read?'),
+    ],
+  },
+  {
+    job: 'before',
+    title: 'Check before you open or install',
+    commands: [
+      more('inspect', 'inspect [<dir>]', 'What will this repo run when an agent opens it?'),
+      more('vet', 'vet --from <path>', 'Read a skill or MCP server before you add it'),
+      more('exposure', 'exposure', 'Map the agents and MCP servers on this machine'),
     ],
   },
   {
@@ -55,53 +93,23 @@ const SECTIONS: readonly Section[] = [
     title: 'Guard your agent',
     commands: [
       more('console', 'console', 'Open the local security platform'),
-      core('init', 'init', 'Block risky actions from now on (asks first)'),
-      core('doctor', 'doctor', 'Is the guard installed and being called?'),
-      core('why', 'why', 'Why was the last action blocked or asked about?'),
-      core('uninstall', 'uninstall', "Take Stroq out of your agent's config"),
+      more('doctor', 'doctor', 'Is the guard installed and being called?'),
       more('untaint', 'untaint --session <id>', 'Clear a flagged session after a false alarm'),
       more('trust', 'trust <file>', 'Mark a file as fine until it changes'),
       more('log', 'log', "Show the latest entries of Stroq's audit log"),
       more('verify', 'verify', 'Check that the audit log was not edited'),
       more('policy', 'policy check', 'Check your policy file and test what it changes'),
-    ],
-  },
-  {
-    job: 'before',
-    title: 'Check before you open or install',
-    commands: [
-      core('inspect', 'inspect [<dir>]', 'What will this repo run when an agent opens it?'),
-      core('vet', 'vet --from <path>', 'Read a skill or MCP server before you add it'),
-      more('add', 'add <path>', 'Install a skill or MCP server after a check'),
-      more('remove', 'remove <name>', 'Remove what stroq add installed'),
-      more('exposure', 'exposure', 'Map the agents and MCP servers on this machine'),
-      more('run', 'run -- <agent>', 'Start an agent after checking the repo and hooks'),
-    ],
-  },
-  {
-    job: 'test',
-    title: 'Test Stroq itself',
-    commands: [
-      more('attack', 'attack', 'Run the built-in attacks against your policy'),
-      more('bench', 'bench', 'Measure false alarms, interruptions and speed'),
-      more('coverage', 'coverage', 'Map Stroq to the MITRE ATLAS and OWASP lists'),
-      more('prove', 'prove', 'Check with your agent that blocking really works'),
       more('canary', 'canary', 'Make a decoy key; sending it out is blocked'),
-    ],
-  },
-  {
-    job: 'experimental',
-    title: 'Experimental',
-    commands: [
-      more('task', 'task -- "<task>"', 'Run a Claude Code task with set files and tools'),
-      more('permit', 'permit list', "See, extend or end a task's permissions"),
-      more('harden', 'harden plan', "Block credential files in your agent's settings"),
     ],
   },
 ];
 
-/** What Stroq writes into an agent's config (`init`, and `add --kind mcp`). No person types these. */
-const HIDDEN: readonly string[] = ['hook', 'mcp'];
+/**
+ * What Stroq writes into an agent's config (`init`) and older copies of it still call: no person
+ * types `hook` and `mcp`. `task-hook` is not a command of the table at all: it is answered in
+ * index.ts. And the card and `show`, which the no-argument `stroq` is to run: listed with it, not here.
+ */
+const HIDDEN: readonly string[] = ['hook', 'mcp', 'card', 'show'];
 
 const TIERS: ReadonlyMap<string, Tier> = new Map([
   ...SECTIONS.flatMap((section) =>
@@ -120,47 +128,40 @@ const TAGLINE = [
   'Runs on your machine, no telemetry.',
 ];
 
-/** The two groups of the first screen, and the jobs whose core commands each one shows. */
-const FIRST_SCREEN: readonly { readonly title: string; readonly jobs: readonly Job[] }[] = [
-  { title: 'Check (reads only):', jobs: ['past', 'before'] },
-  { title: "Guard (init and uninstall change your agent's config):", jobs: ['guard'] },
+const shown = (brief: string): string => (brief === '' ? 'stroq' : `stroq ${brief}`);
+
+/** The rows of the first screen: the bare `stroq`, then the core commands. */
+const FIRST_SCREEN: readonly Pick<Listed, 'brief' | 'summary'>[] = [
+  BARE,
+  ...SECTIONS.flatMap((section) => section.commands).filter((command) => command.tier === 'core'),
 ];
 
-const shown = (brief: string): string => `stroq ${brief}`;
+const widthOf = (rows: readonly Pick<Listed, 'brief'>[]): number =>
+  Math.max(...rows.map((r) => shown(r.brief).length)) + 2;
 
-/** One column for both screens, so that a command sits in the same place on each. */
-const WIDTH =
-  Math.max(...SECTIONS.flatMap((s) => s.commands.map((c) => shown(c.brief).length))) + 2;
+const row = (command: Pick<Listed, 'brief' | 'summary'>, width: number, indent = ''): string =>
+  `${indent}${shown(command.brief).padEnd(width)}${command.summary}`;
 
-const row = (command: Listed): string =>
-  `  ${shown(command.brief).padEnd(WIDTH)}${command.summary}`;
-
-/** `stroq --help`: the commands most people need, and where the others are. */
+/** `stroq --help`: the five things most people need, and where the others are. */
 export function usage(): string {
-  const groups = FIRST_SCREEN.flatMap(({ title, jobs }) => [
-    '',
-    title,
-    ...SECTIONS.filter((section) => jobs.includes(section.job))
-      .flatMap((section) => section.commands)
-      .filter((command) => command.tier === 'core')
-      .map(row),
-  ]);
+  const width = widthOf(FIRST_SCREEN);
   return [
-    ...TAGLINE,
-    ...groups,
+    ...FIRST_SCREEN.map((command) => row(command, width)),
     '',
-    'All commands:  stroq help --all',
-    'One command:   stroq <command> --help',
+    'More commands: stroq help --all',
     '',
   ].join('\n');
 }
 
 /** `stroq help --all`: every command that is not plumbing, one line each, by job. */
 export function usageAll(): string {
+  const everything = [BARE_ALL, ...SECTIONS.flatMap((section) => section.commands)];
+  const width = widthOf(everything);
   const groups = SECTIONS.flatMap((section) => [
     '',
     `${section.title}:`,
-    ...section.commands.map(row),
+    ...(section.job === 'start' ? [row(BARE_ALL, width, '  ')] : []),
+    ...section.commands.map((command) => row(command, width, '  ')),
   ]);
   return [
     ...TAGLINE,

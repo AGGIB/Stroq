@@ -1,6 +1,6 @@
 <!--
   GENERATED FILE. Do not hand-edit.
-  Produced by `pnpm generate:reports` from `stroq coverage`'s own output.
+  Produced by `pnpm generate:reports` from `pnpm dev:coverage`'s own output.
   Refresh it with `pnpm generate:reports`; `pnpm check:reports` fails CI if
   this file and the command's live output disagree.
 -->
@@ -13,7 +13,7 @@ This is a control mapping with evidence, not a compliance claim. `covered` means
 
 Which techniques are in scope for a local, hook-based action firewall at all, and why the rest of the vendored ATLAS denominator is not, is declared in [`packages/cli/src/coverage/scope.json`](../packages/cli/src/coverage/scope.json), with its method documented in [`packages/cli/src/coverage/SCOPE.md`](../packages/cli/src/coverage/SCOPE.md).
 
-Reproduce this table with `stroq coverage`, or load the same mapping into MITRE ATT&CK Navigator with `stroq coverage --format=navigator`.
+Reproduce this table with `pnpm dev:coverage`, or load the same mapping into MITRE ATT&CK Navigator with `pnpm dev:coverage -- --format=navigator`.
 
 ```text
 stroq coverage — 36 scenarios (26 documented, 10 synthetic) · ATLAS 2026.09 · OWASP ASI 2026

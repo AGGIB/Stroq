@@ -2,7 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { isDeepStrictEqual } from 'node:util';
 import { serialize } from 'node:v8';
 import { createWorkspaceReviewContext } from './workspace-review-context.mjs';
-import { executeTaskLock } from './task-lock-runner.mjs';
+import { executeWorker } from './worker-runner.mjs';
 import { withAgentConfigurationLock } from './agent-configuration-lock.mjs';
 import {
   SESSION_TAINT_ERRORS,
@@ -88,7 +88,7 @@ const PRECOMMIT_FAILURES = new Set([
 /** Clear only one freshly selected session's stored taint; retain provenance and source evidence. */
 export async function createSessionTaintControl(configuration: Record<string, any> = {}) {
   const ctx = configuration.context ?? (await createWorkspaceReviewContext(configuration));
-  const execute = configuration.execute ?? executeTaskLock;
+  const execute = configuration.execute ?? executeWorker;
   const lock = configuration.withLock ?? withAgentConfigurationLock;
   const now = configuration.now ?? Date.now;
   const plans = new Map<string, SavedPreview>(),

@@ -7,7 +7,7 @@ import { ENGINE_PATHS, REPOSITORY, engineAvailability } from './control-engine.m
 import { rootIdentity } from './agent-setup-files.mjs';
 import { runtimeDigest } from './agent-setup-cli.mjs';
 import { runtimeLayout } from './runtime-layout.mjs';
-import { executeTaskLock } from './task-lock-runner.mjs';
+import { executeWorker } from './worker-runner.mjs';
 
 export const workspaceReviewHash = (v) => createHash('sha256').update(v).digest('hex');
 export const WORKSPACE_ERRORS = new Set([
@@ -136,7 +136,7 @@ export async function createWorkspaceReviewContext(configuration = {}) {
     }
   }
   const run = (operation, input, bound, extra = {}) =>
-    executeTaskLock(operation, input, {
+    executeWorker(operation, input, {
       workerPath: options.workerPath ?? runtimeLayout().adapter('workspace-review-worker.js'),
       timeoutMs: options.timeoutMs,
       signal: extra.signal,

@@ -21,7 +21,6 @@ import {
   protectionStageSummary,
 } from '@/lib/protection-check-presentation';
 import { protectionRunHref } from '@/lib/protection-check-navigation';
-import { workspaceReviewHref } from '@/lib/workspace-review-navigation';
 import { ACTION_LABELS } from '@/lib/incident-comparison';
 import {
   formatRunTime,
@@ -125,11 +124,9 @@ function StageEvidence({
       {(!result.complete || result.coverage.gaps > 0) && (
         <p className="control-meta">Partial capture · {result.coverage.gaps} coverage gaps</p>
       )}
-      {workspaceId === result.workspaceId && (
-        <Link className="inline-link" href={workspaceReviewHref(result.runId, result.workspaceId)}>
-          Inspect captured workspace <ArrowRight size={14} />
-        </Link>
-      )}
+      <p className="control-meta">
+        To look inside a folder yourself, run <code>stroq inspect &lt;folder&gt;</code>.
+      </p>
     </>
   );
 }

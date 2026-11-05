@@ -3,6 +3,7 @@ import { mkdtempSync, readFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { DEV_COMMANDS, devHelp } from '../src/dev-help.js';
 import { commandNames } from '../src/help.js';
 import { CLI_ENTRY } from './helpers/cli-entry.js';
 
@@ -25,10 +26,8 @@ const COMMANDS: Readonly<Record<string, string>> = {
   console: 'console',
   init: 'init',
   uninstall: 'uninstall',
-  run: 'run',
   mcp: 'mcp',
   doctor: 'doctor',
-  prove: 'prove',
   log: 'log',
   verify: 'verify',
   untaint: 'untaint',
@@ -41,12 +40,14 @@ const COMMANDS: Readonly<Record<string, string>> = {
   exposure: 'exposure',
   inspect: 'inspect',
   trust: 'trust',
+  vet: 'vet',
+};
+
+/** The developer tools that used to be commands, with the source file that parses their arguments. */
+const DEV_TOOLS: Readonly<Record<string, string>> = {
+  prove: 'prove',
   bench: 'bench',
   coverage: 'coverage',
-  harden: 'harden',
-  vet: 'vet',
-  add: 'add',
-  remove: 'remove',
 };
 
 /** The flags a command's source accepts: `parseArgs` options, flag sets, `argv.includes`. */
@@ -94,48 +95,65 @@ describe('stroq <command> --help', () => {
     expect(run('help', 'untaint').stdout).toBe(run('untaint', '--help').stdout);
   });
 
-  it.each(['task', 'permit', 'hook'])('%s --help prints its usage and exits 0', (name) => {
-    const out = run(name, '--help');
+  it('hook --help prints its usage and exits 0', () => {
+    const out = run('hook', '--help');
     expect(out.stderr).not.toMatch(/TypeError|ERR_PARSE_ARGS/);
     expect(out.status).toBe(0);
-    expect(out.stdout).toMatch(new RegExp(`^stroq ${name}\\b`));
-  });
-
-  it('task --help lists all task flags', () => {
-    const help = run('task', '--help').stdout;
-    for (const flag of ['--profile', '--read', '--write', '--ttl', '--hook-only']) {
-      expect(help).toContain(flag);
-    }
-  });
-
-  it('permit --help lists all permit subcommands', () => {
-    const help = run('permit', '--help').stdout;
-    for (const sub of ['list', 'show', 'extend', 'revoke']) {
-      expect(help).toContain(sub);
-    }
+    expect(out.stdout).toMatch(/^stroq hook\b/);
   });
 });
 
-describe('stroq --help and stroq help --all', () => {
-  /** The first screen, in the order it lists them. */
-  const CORE = ['sent', 'inspect', 'vet', 'init', 'doctor', 'why', 'uninstall'];
-  /** What Stroq writes into an agent's config; no person types these. */
-  const HIDDEN = ['hook', 'mcp'];
-  /** The commands a screen lists: one per line that starts with `  stroq <name>`. */
-  const listed = (text: string): string[] =>
-    [...text.matchAll(/^ {2}stroq ([a-z][a-z-]*)/gm)].map((match) => match[1] ?? '');
+describe('the developer tools that used to be commands', () => {
+  it('are exactly the three that dev-help.ts writes the usage of', () => {
+    expect(DEV_COMMANDS.map((c) => c.name).sort()).toEqual(Object.keys(DEV_TOOLS).sort());
+  });
 
-  it('prints the same short screen for stroq, stroq --help, stroq -h and stroq help', () => {
+  it.each(Object.keys(DEV_TOOLS))('%s has a usage that opens with its pnpm script', (name) => {
+    expect(devHelp(name)).toMatch(new RegExp(`^pnpm dev:${name}\\b`));
+  });
+
+  it.each(Object.entries(DEV_TOOLS))(
+    '%s usage names every flag its source accepts',
+    (name, file) => {
+      const help = devHelp(name) ?? '';
+      for (const flag of flagsInSource(file)) expect(help, `${name} ${flag}`).toContain(flag);
+    },
+  );
+});
+
+describe('stroq --help and stroq help --all', () => {
+  /** The first screen, in the order it lists them, after the bare `stroq`. */
+  const CORE = ['init', 'why', 'attack', 'uninstall'];
+  /** What Stroq writes into an agent's config (no person types these), and the card, which `stroq` runs. */
+  const HIDDEN = ['hook', 'mcp', 'card', 'show'];
+  /** The commands a screen lists: one per line that starts with `stroq <name>`, indented or not. */
+  const listed = (text: string): string[] =>
+    [...text.matchAll(/^ {0,2}stroq ([a-z][a-z-]*)/gm)].map((match) => match[1] ?? '');
+
+  it('prints the same short screen for stroq --help, stroq -h and stroq help', () => {
     const screen = run('--help');
     expect(screen.status).toBe(0);
     expect(screen.stderr).toBe('');
-    for (const args of [[], ['-h'], ['help']])
+    for (const args of [['-h'], ['help']])
       expect(run(...args).stdout, args.join(' ')).toBe(screen.stdout);
   });
 
-  it('lists exactly the core commands on that screen, in under 20 lines', () => {
+  it('runs the card for a bare `stroq`, and passes the card its own flags', () => {
+    // The home of this test holds no session: the card says so, as plain text (no terminal, no owl).
+    const bare = run();
+    expect(bare.status).toBe(0);
+    expect(bare.stdout).toMatch(/^Hoo found no agent sessions in the last 30 days\./);
+    expect(bare.stdout).not.toContain('\u001b[');
+    expect(run('card').stdout).toBe(bare.stdout);
+    expect(run('--days', '7').stdout).toMatch(/^Hoo found no agent sessions in the last 7 days\./);
+    expect(JSON.parse(run('--json').stdout)).toMatchObject({ schema: 'stroq-card/1' });
+    expect(run('--share').stdout).toMatch(/npx @stroq\/cli\n$/);
+  });
+
+  it('lists the bare `stroq` and the four core commands on that screen, in under 20 lines', () => {
     const text = run('--help').stdout;
     expect(listed(text)).toEqual(CORE);
+    expect(text).toMatch(/^stroq {2,}who is really in charge of your agent\?/m);
     expect(text.trimEnd().split('\n').length).toBeLessThan(20);
     expect(text).toContain('stroq help --all');
   });

@@ -23,7 +23,7 @@ export function PolicyRestorePreviewPanel({
   const acknowledge = (name: keyof PolicyRestoreAcknowledgements, value: boolean) =>
     action.acknowledge(name, value);
   return (
-    <Panel title="Tested restore">
+    <Panel title="Tested undo">
       <div className="panel-body" aria-live="polite">
         {!preview ? (
           <div className="control-empty">
@@ -307,7 +307,7 @@ export function PolicyRestorePreviewPanel({
                 )}
                 {preview.target === 'current-default'
                   ? 'Use current bundled default'
-                  : 'Restore saved policy'}
+                  : 'Undo: restore the saved policy'}
               </button>
             </div>
           </>

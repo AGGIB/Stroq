@@ -1,4 +1,5 @@
 'use client';
+import { skillsPartHref } from '@/lib/skills-navigation';
 import Link from 'next/link';
 import { useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
@@ -72,7 +73,7 @@ export function McpCallControls() {
                   : 'This exact call control is unavailable.'}
             </p>
             {location.contextId && <code className="inventory-digest">{location.contextId}</code>}
-            <Link className="inline-link" href="/skills/mcp/">
+            <Link className="inline-link" href={skillsPartHref('registrations')}>
               Open local controls
             </Link>
           </div>
@@ -117,7 +118,7 @@ export function McpCallControls() {
                         }
                         onClick={() => {
                           if (location.requested) {
-                            window.history.replaceState(null, '', '/skills/mcp/');
+                            window.history.replaceState(null, '', skillsPartHref('registrations'));
                           }
                           setOpened({
                             contextId: state!.contextId,

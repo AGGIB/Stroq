@@ -87,7 +87,7 @@ export const rowsOf = (rows: readonly Row[], command: string): readonly Row[] =>
 export const saidBy = (rows: readonly Row[]): string =>
   rows.map((row) => `${row.synopsis} ${row.what}`).join(' ');
 
-/** What a count counts: the attack suite, or the ordinary work `bench --actions` replays. */
+/** What a count counts: the attack suite, or the ordinary work `pnpm dev:bench --actions` replays. */
 export type Suite = 'attack' | 'ordinary work';
 
 export interface Claim {
@@ -162,7 +162,7 @@ const READ_AS_A_TOTAL: Readonly<Record<Claim['how'], string>> = {
 const HELD_TO_A_SUITE: Readonly<Record<Suite, string>> = {
   attack: '"ordinary" is not among the words around it, so it is held to the attack suite',
   'ordinary work':
-    '"ordinary" is among the words around it, so it is held to the ordinary work `bench --actions` replays',
+    '"ordinary" is among the words around it, so it is held to the ordinary work `pnpm dev:bench --actions` replays',
 };
 
 /**

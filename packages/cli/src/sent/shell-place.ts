@@ -15,16 +15,21 @@
 // session's later calls are matched to the file by its name (`analyze.ts`).
 import { commandUrls, REDIRECT, type Word } from '@stroq/core';
 import {
-  changedFolders,
+  changesFolderByOption,
   commandPathWords,
+  folderChanges,
   namesFile,
   namesFileHow,
   type Folders,
 } from './file-paths.js';
+import { embedsPrinter, printsEnvironment } from './env-printers.js';
 import { plainText, valueHolds } from './key-text.js';
-import { shellJoined } from './needles.js';
+import { linkedByReach, type Link } from './link-by-reach.js';
+import { isDataHeredoc } from './heredoc-programs.js';
+import { runsQuotedText } from './quoted-cut.js';
+import { inStringPosition } from './string-positions.js';
 import { baseName, isAbsolutePath, joinPath, normalPath } from './path-form.js';
-import { farther, type KeyOf, type Place, type Route } from './place.js';
+import { farther, isThisMachine, type KeyOf, type Place, type Route } from './place.js';
 import {
   commandReading,
   countCut,
@@ -40,9 +45,10 @@ import {
 import {
   allStages,
   commandSends,
-  runStages,
   halfSenderPlace,
   publishes,
+  routesElsewhere,
+  runStages,
   shownName,
   stagePlace,
   stageSends,
@@ -56,6 +62,14 @@ export interface ShellContext {
   readonly cwd: string | null;
   /** Other folders the session's commands changed to: a relative path may be read against them. */
   readonly cwds?: readonly string[];
+  /** The home folder, for `cd ~/dir`. */
+  readonly home?: string;
+  /**
+   * False when the session changed folder in a way not read (`cd "$DIR"`), or past the folders it
+   * follows: the folders above are then not all there are, and a word that spells only the end of a
+   * folder's path is taken to name it wherever it is.
+   */
+  readonly foldersKnown?: boolean;
   /** The URL a git remote of a folder points at, or null when it cannot be read. */
   readonly gitRemote: (cwd: string | null, name: string) => string | null;
 }
@@ -63,8 +77,13 @@ export interface ShellContext {
 /** The folders a command may run in: the session's, those it changed to, and its own `cd`s. */
 function foldersOf(command: string, ctx: ShellContext): Folders {
   const more = [...(ctx.cwds ?? [])];
-  for (const base of [ctx.cwd, ...more].slice(0, 8)) more.push(...changedFolders(command, base));
-  return { cwd: ctx.cwd, more };
+  let read = ctx.cwd !== null && ctx.foldersKnown !== false && !changesFolderByOption(command);
+  for (const base of [ctx.cwd, ...more].slice(0, 8)) {
+    const changes = folderChanges(command, base, ctx.home);
+    more.push(...changes.folders);
+    if (changes.unread || changes.cut) read = false;
+  }
+  return { cwd: ctx.cwd, more, exact: read, ...(ctx.home === undefined ? {} : { home: ctx.home }) };
 }
 
 const pick = (a: Place | null, b: Place | null): Place | null =>
@@ -118,6 +137,21 @@ function wordsWritten(args: readonly Word[], body: string): string {
 }
 
 /**
+ * The stages whose heredoc is text: the program only reads text (`cat > f <<EOF`), nothing is piped on from it and it
+ * is not written to a network address.
+ */
+function dataBodies(reading: CommandReading): Set<Stage> {
+  const text = new Set<Stage>();
+  for (const pipelines of reading.run)
+    for (const stages of pipelines)
+      stages.forEach((stage, at) => {
+        if (stage.body === '' || at !== stages.length - 1) return;
+        if (isDataHeredoc(stage.text, '', stage.quoted === true, stage.body)) text.add(stage);
+      });
+  return text;
+}
+
+/**
  * Every place a command put a text `holds` finds in it: each stage reached in each text the core
  * reads, then the plain cut for what sends. `sendOnly` places only what sends. Every file a stage
  * reached writes is kept with every text written to it.
@@ -128,8 +162,12 @@ function placeIn(
   key: KeyOf,
   cwd: string | null,
   sendOnly: boolean,
+  link?: Link,
 ): Placed {
-  const has = (stage: Stage): boolean => holds(stage.text) || holds(stage.body);
+  // The heredocs that are text, where the link asks for them to be left out.
+  const textBodies = link?.ignoreDataBodies === true ? dataBodies(reading) : null;
+  const has = (stage: Stage): boolean =>
+    holds(stage.text) || (textBodies?.has(stage) !== true && holds(stage.body));
   let place: Place | null = null;
   const written = new Map<string, string>();
   let writtenCut = false;
@@ -161,7 +199,7 @@ function placeIn(
       any = true;
       const facts = reading.facts(reach.stage);
       if (word === '' && reach.direct) word = shownName(facts, holds);
-      add(stagePlace(reach, reading, key, holds, sendOnly));
+      add(linkedByReach(stagePlace(reach, reading, key, holds, sendOnly), reach, link));
       // It names more files it may write than are read: one not read may be sent unseen.
       if (facts.writesCut === true) writtenCut = true;
       if (facts.writes.length === 0) continue;
@@ -183,7 +221,7 @@ function placeIn(
   // The plain cut, read for sends: a heredoc the lexer read wrongly can hide no request.
   for (const reach of reached(reading.plain, has, reading.facts)) {
     any = true;
-    add(stagePlace(reach, reading, key, holds, true));
+    add(linkedByReach(stagePlace(reach, reading, key, holds, true), reach, link));
   }
   const files = [...written].map(([path, text]) => ({ path, text }));
   return { place, written: files, word, reached: any, sent, writtenCut };
@@ -235,6 +273,7 @@ function wholeCommand(reading: CommandReading, word: string, sent: boolean): Pla
     tool: 'Bash',
     ...detailOf(word),
     ...(host === undefined || host === '' ? {} : { host: host.toLowerCase() }),
+    ...(host !== undefined && host !== '' && staysHome(reading) ? { local: true as const } : {}),
   };
 }
 
@@ -273,19 +312,55 @@ function firstStage(reading: CommandReading, which: 'sends' | 'runs'): string | 
   return null;
 }
 
-/** A command that can send, and holds the key, sent it to another company: where, as far as read. */
+/** Most addresses read in one stage. */
+const MAX_STAGE_URLS = 64;
+
+/**
+ * Whether every stage of the command that sends does so to this machine, by an address that was read:
+ * a command that also reaches another host, or one whose destination was not read, does not stay home.
+ */
+function staysHome(reading: CommandReading): boolean {
+  for (const stage of allStages(reading)) {
+    if (!stageSends(reading.facts(stage))) continue;
+    const read = commandUrls(stage.text, MAX_STAGE_URLS);
+    if (read.capped || read.urls.length === 0 || routesElsewhere(stage.text)) return false;
+    if (!read.urls.every((u) => isThisMachine(u.host))) return false;
+  }
+  return true;
+}
+
+/** The first host of the command that is not this machine, or null. */
+function elsewhereHost(reading: CommandReading): string | null {
+  const hosts = commandUrls(reading.command, MAX_STAGE_URLS).urls.map((u) => u.host.toLowerCase());
+  return hosts.find((h) => h !== '' && !isThisMachine(h)) ?? null;
+}
+
+/**
+ * A command that can send, and holds the key, sent it to another company: where, as far as read. Not
+ * when everything it sends goes to this machine: a local program may send the key on, which is a maybe
+ * and no more.
+ */
 function anotherCompany(place: Place, reading: CommandReading): Place {
   if (place.tier === 'third_party') return place;
-  if (REQUEST_ROUTES.has(place.route)) return { ...place, tier: 'third_party' };
+  const home = staysHome(reading);
+  if (place.local === true && home) return place;
+  if (REQUEST_ROUTES.has(place.route)) {
+    if (place.local !== true) return { ...place, tier: 'third_party' };
+    // It also reached a host that is not this machine: that is the host, and the key may have gone there.
+    const { local: _local, host: _host, ...rest } = place;
+    const elsewhere = elsewhereHost(reading);
+    return { ...rest, tier: 'third_party', ...(elsewhere === null ? {} : { host: elsewhere }) };
+  }
   // The key was not where the request is: a command that also made a request.
-  const host = commandUrls(reading.command, 1).urls[0]?.host ?? '';
-  return {
+  const host = (commandUrls(reading.command, 1).urls[0]?.host ?? '').toLowerCase();
+  const near: Place = {
     tier: 'third_party',
     route: 'command-near',
     tool: 'Bash',
     ...detailOf(firstStage(reading, 'sends') ?? ''),
-    ...(host === '' ? {} : { host: host.toLowerCase() }),
+    ...(host === '' ? {} : { host }),
   };
+  return home && host !== '' ? { ...near, tier: 'maybe', local: true } : near;
 }
 
 /**
@@ -380,6 +455,8 @@ export function shellPlace(command: string, key: KeyOf, ctx: ShellContext): Plac
   return judgedWhole(base, reading, key, found.word);
 }
 
+const stageOf = (text: string): Stage => ({ text, body: '', piped: false });
+
 /** The files a command wrote a text into, and whether there were more files or text than are kept. */
 export interface Writes {
   readonly files: readonly WrittenFile[];
@@ -431,6 +508,10 @@ export interface FileUse {
   readonly place: Place;
   /** The command named a folder the file is in, not the file. */
   readonly folder?: boolean;
+  /** How the command named it: the file, a folder it is in, a pattern; `near` when it only ran beside a request. */
+  readonly how?: 'file' | 'folder' | 'pattern' | 'near';
+  /** The word of the command that named it. */
+  readonly word?: string;
 }
 
 /**
@@ -440,13 +521,55 @@ export interface FileUse {
 export function fileKinds(command: string, file: string, ctx: ShellContext): Set<string> {
   const target = normalPath(file);
   const folders = foldersOf(command, ctx);
+  // The root and the home folder have every key file under them: they name one only where a program that
+  // archives or uploads a folder is given them.
+  let archives: boolean | null = null;
+  const mayArchive = (): boolean =>
+    (archives ??= archivesFolders(commandReading(command, ctx.cwd)));
   return new Set(
-    commandPathWords(command).map((w) => {
+    commandPathWords(command, runsQuotedText(command)).map((w) => {
       const named = namesFileHow(w, target, folders);
-      return named === null ? '' : named.sure ? named.kind : `${named.kind}?`;
+      if (named === null || (named.broad === true && !mayArchive())) return '';
+      return named.sure ? named.kind : `${named.kind}?`;
     }),
   );
 }
+
+/**
+ * Programs that take a folder in their words and archive, copy or upload it whole. The root or the home folder is
+ * named by a command only through one of these; for any other program it is text, or a string.
+ */
+const FOLDER_TAKERS: ReadonlySet<string> = new Set([
+  'tar',
+  'bsdtar',
+  'gtar',
+  'zip',
+  '7z',
+  '7za',
+  '7zr',
+  'cpio',
+  'pax',
+  'rsync',
+  'scp',
+  'sftp',
+  'rclone',
+  'aws',
+  'gsutil',
+  'gcloud',
+  'az',
+  's3cmd',
+  'mc',
+  'kubectl',
+  'docker',
+  'find',
+  'unison',
+  'ftp',
+  'lftp',
+]);
+
+/** Whether any stage of a command is a program that takes a folder whole. */
+const archivesFolders = (reading: CommandReading): boolean =>
+  allStages(reading).some((stage) => FOLDER_TAKERS.has(reading.facts(stage).name));
 
 /** A place a pattern only may have reached: never surer than maybe. */
 const atMostMaybe = (place: Place): Place =>
@@ -490,30 +613,123 @@ export function fileUse(
       (out) => namesFile(out, target, folders) === 'file',
     );
   };
+  // What is quoted in a command that hands text to a shell is code: its words may name a file.
+  const quotedIsCode = runsQuotedText(command);
+  // The word that named the file in the pass that placed it, for the evidence.
+  let namedBy = '';
+  let namedByEnd = false;
+  let namedStage = '';
+  // `glob`: null any naming, false only a naming by the file's own name, true only a pattern.
   const namesAs =
-    (kind: 'file' | 'folder', sure: boolean) =>
-    (text: string): boolean =>
-      commandPathWords(text).some((w) => {
+    (kind: 'file' | 'folder', sure: boolean, glob: boolean | null) =>
+    (text: string): boolean => {
+      const hit = commandPathWords(text, quotedIsCode).find((w) => {
         const named = namesFileHow(w, target, folders);
-        return named !== null && named.kind === kind && named.sure === sure;
-      }) && !skips(text);
-  // Sure namings first; one only a pattern someone may fill in reaches is at most maybe.
-  for (const [kind, sure] of [
-    ['file', true],
-    ['folder', true],
-    ['file', false],
-    ['folder', false],
-  ] as const) {
+        return (
+          named !== null &&
+          named.kind === kind &&
+          named.sure === sure &&
+          (glob === null || (named.glob === true) === glob) &&
+          (named.broad !== true || FOLDER_TAKERS.has(reading.facts(stageOf(text)).name))
+        );
+      });
+      if (hit === undefined || skips(text)) return false;
+      if (namedBy === '') {
+        namedStage = text;
+        namedBy = hit.text;
+        namedByEnd = namesFileHow(hit, target, folders)?.byEnd === true;
+      }
+      return true;
+    };
+  // Whether every word of a stage that names the folder stands where its program takes a string.
+  const strings = (text: string): boolean => {
+    const facts = reading.facts(stageOf(text));
+    const naming = commandPathWords(text, quotedIsCode).filter((w) => {
+      const named = namesFileHow(w, target, folders);
+      return named !== null && named.kind === 'folder';
+    });
+    return (
+      naming.length > 0 &&
+      naming.every((w) => inStringPosition(facts.name, facts.resolved?.args ?? [], w.text))
+    );
+  };
+  // Sure namings first, and of those the file by its own name. Whatever was named, a request that names
+  // it in its own words, or is piped what a stage that names it printed (an archive of the folder, a
+  // `cat` of the pattern), sent it. One that only ran after such a step is a maybe, linked to the key by
+  // what the step named; so is a naming only a pattern someone may fill in reaches.
+  const passes: readonly {
+    readonly kind: 'file' | 'folder';
+    readonly sure: boolean;
+    readonly glob: boolean | null;
+    readonly how: 'file' | 'folder' | 'pattern';
+    readonly link: Link;
+  }[] = [
+    {
+      kind: 'file',
+      sure: true,
+      glob: false,
+      how: 'file',
+      link: { via: 'pattern', proof: 'named', ignoreDataBodies: true },
+    },
+    {
+      kind: 'file',
+      sure: true,
+      glob: true,
+      how: 'pattern',
+      link: { via: 'pattern', proof: 'named', ignoreDataBodies: true },
+    },
+    {
+      kind: 'folder',
+      sure: true,
+      glob: null,
+      how: 'folder',
+      link: { via: 'folder', proof: 'named', strings, ignoreDataBodies: true },
+    },
+    {
+      kind: 'file',
+      sure: false,
+      glob: null,
+      how: 'pattern',
+      link: { via: 'pattern', proof: 'named', ignoreDataBodies: true },
+    },
+    {
+      kind: 'folder',
+      sure: false,
+      glob: null,
+      how: 'folder',
+      link: { via: 'folder', proof: 'named', strings, ignoreDataBodies: true },
+    },
+  ];
+  for (const { kind, sure, glob, how, link } of passes) {
     if (!kinds.has(sure ? kind : `${kind}?`)) continue;
-    const { place } = placeIn(reading, namesAs(kind, sure), key, ctx.cwd, kind === 'folder');
+    namedBy = '';
+    namedByEnd = false;
+    const { place } = placeIn(
+      reading,
+      namesAs(kind, sure, glob),
+      key,
+      ctx.cwd,
+      kind === 'folder',
+      link,
+    );
     if (place !== null && place.tier !== 'seen')
-      return { place: sure ? place : atMostMaybe(place), folder: kind === 'folder' };
+      return {
+        // A folder named by a word that is only its name, where the cut is not sure of the command: a maybe.
+        place: sure && (!namedByEnd || reading.certainOf(namedStage)) ? place : atMostMaybe(place),
+        folder: kind === 'folder',
+        how,
+        word: namedBy,
+      };
   }
   // A command that names the file and makes a request the file was not seen to reach (`find dir
   // -exec curl -T {} …`, `xargs`) may have sent it: as a key beside a request is.
   const near = wholeCommand(reading, '', false);
   return near !== null && near.route === 'command-near'
-    ? { place: atMostMaybe(near), folder: !kinds.has('file') && !kinds.has('file?') }
+    ? {
+        place: atMostMaybe(near),
+        folder: !kinds.has('file') && !kinds.has('file?'),
+        how: 'near',
+      }
     : null;
 }
 
@@ -521,30 +737,6 @@ const NONE: ReadonlySet<string> = new Set();
 
 /** No key: a use of a key file is placed for every key in it, whichever service issued it. */
 export const NO_KEY: KeyOf = { name: '', source: '', value: '' };
-
-/** Words that print the environment when given nothing else: `env`, `printenv`, `export -p`. */
-const ENV_PRINTERS: ReadonlySet<string> = new Set([
-  'env',
-  'printenv',
-  'set',
-  'export',
-  'declare',
-  'typeset',
-]);
-
-/** Whether a stage prints the environment, or reads a process's (`/proc/self/environ`). */
-function printsEnvironment(text: string): boolean {
-  if (text.includes('environ')) return true;
-  const words = joinedWords(text);
-  const program = (words[0] ?? '').replace(/^.*\//, '');
-  return ENV_PRINTERS.has(program) && words.slice(1).every((w) => /^-[pxi0u]*$/.test(w));
-}
-
-const joinedWords = (text: string): string[] =>
-  shellJoined(text)
-    .trim()
-    .split(/\s+/)
-    .filter((w) => w !== '');
 
 /**
  * Where a command sent the environment it printed (`env | curl -d @- …`, `printenv | nc …`): a
@@ -559,12 +751,16 @@ export function environmentUse(command: string, ctx: ShellContext): Place | null
     countCut(command);
     return unreadCommand();
   }
+  // A request is a send of the environment when it is piped what the printer printed (`env | curl -d
+  // @-`) or has the printer in its own words (`curl -d "$(env)"`). One that merely ran beside `set -x`,
+  // `export -p` or a script that reads `environ` may have, and is a maybe.
   const { place } = placeIn(
     commandReading(command, ctx.cwd),
-    printsEnvironment,
+    (text) => printsEnvironment(text) || embedsPrinter(text),
     NO_KEY,
     ctx.cwd,
     true,
+    { via: 'environment', proof: 'piped', embeds: embedsPrinter, ignoreDataBodies: true },
   );
   return place === null || place.tier === 'seen' ? null : place;
 }

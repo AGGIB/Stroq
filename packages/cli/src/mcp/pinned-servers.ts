@@ -24,5 +24,5 @@ export async function pinnedServers(home: string): Promise<string[]> {
 
 /** The sentence for a run under the sandbox and for doctor. `shown` is the names, already made safe to print. */
 export function sandboxPinNote(shown: string, count: number, home: string): string {
-  return `${count === 1 ? '1 pinned MCP server' : `${count} pinned MCP servers`} (${shown}) keep a verified copy under ${home}/run, which the sandbox denies writes to, so ${count === 1 ? 'it' : 'they'} cannot start inside \`stroq run --sandbox\` (this follows from the deny and was not measured with a real srt): start the client without --sandbox, or run ${count === 1 ? 'that server' : 'those servers'} outside it`;
+  return `${count === 1 ? '1 pinned MCP server' : `${count} pinned MCP servers`} (${shown}) keep a verified copy under ${home}/run, which a sandbox that protects the Stroq home denies writes to, so ${count === 1 ? 'it' : 'they'} cannot start inside one (this follows from the deny and was not measured with a real srt): start the client outside the sandbox, or run ${count === 1 ? 'that server' : 'those servers'} outside it`;
 }

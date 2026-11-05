@@ -108,8 +108,32 @@ function regular(stat) {
   return stat.isFile() && owned(stat) && stat.nlink === 1 && (stat.mode & 0o777) === 0o600;
 }
 
-/** Bound bytes before reading and verify the opened inode, named file and parent identities. */
+/** How many times a read starts again when a writer's rename falls between two of its looks at the file. */
+const READ_TRIES = 5;
+const REPLACED = 'file-replaced';
+/** A file a rename has gone over has no name left: a look at it, by handle or as the rename happens, sees no links. */
+const failIfReplaced = (stat) => {
+  if (stat.nlink === 0) fail(REPLACED);
+};
+
+/**
+ * A writer replaces the file by rename and takes no lock against a reader, so a read can see two different files, each
+ * of them whole. That is no sign of a planted file, and the read starts again, with every check made anew. A file that
+ * keeps changing past the tries, or that is not a private regular file at any look, still fails.
+ */
 async function readBytes(root, pinned, filename) {
+  for (let tries = 1; ; tries += 1) {
+    try {
+      return await readOnce(root, pinned, filename);
+    } catch (error) {
+      if (error.message !== REPLACED) throw error;
+      if (tries >= READ_TRIES) fail('read-failed');
+    }
+  }
+}
+
+/** Bound bytes before reading and verify the opened inode, named file and parent identities. */
+async function readOnce(root, pinned, filename) {
   await assertLocation(root, pinned);
   if (pinned.consoleStat === null) return null;
   const path = join(root, 'console', filename);
@@ -122,25 +146,30 @@ async function readBytes(root, pinned, filename) {
       if (error.code === 'ENOENT') return null;
       throw error;
     }
+    failIfReplaced(before);
     if (!regular(before)) fail('unsafe-path');
     if (before.size > MAX_HISTORY_BYTES) fail('invalid-history');
     handle = await open(path, flags);
     const stat = await handle.stat();
-    if (!regular(stat) || !same(stat, before)) fail('unsafe-path');
+    failIfReplaced(stat);
+    if (!regular(stat)) fail('unsafe-path');
+    if (!same(stat, before)) fail(REPLACED);
     if (stat.size > MAX_HISTORY_BYTES) fail('invalid-history');
     const bytes = Buffer.alloc(stat.size);
     const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
     const after = await handle.stat();
+    failIfReplaced(after);
     const named = await lstat(path);
+    failIfReplaced(named);
     if (
       bytesRead !== bytes.length ||
       after.size !== stat.size ||
       after.mtimeMs !== stat.mtimeMs ||
       after.ctimeMs !== stat.ctimeMs ||
-      !same(stat, named) ||
       !regular(named)
     )
       fail('read-failed');
+    if (!same(stat, named)) fail(REPLACED);
     await assertLocation(root, pinned);
     return bytes;
   } finally {
@@ -252,7 +281,7 @@ export async function createRunStore({
   if (root !== null) {
     try {
       if (
-        !['runs', 'hook-checks', 'workspace-review', 'codex-network-checks'].includes(namespace) ||
+        !['runs', 'hook-checks', 'workspace-review'].includes(namespace) ||
         typeof workspaceId !== 'string' ||
         !/^[a-f0-9]{64}$/.test(workspaceId)
       )

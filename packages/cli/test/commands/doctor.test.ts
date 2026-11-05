@@ -1145,7 +1145,7 @@ describe('doctorReport mcp proxy', () => {
     expect(check?.ok).toBe(false);
     expect(check?.detail).toContain('wrapped 0/2 stdio servers');
     expect(check?.detail).toContain(
-      '2 stale wrappers: entry missing — run `stroq init --agent mcp --client claude-code` or `stroq add <name> --kind mcp --force`',
+      '2 stale wrappers: entry missing — run `stroq init --agent mcp --client claude-code`',
     );
   });
 

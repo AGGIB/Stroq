@@ -9,10 +9,15 @@
 import { displayPath, neutralizeControls } from '@stroq/core';
 import { SPILL_BUDGET_BYTES } from '../replay/spilled.js';
 import type { Finding } from './findings.js';
+import { notTracedNote } from './key-quality.js';
 import { slashed } from './path-form.js';
 import { TIERS, type Tier } from './place.js';
 import type { SentReport } from './report.js';
 import { inTier, keysLeftOut, stoppedTowardOthers } from './report.js';
+
+/** Whether keys were left out for any reason but that their values look like examples. */
+const keysLeftOutOtherwise = (k: Parameters<typeof keysLeftOut>[0]): boolean =>
+  keysLeftOut({ ...k, placeholders: 0 });
 import { countParts, describePlace, doLine, LABEL, SEND_LIMIT, when } from './phrases.js';
 import { MAX_FOLDER_BYTES, MAX_FOLDER_ENV_FILES, MAX_KEYS } from './keys.js';
 import { CANARY_SOURCE } from './session-canaries.js';
@@ -71,10 +76,17 @@ function verdictLines(report: SentReport): string[] {
 /** What was found, as counts: never a claim that a key did not go somewhere. */
 function countLines(report: SentReport): string[] {
   const k = report.keys;
-  if (k.compared === 0 && report.scope !== 'audit-log')
+  if (k.compared === 0 && report.scope !== 'audit-log') {
+    const examples = (k.placeholders ?? 0) > 0;
+    // Values that look like examples are not keys to look for; say that before "none found".
+    if (examples && !keysLeftOutOtherwise(k))
+      return [
+        'No keys were compared: the values in your key files look like examples or placeholders. See "Not checked" below.',
+      ];
     return keysLeftOut(k)
       ? ['No keys were compared: key files were not read whole. See "Not checked" below.']
       : ['No keys found on this machine, so there was nothing to look for.'];
+  }
   const found = Object.fromEntries(TIERS.map((t) => [t, inTier(report, t).length])) as Record<
     Tier,
     number
@@ -285,6 +297,7 @@ function tierLines(report: SentReport, home: string): string[] {
 const CALL_ROUTES = new Set([
   'command',
   'command-near',
+  'linked',
   'command-ran',
   'command-unread',
   'post',
@@ -347,6 +360,9 @@ function notChecked(report: SentReport): string {
       : [
           `${plural(report.keys.rejectedLines, 'line', 'lines')} named like a key whose value Stroq does not compare (too short, a placeholder, a path or an address)`,
         ]),
+    ...(report.keys.placeholders === undefined
+      ? []
+      : [notTracedNote(report.keys.placeholders, report.keys.placeholderNames ?? [], safe)]),
     ...(report.keys.subfolderEnvFiles === undefined
       ? []
       : [

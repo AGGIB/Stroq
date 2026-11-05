@@ -77,7 +77,7 @@ test('windsurf is not offered and a request for it is refused before any file is
   await assert.rejects(stat(home), { code: 'ENOENT' });
 });
 
-test('setup waits on the same real manifest lock as file filters and removes no foreign settings', async (t) => {
+test('setup waits on the same real configuration lock as every other settings writer and removes no foreign settings', async (t) => {
   const { setup, project, home } = await fixture(t);
   const file = join(project, '.claude', 'settings.json');
   const original = '{"foreign":"preserved"}\n';
@@ -86,21 +86,18 @@ test('setup waits on the same real manifest lock as file filters and removes no 
   const preview = await setup.preview({ agent: 'claude-code', scope: 'project' });
   assert.equal(preview.status, 200, JSON.stringify(preview));
   const engine = await import(
-    pathToFileURL(runtimeLayout().adapter('credential-filter-engine.js')).href
+    pathToFileURL(runtimeLayout().adapter('agent-configuration-lock-engine.js')).href
   );
   let release, enter;
   const entered = new Promise((done) => {
     enter = done;
   });
-  const held = engine.withManifestLock(
-    { home, version: '0.28.0', now: () => new Date() },
-    async () => {
-      enter();
-      await new Promise((done) => {
-        release = done;
-      });
-    },
-  );
+  const held = engine.withConfigurationLock({ home }, async () => {
+    enter();
+    await new Promise((done) => {
+      release = done;
+    });
+  });
   await entered;
   try {
     const result = await setup.apply(consent(preview.body));

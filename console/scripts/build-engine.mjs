@@ -43,25 +43,23 @@ export async function buildEngine() {
     'inventory-schema': resolve(repository, 'console/lib/inventory.ts'),
     'control-schema': resolve(repository, 'console/lib/control.ts'),
     'skill-quarantine-schema': resolve(repository, 'console/lib/skill-quarantine.ts'),
-    'credential-filter-schema': resolve(repository, 'console/lib/credential-filters.ts'),
     'mcp-containment-schema': resolve(repository, 'console/lib/mcp-containment.ts'),
     'local-api-schema': resolve(repository, 'console/scripts/local-api-schema.ts'),
   };
   for (const [name, source] of [
-    ['credential-filter-worker', 'credential-filter-worker.ts'],
-    ['credential-filter-engine', 'credential-filter-engine.ts'],
+    ['agent-configuration-lock-engine', 'agent-configuration-lock-engine.ts'],
     ['skill-quarantine-worker', 'skill-quarantine-worker.ts'],
     ['mcp-containment-worker', 'mcp-containment-worker.ts'],
     ['policy-engine', 'policy-engine-entry.ts'],
     ['agent-status-engine', 'agent-status-engine.ts'],
-    ['live-proof-engine', 'live-proof-engine.ts'],
     ['hook-check-engine', 'hook-check-engine.ts'],
-    ['task-lock-worker', 'task-lock-worker.ts'],
+    ['session-taint-engine', 'session-taint-engine.ts'],
     ['workspace-review-worker', 'workspace-review-worker.ts'],
     ['workspace-monitor-engine', 'workspace-monitor-engine.ts'],
     ['incidents-engine', 'incidents-engine-entry.ts'],
     ['secret-scan-engine', 'secret-scan-engine.ts'],
     ['incident-recheck-engine', 'incident-recheck-engine-entry.ts'],
+    ['card-view', 'card-view-engine.ts'],
   ]) {
     const path = resolve(repository, 'console/scripts', source);
     try {

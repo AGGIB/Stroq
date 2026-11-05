@@ -68,11 +68,14 @@ const readsCursorStore = (scope: SentScope): boolean =>
 const cursorStore = (run: RunEnv): string =>
   cursorStateDb(process.platform, { ...run.env }, run.home);
 
-/** A path from this machine or a session, hidden when it holds a piece of a key: it would print it. */
+/**
+ * A path from this machine or a session as it may be printed: the whole of it hidden when it holds a
+ * piece of a key, else with the value of a key that only a word stands for cut out of it.
+ */
 const cleanWith =
   (finder: KeyFinder) =>
   (path: string): string =>
-    finder.hasPiece(path) ? HIDDEN : path;
+    finder.shown(path) ?? HIDDEN;
 
 /** What is printed in place of a session's or a subagent's id that is not printed. */
 export const ID_NOT_SHOWN = '[an id that cannot be printed]';
@@ -80,8 +83,8 @@ export const ID_NOT_SHOWN = '[an id that cannot be printed]';
 /** An id as a record gives it: plain characters, a bound on its length. */
 const ID_SHAPE = /^[A-Za-z0-9._:-]{1,64}$/;
 
-const printableId = (id: string, finder: KeyFinder): string =>
-  ID_SHAPE.test(id) && !finder.hasPiece(id) ? id : ID_NOT_SHOWN;
+export const printableId = (id: string, finder: KeyFinder): string =>
+  ID_SHAPE.test(id) && finder.shown(id) === id ? id : ID_NOT_SHOWN;
 
 /**
  * A finding's session and subagent as they may be printed: an id is kept only when it has the
@@ -105,7 +108,7 @@ export function printableSession(
 }
 
 /** A finding with its session, subagent and source as they may be printed. */
-function printableFinding(f: Finding, finder: KeyFinder): Finding {
+export function printableFinding(f: Finding, finder: KeyFinder): Finding {
   const { session, subagent } = printableSession(f.session, f.subagent, finder);
   // `env` and `stroq canary` are fixed labels, not paths.
   const source =

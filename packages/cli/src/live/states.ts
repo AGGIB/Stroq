@@ -188,7 +188,7 @@ function fromResult(
 ): DisplayedState {
   const changes = whatChanged(result, today);
   // What to do next. With a hook that does not work it is the hook, and only then is it another check.
-  const next = broken === null ? 'run stroq prove again' : broken.fix;
+  const next = broken === null ? 'run the live check again' : broken.fix;
   const caveats = caveatsOf(result);
   switch (result.state) {
     case 'verified':

@@ -5,7 +5,7 @@
 // and each has its own spelling of it. The stream has whatever the model typed, which may differ from the
 // probe in the white space; the audit log has the command redacted and cut. These are the rules for
 // comparing each with the probe.
-import { redact } from '@stroq/core';
+import { MAX_AUDIT_SUMMARY, redact } from '@stroq/core';
 
 /**
  * The tool the probes are run with, as a host names it in its stream. A driver puts the shell tool of its
@@ -14,11 +14,11 @@ import { redact } from '@stroq/core';
 export const SHELL_TOOL = 'Bash';
 
 /**
- * How many characters of a summary the audit log keeps. It is `MAX_SUMMARY` in core's `audit-log.ts`,
- * which does not export it; `evidence-command.test.ts` records a command longer than this through the
- * real engine and log, so a change there fails there.
+ * How many characters of a summary the audit log keeps: core's `MAX_AUDIT_SUMMARY`.
+ * `evidence-command.test.ts` records a command longer than this through the real engine and log, so a
+ * change there fails there.
  */
-export const AUDIT_SUMMARY_CHARS = 300;
+export const AUDIT_SUMMARY_CHARS = MAX_AUDIT_SUMMARY;
 
 /**
  * What the engine writes as the summary of a call when its secret index fails (`safeSummary` in core's

@@ -1,17 +1,6 @@
-import { join } from 'node:path';
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { findLossyJson } from '../../src/harden/json-lossy.js';
-import { planJsonEdits } from '../../src/harden/json-edit.js';
-import { undoJsonEdits } from '../../src/harden/json-undo.js';
-import type { JsonEdit } from '../../src/harden/types.js';
 import { cpuNow } from '../helpers/cpu-time.js';
-import { removeTempDirs, tempDir } from './helpers.js';
-
-afterEach(removeTempDirs);
-
-const addDeny: JsonEdit = { kind: 'json-array-add', path: ['permissions', 'deny'], value: 'x' };
-const planOf = (contents: string) =>
-  planJsonEdits(join(tempDir(), 'settings.json'), [addDeny], { read: () => contents });
 
 /**
  * A file that parses as JSON and prints back as the same JSON is one the engine can edit. One
@@ -85,65 +74,5 @@ describe('findLossyJson: files that can', () => {
     expect(findLossyJson(`{"a":${'['.repeat(100_000)}${']'.repeat(100_000)}}`)).toBeNull();
 
     expect(cpuNow() - started).toBeLessThan(5_000);
-  });
-});
-
-describe('planJsonEdits: a file that cannot be written back as it is', () => {
-  it.each([
-    ['a number past double precision', '{\n  "big": 12345678901234567890\n}\n'],
-    ['a number out of range', '{\n  "huge": 1e400\n}\n'],
-    ['a duplicated key', '{\n  "a": 1,\n  "a": 2\n}\n'],
-    ['keys that look like numbers', '{\n  "b": 1,\n  "2": 2\n}\n'],
-  ])('refuses %s, and leaves it exactly as it is', (_name, before) => {
-    const plan = planOf(before);
-
-    expect(plan.refused).toBe('lossy-json');
-    expect(plan.changed).toBe(false);
-    expect(plan.after).toBe(before);
-    expect(plan.diff).toBe('');
-    expect(plan.edits).toEqual([]);
-    expect(plan.formatting).toBe('preserved');
-  });
-
-  it('says what is wrong without quoting any of it', () => {
-    const plan = planOf('{"password": "stroq_attack_fixture_value_0123456789", "n": 1e400}');
-
-    expect(plan.refused).toBe('lossy-json');
-    expect(plan.refusedDetail).toMatch(/double/);
-    expect(plan.refusedDetail).not.toContain('stroq_attack_');
-    expect(plan.refusedDetail).not.toContain('password');
-  });
-
-  it('refuses even when the edit would change nothing, so that "no change" is never a way past it', () => {
-    const plan = planJsonEdits(join(tempDir(), 'settings.json'), [addDeny], {
-      read: () => '{"permissions": {"deny": ["x"]}, "n": 1e400}',
-    });
-
-    expect(plan.refused).toBe('lossy-json');
-  });
-
-  it('still plans a file whose layout alone would change', () => {
-    const plan = planOf('{"permissions":{"deny":["a"]}, "n": 1.0}\n');
-
-    expect(plan.refused).toBeUndefined();
-    expect(plan.formatting).toBe('will-change');
-  });
-});
-
-describe('undoJsonEdits: a file that cannot be written back as it is', () => {
-  it('is blocked and untouched, because laying it out again would lose something', () => {
-    const made = planOf('{"model": "m"}\n');
-
-    const result = undoJsonEdits('{"permissions": {"deny": ["x"]}, "n": 1e400}', made.edits);
-
-    expect(result).toMatchObject({ outcome: 'blocked', refused: 'lossy-json' });
-  });
-
-  it('is blocked for a duplicated key too', () => {
-    const made = planOf('{"model": "m"}\n');
-
-    const result = undoJsonEdits('{"a": 1, "a": 2, "permissions": {"deny": ["x"]}}', made.edits);
-
-    expect(result).toMatchObject({ outcome: 'blocked', refused: 'lossy-json' });
   });
 });

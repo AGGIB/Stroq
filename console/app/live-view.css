@@ -109,12 +109,87 @@
   list-style: none;
 }
 .live-row {
+  border-top: 1px solid var(--border);
+  scroll-margin-top: 80px;
+}
+.live-row-button {
   display: grid;
-  grid-template-columns: 6.5rem 8rem minmax(0, 1fr);
+  grid-template-columns: 6.5rem 8rem minmax(0, 1fr) auto 16px;
   align-items: center;
   gap: 14px;
+  width: 100%;
   padding: 12px 18px;
-  border-top: 1px solid var(--border);
+  border: 0;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.live-row-button:hover {
+  background: var(--accent);
+}
+.live-session {
+  color: var(--ink-3);
+  font-size: var(--text-secondary);
+}
+.live-chevron {
+  color: var(--ink-3);
+}
+.live-row-button[aria-expanded='true'] .live-chevron {
+  transform: rotate(180deg);
+}
+.live-toolbar {
+  padding: 0 18px 14px;
+}
+.live-chain {
+  display: grid;
+  gap: 18px;
+  padding: 4px 18px 20px 18px;
+  border-left: 3px solid var(--hairline-strong);
+  margin: 0 18px 14px;
+}
+.live-chain ol {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  counter-reset: chain;
+}
+.live-chain ol > li {
+  display: grid;
+  gap: 4px;
+  counter-increment: chain;
+}
+.live-chain h4 {
+  margin: 0;
+  font-size: var(--text-secondary);
+  font-weight: 600;
+  color: var(--ink-2);
+}
+.live-chain ol > li > h4::before {
+  content: counter(chain) '. ';
+  color: var(--ink-3);
+}
+.live-chain p {
+  margin: 0;
+  font-size: var(--text-ui);
+}
+.live-chain p.muted {
+  color: var(--ink-3);
+  font-size: var(--text-secondary);
+}
+.live-chain ul {
+  display: grid;
+  gap: 4px;
+  margin: 4px 0 0;
+  padding: 0;
+  list-style: none;
+}
+.live-chain-commands {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
 }
 .live-row:first-child {
   border-top: 0;
@@ -162,10 +237,20 @@
   .live-counts {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
-  .live-row {
-    grid-template-columns: auto minmax(0, 1fr);
-    grid-template-areas: 'verdict time' 'what what';
+  .live-row-button {
+    grid-template-columns: auto minmax(0, 1fr) auto 16px;
+    grid-template-areas: 'verdict time time chevron' 'what what what what';
     row-gap: 6px;
+  }
+  .live-chevron {
+    grid-area: chevron;
+  }
+  .live-session {
+    display: none;
+  }
+  .live-chain {
+    margin: 0 14px 14px;
+    padding: 4px 12px 16px;
   }
   .live-verdict {
     grid-area: verdict;

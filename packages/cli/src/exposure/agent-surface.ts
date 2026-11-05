@@ -28,6 +28,7 @@ import { foldName } from './git-dir-names.js';
 import { opencodeConfig, pluginCode, zedSettings } from './agent-others.js';
 import { geminiSettings } from './agent-switches.js';
 import { agentDefinition, instructionFile } from './agent-text.js';
+import type { LargeScan } from './large-text.js';
 import { codexConfig } from './agent-toml.js';
 import { lineOf, stripJsonc } from './jsonc.js';
 import { parseToml } from './toml-lite.js';
@@ -432,7 +433,11 @@ export function scanFile(path: string, text: string, onParseGap?: () => void): r
 /** What a source found at a path. */
 export type SourceRead =
   | { readonly kind: 'text'; readonly text: string }
-  | { readonly kind: 'too-large'; readonly size: number }
+  /**
+   * Over the cap of bytes read whole. `scan` is the scan of all of it for characters nobody would see,
+   * when it was made (see `large-text.ts`); a file with none was not scanned.
+   */
+  | { readonly kind: 'too-large'; readonly size: number; readonly scan?: LargeScan }
   /** Past the budget of bytes one check reads, so not read; reported like a file too large. */
   | { readonly kind: 'over-budget'; readonly budget: number }
   | { readonly kind: 'outside'; readonly target: string }
@@ -448,6 +453,53 @@ export const MAX_FILE_BYTES = 1024 * 1024;
 
 /** What a Git LFS pointer starts with: the file a checkout writes here is fetched from elsewhere. */
 const LFS_POINTER = 'version https://git-lfs.github.com/spec/';
+
+/**
+ * Names that are settings or an MCP server list wherever they are kept: a file by one of them is
+ * never taken for data, though it lies in a skill's `data` folder.
+ */
+const NOT_DATA_NAMES: ReadonlySet<string> = new Set([
+  'settings.json',
+  'settings.local.json',
+  'hooks.json',
+  'mcp.json',
+  '.mcp.json',
+  'tasks.json',
+  'plugin.json',
+]);
+
+/**
+ * Whether a path, as spelled, is a `.json` file in a `data` or `scripts` folder below a skill
+ * (`.claude/skills/<skill>/…`, or the same under `.agents`): the folder is a folder, not the skill's
+ * own name, and the file is not one of the names above.
+ */
+function inSkillData(path: string): boolean {
+  const parts = path.split('/');
+  const base = parts[parts.length - 1] ?? '';
+  if (!base.endsWith('.json') || NOT_DATA_NAMES.has(base)) return false;
+  const at = parts.findIndex(
+    (part, i) => part === 'skills' && /^\.(?:claude|agents?)$/.test(parts[i - 1] ?? ''),
+  );
+  return at !== -1 && parts.slice(at + 2, -1).some((part) => part === 'data' || part === 'scripts');
+}
+
+/**
+ * A data file of a skill: one that no reader but the instruction reader takes, in a skill's `data`
+ * or `scripts` folder, under the name as written and under every name a disk may open it as. An agent
+ * does not load it as instructions, so when it is too large to read whole it is a notice and not a
+ * failure, but only after all of it was scanned for characters nobody would see and none was found
+ * (see `large-text.ts`). Everything else keeps failing, an instruction file of a skill among it:
+ * padding one past the cap would switch its check for invisible characters off.
+ */
+export function isSkillDataFile(path: string): boolean {
+  const readers = readersFor(path);
+  return (
+    readers.length > 0 &&
+    readers.every((reader) => reader === READERS.instruction) &&
+    inSkillData(path.toLowerCase()) &&
+    inSkillData(foldPath(path))
+  );
+}
 
 export function hitsForRead(
   path: string,
@@ -482,7 +534,19 @@ export function hitsForRead(
       ? `too large to read (${read.size} bytes)`
       : `past the ${read.budget} bytes one check reads`;
   // An instruction file too, though its only check is for hidden characters: padding it past
-  // the cap would otherwise switch that check off.
+  // the cap would otherwise switch that check off. A skill's data file is not one, once all of it
+  // was scanned: one that was not (past the cap, past the budget, read some other way) fails.
+  if (read.kind === 'too-large' && read.scan !== undefined && isSkillDataFile(path)) {
+    const found = read.scan.kind === 'hidden';
+    const notice = hit(
+      'instruction-file',
+      path,
+      1,
+      'size',
+      `${why}; a data file of a skill, scanned all through for characters nobody would see, and ${found ? 'some were found' : 'none was found'}`,
+    );
+    return read.scan.kind === 'hidden' ? [read.scan.hit, notice] : [notice];
+  }
   return [hit('unreadable-config', path, 1, 'size', why)];
 }
 

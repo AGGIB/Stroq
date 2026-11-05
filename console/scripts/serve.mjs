@@ -20,8 +20,6 @@ import { createPolicyCasesService } from './policy-cases.mjs';
 import { runPolicyAdapter, runPolicyCaseEvaluation } from './policy-worker.mjs';
 import { createInventory } from './inventory.mjs';
 import { createSkillQuarantine } from './skill-quarantine.mjs';
-import { createCredentialFilterService } from './credential-filters.mjs';
-import { routeCredentialFilters } from './credential-filter-http.mjs';
 import { createMcpContainmentService } from './mcp-containment.mjs';
 import {
   routeMcpContainment,
@@ -35,34 +33,24 @@ import {
 import { createAgentStatus } from './agent-status.mjs';
 import { createIncidentService } from './incidents.mjs';
 import { createIncidentAssessmentService, routeIncidentAssessments } from './incidents-worker.mjs';
-import { createLiveProofService } from './live-proof-service.mjs';
 import { createHookCheckService } from './hook-check-service.mjs';
-import { createTaskLockService } from './task-lock-service.mjs';
-import { createTaskAccessService } from './task-access-service.mjs';
 import { createWorkspaceReviewService } from './workspace-review-service.mjs';
 import {
-  createWorkspaceMonitorControl,
-  routeWorkspaceMonitor,
-  createInventoryMonitorControl,
-  routeInventoryMonitor,
   createWorkspaceTaskControl,
   routeWorkspaceTasks,
   createSessionTaintControl,
   routeSessionTaint,
-  acquireProtectionCheckLease,
   createJournalViewService,
   createPostureService,
-  createThreatFeedService,
   routeJournalView,
   routePosture,
-  routeThreatFeed,
 } from './workspace-monitor-bridge.mjs';
 import { createSecretScanService } from './secret-scan-service.mjs';
+import { createCardService } from './card-service.mjs';
 import { createIncidentRecheckService } from './incident-recheck.mjs';
 import { routeOperational } from './operational-http.mjs';
 import { runtimeLayout } from './runtime-layout.mjs';
-import { createRunStore } from './run-store.mjs';
-import { executeCodexNetworkCheck } from './hook-check-process.mjs';
+import { redirectFor } from './console-redirects.mjs';
 
 const DEFAULT_ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../out');
 const MIME = {
@@ -178,32 +166,22 @@ export async function startServer({
   mcpGovernance: suppliedMcpGovernance,
   inventory: suppliedInventory,
   quarantine: suppliedQuarantine,
-  credentialFilters: suppliedCredentialFilters,
-  claudeConfigDir: suppliedClaudeConfigDir,
   mcp: suppliedMcp,
   mcpToolContracts: suppliedMcpToolContracts,
   mcpCallControls: suppliedMcpCallControls,
   mcpEnvironment: suppliedMcpEnvironment,
   codexEnvironment: suppliedCodexEnvironment,
-  codexNetworkGuard: suppliedCodexNetworkGuard,
-  codexPathGuard: suppliedCodexPathGuard,
-  codexNetworkChecks: suppliedCodexNetworkChecks,
   agents: suppliedAgents,
   incidents: suppliedIncidents,
   incidentAssessments: suppliedIncidentAssessments,
-  live: suppliedLive,
   hookChecks: suppliedHookChecks,
-  taskLocks: suppliedTaskLocks,
-  taskAccess: suppliedTaskAccess,
   workspaceReview: suppliedWorkspaceReview,
   workspaceTasks: suppliedWorkspaceTasks,
   sessionTaint: suppliedSessionTaint,
-  workspaceMonitor: suppliedWorkspaceMonitor,
-  inventoryMonitor: suppliedInventoryMonitor,
   journalView: suppliedJournalView,
   posture: suppliedPosture,
-  threatFeed: suppliedThreatFeed,
   secrets: suppliedSecrets,
+  card: suppliedCard,
   comparisons: suppliedComparisons,
   port = 47815,
   token = randomBytes(32).toString('base64url'),
@@ -243,16 +221,14 @@ export async function startServer({
     suppliedPolicyHistory ??
     createPolicyHistoryService({ home: selectedHome, caseStore: policyCaseStore });
   const inventory = suppliedInventory ?? createInventory(context);
-  let networkSchema;
+  let apiSchema;
   try {
-    networkSchema = await import(
-      pathToFileURL(runtimeLayout().adapter('local-api-schema.js')).href
-    );
+    apiSchema = await import(pathToFileURL(runtimeLayout().adapter('local-api-schema.js')).href);
   } catch {
     /* Finite feature refusal when the local runtime is unavailable. */
   }
   const mcpGovernance = suppliedMcpGovernance ??
-    networkSchema?.createMcpGovernanceService?.({
+    apiSchema?.createMcpGovernanceService?.({
       ...context,
       workspaceId,
       platform: process.platform,
@@ -269,99 +245,7 @@ export async function startServer({
       ),
       close: async () => {},
     };
-  const unavailableNetwork = {
-    read: async () => ({ status: 503, body: { error: 'codex-network-unavailable' } }),
-    capture: async () => ({ status: 503, body: { error: 'codex-network-unavailable' } }),
-    preview: async () => ({ status: 503, body: { error: 'codex-network-unavailable' } }),
-    apply: async () => ({ status: 503, body: { error: 'codex-network-unavailable' } }),
-    recheck: async () => ({ status: 503, body: { error: 'codex-network-unavailable' } }),
-    start: async () => ({ status: 503, body: { error: 'codex-network-check-unavailable' } }),
-    cancel: async () => ({ status: 503, body: { error: 'codex-network-check-unavailable' } }),
-    close: async () => {},
-  };
-  const codexNetworkGuard =
-    suppliedCodexNetworkGuard ??
-    networkSchema?.createCodexNetworkGuardService?.({ inventory }) ??
-    unavailableNetwork;
-  const codexPathGuard = suppliedCodexPathGuard ??
-    networkSchema?.createCodexPathGuardService?.({ inventory }) ?? {
-      ...Object.fromEntries(
-        ['read', 'capture', 'preview', 'apply', 'recheck'].map((name) => [
-          name,
-          async () => ({ status: 503, body: { error: 'codex-path-guard-unavailable' } }),
-        ]),
-      ),
-      close: async () => {},
-    };
-  let codexNetworkChecks = suppliedCodexNetworkChecks;
-  if (!codexNetworkChecks && typeof networkSchema?.createCodexNetworkCheckService === 'function') {
-    const [p, u] = await Promise.all([lstat(selectedProject), lstat(selectedUserHome)]);
-    const storeId = createHash('sha256')
-      .update(
-        JSON.stringify([
-          'stroq-codex-network-checks/1',
-          selectedProject,
-          p.dev,
-          p.ino,
-          selectedUserHome,
-          u.dev,
-          u.ino,
-          selectedHome,
-          codexEnvironment.CODEX_HOME ?? null,
-        ]),
-      )
-      .digest('hex');
-    const store = await createRunStore({
-      home: selectedHome,
-      workspaceId: storeId,
-      namespace: 'codex-network-checks',
-      loadValidator: async () => ({
-        validateRun: (job) =>
-          networkSchema.validateCodexNetworkCheckJob(job) &&
-          job.binding.workspaceId === workspaceId,
-      }),
-    });
-    codexNetworkChecks = await networkSchema.createCodexNetworkCheckService({
-      inventory,
-      workspaceId,
-      store,
-      acquireLease: () =>
-        acquireProtectionCheckLease({
-          home: selectedHome,
-          storeId: createHash('sha256')
-            .update(
-              JSON.stringify([
-                'stroq-codex-network-check-lease/1',
-                selectedProject,
-                p.dev,
-                p.ino,
-                selectedUserHome,
-                u.dev,
-                u.ino,
-                selectedHome,
-              ]),
-            )
-            .digest('hex'),
-        }),
-      run: (input, extra) =>
-        executeCodexNetworkCheck(input, {
-          ...extra,
-          adapterPath: runtimeLayout().adapter('hook-check-engine.js'),
-          validateResult: networkSchema.validateCodexNetworkCheckResult,
-          timeoutMs: 30000,
-        }),
-    });
-  }
-  codexNetworkChecks ??= unavailableNetwork;
   const quarantine = suppliedQuarantine ?? createSkillQuarantine(context);
-  const credentialFilters =
-    suppliedCredentialFilters ??
-    createCredentialFilterService({
-      ...context,
-      claudeConfigDir:
-        suppliedClaudeConfigDir ??
-        (userHome === undefined ? (process.env.CLAUDE_CONFIG_DIR ?? '') : ''),
-    });
   const mcp = suppliedMcp ?? createMcpContainmentService(context);
   const mcpToolContracts = suppliedMcpToolContracts ?? createMcpToolContractService(context);
   const mcpCallControls = suppliedMcpCallControls ?? (await createMcpCallControlService(context));
@@ -369,7 +253,6 @@ export async function startServer({
   const incidents = suppliedIncidents ?? createIncidentService(context);
   const incidentAssessments =
     suppliedIncidentAssessments ?? (await createIncidentAssessmentService(context));
-  const live = suppliedLive ?? (await createLiveProofService(context));
   const hookChecks =
     suppliedHookChecks ?? (await createHookCheckService({ ...context, workspaceId }));
   const workspaceReview =
@@ -377,28 +260,6 @@ export async function startServer({
   const workspaceTasks =
     suppliedWorkspaceTasks ??
     (await createWorkspaceTaskControl({ ...context, workspaceId, workspaceReview }));
-  const workspaceMonitor =
-    suppliedWorkspaceMonitor ??
-    (await createWorkspaceMonitorControl({ ...context, workspaceId, workspaceReview }));
-  const inventoryMonitor =
-    suppliedInventoryMonitor ??
-    (await createInventoryMonitorControl({
-      ...context,
-      workspaceId,
-      inventory: {
-        read: () =>
-          typeof inventory.observe === 'function'
-            ? inventory.observe()
-            : Promise.resolve({ status: 503, body: { error: 'inventory-unavailable' } }),
-      },
-    }));
-  const taskLocks =
-    suppliedTaskLocks ??
-    (await createTaskLockService({
-      ...context,
-      workspaceId,
-      selectEvidence: (request) => incidents.selectForComparison(request),
-    }));
   const sessionTaint =
     suppliedSessionTaint ??
     (await createSessionTaintControl({
@@ -407,12 +268,15 @@ export async function startServer({
       selectEvidence: (request) => incidents.selectForComparison(request),
     }));
   const secrets = suppliedSecrets ?? (await createSecretScanService(context));
-  const taskAccess =
-    suppliedTaskAccess ??
-    (await createTaskAccessService({
-      ...context,
-      workspaceId,
-      selectEvidence: (request) => incidents.selectForComparison(request),
+  // The card runs in the environment of this server, as the terminal's would; a test that names the
+  // user's home gives it an environment of its own.
+  const card =
+    suppliedCard ??
+    (await createCardService({
+      home: selectedHome,
+      userHome: selectedUserHome,
+      project: selectedProject,
+      environment: userHome === undefined ? process.env : {},
     }));
   const comparisons =
     suppliedComparisons ??
@@ -470,64 +334,33 @@ export async function startServer({
         if (
           parsed.path === '/api/agents' ||
           parsed.path.startsWith('/api/incidents') ||
-          parsed.path.startsWith('/api/live') ||
           parsed.path.startsWith('/api/hook-checks') ||
-          parsed.path.startsWith('/api/task-locks') ||
           parsed.path.startsWith('/api/workspace-review') ||
           parsed.path.startsWith('/api/secrets')
         ) {
           response = await routeOperational(req, parsed.path, origin, {
             agents,
             incidents,
-            live,
             hookChecks,
-            taskLocks,
-            taskAccess,
             workspaceReview,
             secrets,
             comparisons,
           });
-        } else if (parsed.path.startsWith('/api/codex-path-guard') && req.url.includes('?')) {
-          response = { status: 404, body: { error: 'not-found' } };
-        } else if (parsed.path === '/api/codex-path-guard') {
+        } else if (parsed.path === '/api/card') {
           response =
             req.method === 'GET'
-              ? await codexPathGuard.read()
+              ? { status: 200, body: await card.getState() }
               : { status: 405, body: { error: 'method-not-allowed' } };
-        } else if (
-          /^\/api\/codex-path-guard\/(?:capture|preview|apply|recheck)$/.test(parsed.path)
-        ) {
+        } else if (parsed.path === '/api/card/start') {
           response = await jsonAction(
             req,
             origin,
-            (input) => codexPathGuard[parsed.parts.at(-1)](input),
-            4096,
-          );
-        } else if (
-          parsed.path === '/api/codex-network-guard' ||
-          parsed.path === '/api/codex-network-checks'
-        ) {
-          response =
-            req.method === 'GET'
-              ? await (
-                  parsed.path.endsWith('-guard') ? codexNetworkGuard : codexNetworkChecks
-                ).read()
-              : { status: 405, body: { error: 'method-not-allowed' } };
-        } else if (
-          /^\/api\/codex-network-guard\/(?:capture|preview|apply|recheck)$/.test(parsed.path)
-        ) {
-          response = await jsonAction(
-            req,
-            origin,
-            (input) => codexNetworkGuard[parsed.parts.at(-1)](input),
-            4096,
-          );
-        } else if (/^\/api\/codex-network-checks\/(?:preview|start|cancel)$/.test(parsed.path)) {
-          response = await jsonAction(
-            req,
-            origin,
-            (input) => codexNetworkChecks[parsed.parts.at(-1)](input),
-            4096,
+            (input) => {
+              if (input === null || typeof input !== 'object' || Object.keys(input).length > 0)
+                throw new Error('invalid-request');
+              return card.start();
+            },
+            256,
           );
         } else if (parsed.path.startsWith('/api/incident-assessments')) {
           response = await routeIncidentAssessments(req, parsed.path, origin, incidentAssessments);
@@ -539,16 +372,8 @@ export async function startServer({
           response = await routeJournalView(req, parsed.path, origin, journalView);
         } else if (parsed.path.startsWith('/api/posture')) {
           response = await routePosture(req, parsed.path, origin, posture);
-        } else if (parsed.path === '/api/threats') {
-          response = await routeThreatFeed(req, parsed.path, origin, threatFeed);
-        } else if (parsed.path.startsWith('/api/inventory-monitor')) {
-          response = await routeInventoryMonitor(req, parsed.path, origin, inventoryMonitor);
-        } else if (parsed.path.startsWith('/api/workspace-monitor')) {
-          response = await routeWorkspaceMonitor(req, parsed.path, origin, workspaceMonitor);
         } else if (parsed.path.startsWith('/api/agent-setup')) {
           response = await routeAgentSetup(req, parsed.path, origin, setup);
-        } else if (parsed.path.startsWith('/api/credential-filters')) {
-          response = await routeCredentialFilters(req, parsed.path, origin, credentialFilters);
         } else if (parsed.path.startsWith('/api/mcp-call-controls')) {
           response = await routeMcpCallControls(req, parsed.path, origin, mcpCallControls);
         } else if (parsed.path.startsWith('/api/mcp-tool-contracts')) {
@@ -577,34 +402,6 @@ export async function startServer({
               : { status: 405, body: { error: 'method-not-allowed' } };
         } else if (parsed.path === '/api/inventory/review') {
           response = await jsonAction(req, origin, (input) => inventory.review(input), 4096);
-        } else if (parsed.path === '/api/inventory/codex-sources') {
-          response = await jsonAction(req, origin, (input) => inventory.codexSources(input), 4096);
-        } else if (parsed.path === '/api/inventory/codex-controls') {
-          response =
-            req.method === 'GET'
-              ? await inventory.codexControlState({})
-              : { status: 405, body: { error: 'method-not-allowed' } };
-        } else if (parsed.path === '/api/inventory/codex-control-preview') {
-          response = await jsonAction(
-            req,
-            origin,
-            (input) => inventory.codexControlPreview(input),
-            4096,
-          );
-        } else if (parsed.path === '/api/inventory/codex-control-apply') {
-          response = await jsonAction(
-            req,
-            origin,
-            (input) => inventory.codexControlApply(input),
-            4096,
-          );
-        } else if (parsed.path === '/api/inventory/codex-control-recheck') {
-          response = await jsonAction(
-            req,
-            origin,
-            (input) => inventory.codexControlRecheck(input),
-            4096,
-          );
         } else if (parsed.path === '/api/inventory/inspect') {
           response = await jsonAction(req, origin, (input) => inventory.inspect(input), 4096);
         } else if (parsed.path === '/api/inventory/compare') {
@@ -645,7 +442,7 @@ export async function startServer({
                 (input) => mcpGovernance[parsed.path.split('/').at(-1)](input),
                 16 * 1024,
                 (text) => {
-                  const parsed = networkSchema?.parsePolicyHistoryJson?.(text);
+                  const parsed = apiSchema?.parsePolicyHistoryJson?.(text);
                   if (!parsed?.ok) throw Error('invalid-request');
                   const pending = [parsed.value];
                   while (pending.length) {
@@ -713,6 +510,13 @@ export async function startServer({
       }
       if (req.method !== 'GET' && req.method !== 'HEAD')
         return respond(res, 405, 'Method not allowed');
+      // An address of the older console goes to the screen that took its place.
+      const query = req.url.indexOf('?');
+      const moved = redirectFor(parsed.path, query === -1 ? '' : req.url.slice(query + 1));
+      if (moved !== null) {
+        res.writeHead(302, { ...HEADERS, Location: moved });
+        return res.end();
+      }
       const file = await staticFile(staticRoot, parsed.parts);
       if (!file) return respond(res, 404, 'Not found');
       return respond(res, 200, req.method === 'HEAD' ? undefined : file.bytes, file.type);
@@ -731,8 +535,6 @@ export async function startServer({
       resolveListen();
     });
   });
-  await workspaceMonitor.start();
-  await inventoryMonitor.start();
   const journalView =
     suppliedJournalView ?? (await createJournalViewService({ home: selectedHome }));
   const posture =
@@ -742,21 +544,11 @@ export async function startServer({
       project: selectedProject,
       codexHome: process.env.CODEX_HOME ?? null,
     }));
-  // Downloads pwn.watch's list only when the page asks, which it does only once you turn the feed on.
-  const threatFeed =
-    suppliedThreatFeed ??
-    (await createThreatFeedService({
-      userHome: selectedUserHome,
-      project: selectedProject,
-      codexHome: process.env.CODEX_HOME ?? null,
-    }));
   return {
     server,
     token,
     url: `${origin}/#token=${token}`,
     close: async () => {
-      await workspaceMonitor.close();
-      await inventoryMonitor.close();
       await Promise.allSettled(
         [
           control,
@@ -766,30 +558,23 @@ export async function startServer({
           policyHistory,
           mcpGovernance,
           inventory,
-          codexNetworkGuard,
-          codexPathGuard,
-          codexNetworkChecks,
           quarantine,
-          credentialFilters,
           mcp,
           mcpToolContracts,
           mcpCallControls,
           agents,
           incidents,
           incidentAssessments,
-          live,
           hookChecks,
-          taskLocks,
-          taskAccess,
           workspaceReview,
           workspaceTasks,
           sessionTaint,
           secrets,
+          card,
           comparisons,
           policyCases,
           journalView,
           posture,
-          threatFeed,
         ].map((service) => Promise.resolve().then(() => service.close())),
       );
       return new Promise((resolveClose, reject) => {

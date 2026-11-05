@@ -7,7 +7,7 @@ import {
 } from '@stroq/core';
 import { join } from 'node:path';
 import { runtimeDigest } from './runtime-digest.mjs';
-import { assertLocation, checkDeadline, fail, hash, same } from './task-lock-files.ts';
+import { assertLocation, checkDeadline, fail, hash, same } from './session-taint-files.ts';
 import {
   inspectSessionTaint,
   type TaintBinding,

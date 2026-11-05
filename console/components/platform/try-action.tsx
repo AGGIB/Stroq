@@ -1,7 +1,7 @@
 'use client';
 import { useId, useState, type FormEvent, type KeyboardEvent } from 'react';
 import { CircleAlert, LoaderCircle, Play } from 'lucide-react';
-import { Badge, EmptyState, PageHeading, Panel } from '@/components/platform-ui';
+import { Badge, Panel } from '@/components/platform-ui';
 import { useTryAction } from './use-try-action';
 import {
   TRY_KINDS,
@@ -81,7 +81,8 @@ function Verdict({ result }: { result: TryResult }) {
   );
 }
 
-export function TryActionPage() {
+/** What a command would get: in a clean session and after untrusted text. The top of Rules. */
+export function TryAction() {
   const { outcome, busy, error, check, localAccess } = useTryAction();
   const [kind, setKind] = useState<TryKind>('command');
   const [subject, setSubject] = useState('');
@@ -104,17 +105,20 @@ export function TryActionPage() {
   };
 
   return (
-    <div className="page-stack" role="region" aria-label="Try an action">
-      <PageHeading
-        title="Try an action"
-        description="See what your policy would do with an action an agent might take. Nothing is run, written or sent."
-      />
+    <section id="try" className="rules-section" aria-labelledby="try-title">
+      <div className="rules-section-head">
+        <h2 id="try-title">Try an action</h2>
+        <p>
+          See what your policy would do with an action an agent might take. Nothing is run, written
+          or sent.
+        </p>
+      </div>
       {!localAccess ? (
         <Panel>
-          <EmptyState
-            title="Connect the local engine"
-            description="Open the private link printed by the local server. Your own policy judges the action, so this page needs the engine."
-          />
+          <p className="panel-body control-meta">
+            Not connected to Stroq on this machine. Run <code>npx @stroq/cli console</code> to open
+            this page with your data. Your own policy judges the action, so this needs the engine.
+          </p>
         </Panel>
       ) : (
         <>
@@ -226,6 +230,6 @@ export function TryActionPage() {
           </details>
         </>
       )}
-    </div>
+    </section>
   );
 }

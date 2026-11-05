@@ -20,8 +20,8 @@ export function policyHistorySelection(
 }
 export function policyHistoryHref(entryId: string | null = null) {
   return entryId && UUID.test(entryId)
-    ? `/policies/history/?${new URLSearchParams({ entry: entryId })}`
-    : '/policies/history/';
+    ? `/policies/?${new URLSearchParams({ entry: entryId })}#history`
+    : '/policies/#history';
 }
 export function policyHistoryReadAllowed(
   selection: PolicyHistorySelection,

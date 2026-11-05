@@ -8,7 +8,7 @@ import { basename } from 'node:path';
 import { commandUrls, type Word } from '@stroq/core';
 import { plainText } from './key-text.js';
 import { isProgramName } from './names.js';
-import { isLoopback } from './place.js';
+import { isThisMachine } from './place.js';
 import { COPIERS } from './shell-place.js';
 import {
   commandReading,
@@ -233,7 +233,7 @@ export function shellCallFacts(command: string, cwd: string | null): CallFacts {
     archives,
     runs,
     sender,
-    ...(host === '' ? {} : { host, ...(isLoopback(host) ? { local: true as const } : {}) }),
+    ...(host === '' ? {} : { host, ...(isThisMachine(host) ? { local: true as const } : {}) }),
     outputs: unique(outputs),
     archiveOutputs: unique(archiveOutputs),
     assigns: assigned.uses,

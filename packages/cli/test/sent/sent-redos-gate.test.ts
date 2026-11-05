@@ -121,6 +121,12 @@ const SHELL_SHAPES: readonly (readonly [string, (size: number) => string])[] = [
   ['loops into files', repeat('for i in 1; do echo k; done > a; ')],
   ['environment printers', repeat('env | ')],
   ['printenv words', repeat('printenv -0 ')],
+  // A word with two `=` after `| env` could be cut at either one, and a line of them with no program after was
+  // tried every way (CodeQL js/redos on the reader of a command that hands text to a shell).
+  ['env assignments after a pipe', (size: number) => `|env\t${repeat('a==\t')(size)}`],
+  ['env assignments after sudo', (size: number) => `| sudo -u a env ${repeat('b=c= ')(size)}`],
+  ['grep patterns that look like a pipe', repeat('grep "a|eval" | ')],
+  ['many patterns of one grep', (size: number) => `grep ${repeat('"a|eval" ')(size)}| sh`],
   ['gh token expansions', repeat('$GH_TOKE')],
   ['wget input files', repeat('wget -i')],
   ['addresses with a path', repeat('https://a.example/')],
@@ -171,10 +177,19 @@ describe('stroq sent reads session text in linear time', () => {
     ['relative ends', repeat('x/')],
     ['folders changed to', repeat('cd a; ')],
     ['copies', repeat('cp /w/x.sh /w/y ')],
-  ] as const)('a command that names a file the AI wrote: %s', (_name, shape) => {
-    gate((text) => fileUse(`${text} /w/x.sh`, '/w/x.sh', KEY, ctx), shape);
-    gate((text) => fileUse(`${text} x.sh`, '/w/x.sh', KEY, { ...ctx, cwds: ['/a', '/b'] }), shape);
-  });
+  ] as const)(
+    'a command that names a file the AI wrote: %s',
+    (_name, shape) => {
+      gate((text) => fileUse(`${text} /w/x.sh`, '/w/x.sh', KEY, ctx), shape);
+      gate(
+        (text) => fileUse(`${text} x.sh`, '/w/x.sh', KEY, { ...ctx, cwds: ['/a', '/b'] }),
+        shape,
+      );
+    },
+    // Linear, but every `cd` of 'folders changed to' is a stage the reader follows: about a second at 16 KiB,
+    // and over the 30 s default under coverage on Node 22 and on Windows.
+    120_000,
+  );
 
   it.each([
     ['copies of copies', repeat('cp /w/f /w/f')],

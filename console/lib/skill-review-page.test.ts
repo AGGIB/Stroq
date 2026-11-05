@@ -76,7 +76,6 @@ function render(configure: (state: any) => void) {
       if (name === 'lucide-react')
         return new Proxy({}, { get: () => (props: any) => React.createElement('svg', props) });
       if (name === '@/components/control-provider') return { useControl: () => state };
-      if (name === './inventory') return { SkillsTabs: () => null };
       if (name === '@/components/platform-ui')
         return {
           PageHeading: ({ title, actions }: any) =>
@@ -90,7 +89,7 @@ function render(configure: (state: any) => void) {
       throw Error(name);
     },
   });
-  const html = renderToStaticMarkup(React.createElement(exports.SkillsPage));
+  const html = renderToStaticMarkup(React.createElement(exports.CheckText));
   const scanButton = elements.find(
     (element) => element.type === 'button' && element.props.className === 'button primary',
   );

@@ -1,4 +1,4 @@
-import type { Agent, ToolCall } from './data';
+import type { Agent, ToolCall } from './platform-types';
 
 /** The v1 bridge is observational: it cannot assess current protection or keys. */
 export interface LocalSnapshot {

@@ -36,7 +36,7 @@ describe('exact local check navigation', () => {
     expect(protectionRunReadAllowed(protectionRunSelection(new URLSearchParams()), workspace)).toBe(
       true,
     );
-    expect(protectionRunHref('../private', workspace)).toBe('/protection/');
+    expect(protectionRunHref('../private', workspace)).toBe('/');
   });
   it('only expands and focuses fixed evidence stage targets', () => {
     expect(protectionStageTarget('#protection-check-workspace-review')).toBe(

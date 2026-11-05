@@ -138,6 +138,14 @@ export function loadMcpServers(where: {
     // One name, two configs: the more outward one is what a call may have reached.
     if (known.get(key)?.remote !== true) known.set(key, server);
   }
+  return mcpServersFrom(known);
+}
+
+/**
+ * The servers a table names (as `known` holds them), able to answer for a tool: for a worker that is
+ * handed the table another thread read, and not the files.
+ */
+export function mcpServersFrom(known: ReadonlyMap<string, McpServer>): McpServers {
   return {
     known,
     lookup(tool: string): McpLookup | null {

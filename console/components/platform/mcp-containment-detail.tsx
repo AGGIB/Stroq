@@ -1,4 +1,5 @@
 'use client';
+import { skillsPartHref } from '@/lib/skills-navigation';
 import { useState } from 'react';
 import Link from 'next/link';
 import { Dialog } from 'radix-ui';
@@ -244,7 +245,7 @@ export function McpContainmentDetail({
                 </p>
               )}
               {!foreign && record.proxy?.toolApproval && (
-                <Link className="button" href="/skills/mcp/contracts/">
+                <Link className="button" href={skillsPartHref('tools')}>
                   Review tool contracts
                 </Link>
               )}

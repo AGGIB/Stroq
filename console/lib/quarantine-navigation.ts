@@ -1,3 +1,4 @@
+import { skillsPartHref } from './skills-navigation';
 export type QuarantineFilter = 'all' | 'quarantined' | 'attention';
 const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
 const WORKSPACE = /^workspace-[a-f0-9]{24}$/;
@@ -28,5 +29,5 @@ export function quarantineHref(
     params.set('workspace', workspaceId);
     params.set('record', recordId);
   }
-  return '/skills/quarantine/' + (params.size ? '?' + params : '');
+  return skillsPartHref('quarantine', params);
 }

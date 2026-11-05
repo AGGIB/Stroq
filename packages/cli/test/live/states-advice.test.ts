@@ -90,7 +90,7 @@ describe('the caveats of a result', () => {
 
 describe('a hook that is not whole, and what to do about it', () => {
   // The fix for a hook that does not work is the hook, and a check run again against it would find
-  // nothing new: it is never "run stroq prove again".
+  // nothing new: it is never "run the live check again".
   const fixes: ReadonlyArray<readonly [string, DisplayStateInput['installed'], RegExp]> = [
     ['not installed', { installed: false, changed: false }, /run stroq init/],
     ['changed since stroq init', { installed: true, changed: true }, /run stroq init/],
@@ -114,7 +114,7 @@ describe('a hook that is not whole, and what to do about it', () => {
       const shown = displayState(input({ stored: stored('verified'), installed }));
       expect(shown.state).toBe('stale');
       expect(shown.reason).toMatch(fix);
-      expect(shown.reason).not.toMatch(/stroq prove/);
+      expect(shown.reason).not.toMatch(/run the live check again/);
     },
   );
 
@@ -124,7 +124,7 @@ describe('a hook that is not whole, and what to do about it', () => {
       const shown = displayState(input({ installed }));
       expect(shown.state).toBe('not-attempted');
       expect(shown.reason).toMatch(fix);
-      expect(shown.reason).not.toMatch(/stroq prove/);
+      expect(shown.reason).not.toMatch(/run the live check again/);
     },
   );
 
@@ -136,18 +136,18 @@ describe('a hook that is not whole, and what to do about it', () => {
       );
       expect(shown.state).toBe('failed');
       expect(shown.reason).toMatch(fix);
-      expect(shown.reason).not.toMatch(/stroq prove/);
+      expect(shown.reason).not.toMatch(/run the live check again/);
     },
   );
 
   it('still says to prove again when the hook is whole and something else changed', () => {
     const shown = displayState(input({ stored: stored('failed'), stroqVersion: '0.24.0' }));
-    expect(shown.reason).toMatch(/stroq prove/);
+    expect(shown.reason).toMatch(/run the live check again/);
     expect(shown.reason).not.toMatch(/stroq init/);
   });
 
   it('says to prove again for a stale result whose hook is whole', () => {
     const shown = displayState(input({ stored: stored('verified'), stroqVersion: '0.24.0' }));
-    expect(shown.reason).toMatch(/stroq prove/);
+    expect(shown.reason).toMatch(/run the live check again/);
   });
 });

@@ -1,98 +1,69 @@
-import type { LiveAgent, LiveJob, LiveState } from './live-proof';
+import type { ToolCall } from './platform-types';
 
-const UUID = /^[a-f0-9]{8}-(?:[a-f0-9]{4}-){3}[a-f0-9]{12}$/;
-const WORKSPACE = /^workspace-[a-f0-9]{24}$/;
-const AGENTS = new Set(['claude-code', 'codex', 'cursor']);
+/**
+ * What the Live address says: which decisions to show, one session, one day, some words, and the one
+ * event whose chain is open. Everything is read back through these guards, so a hand-made address
+ * can only select; it never reaches anything the page does not already show.
+ */
+export const LIVE_SHOWS = ['all', 'denied', 'asked', 'flagged'] as const;
+export type LiveShow = (typeof LIVE_SHOWS)[number];
+
 export interface LiveSelection {
-  requested: boolean;
-  invalid: boolean;
-  jobId: string | null;
-  agent: LiveAgent | null;
-  workspaceId: string | null;
+  readonly show: LiveShow;
+  /** A session by the name the console gives it (`session-` and sixteen hex digits), or null. */
+  readonly session: string | null;
+  /** A local day, `YYYY-MM-DD`, or null. */
+  readonly date: string | null;
+  readonly text: string;
+  /**
+   * The open event: the digest of its journal line (64 hex digits) or, for an older link, its
+   * number in the journal. Null when none is open.
+   */
+  readonly event: string | null;
 }
 
-export function liveSelection(
-  params: Pick<URLSearchParams, 'get' | 'has' | 'getAll'>,
-): LiveSelection {
-  const job = params.get('job'),
-    agent = params.get('agent'),
-    workspace = params.get('workspace');
-  const requested = ['job', 'agent', 'workspace'].some((key) => params.has(key));
-  const duplicate = ['job', 'agent', 'workspace'].some((key) => params.getAll(key).length > 1);
-  const valid =
-    !duplicate &&
-    workspace !== null &&
-    WORKSPACE.test(workspace) &&
-    ((job !== null && UUID.test(job) && !params.has('agent')) ||
-      (agent !== null && AGENTS.has(agent) && !params.has('job')));
+const SESSION = /^session-[a-f0-9]{16}$/;
+const DATE = /^\d{4}-\d{2}-\d{2}$/;
+const EVENT = /^(?:[a-f0-9]{64}|[1-9]\d{0,15})$/;
+const MAX_TEXT = 200;
+
+type Params = Pick<URLSearchParams, 'get'>;
+
+export function liveSelection(params: Params): LiveSelection {
+  const show = params.get('show');
+  const session = params.get('session');
+  const date = params.get('date');
+  const text = params.get('q') ?? '';
+  const event = params.get('event');
   return {
-    requested,
-    invalid: requested && !valid,
-    jobId: valid ? job : null,
-    agent: valid ? (agent as LiveAgent | null) : null,
-    workspaceId: valid ? workspace : null,
+    show: LIVE_SHOWS.find((value) => value === show) ?? 'all',
+    session: session !== null && SESSION.test(session) ? session : null,
+    date:
+      date !== null && DATE.test(date) && !Number.isNaN(Date.parse(`${date}T00:00:00Z`))
+        ? date
+        : null,
+    text: text.length <= MAX_TEXT ? text : '',
+    event: event !== null && EVENT.test(event) ? event : null,
   };
 }
 
-export function liveHref({
-  jobId,
-  agent,
-  workspaceId,
-}: {
-  jobId?: string | null;
-  agent?: LiveAgent | null;
-  workspaceId?: string | null;
-} = {}) {
-  const base = '/agents/checks/';
-  if (!workspaceId || !WORKSPACE.test(workspaceId) || Boolean(jobId) === Boolean(agent))
-    return base;
-  const params = new URLSearchParams({ workspace: workspaceId });
-  if (jobId && UUID.test(jobId)) params.set('job', jobId);
-  else if (agent && AGENTS.has(agent)) params.set('agent', agent);
-  else return base;
-  return base + '?' + params;
+/** The address of Live for a selection; what is left at its default is left out. */
+export function liveHref(selection: Partial<LiveSelection>): string {
+  const params = new URLSearchParams();
+  if (selection.show !== undefined && selection.show !== 'all') params.set('show', selection.show);
+  if (selection.session) params.set('session', selection.session);
+  if (selection.date) params.set('date', selection.date);
+  if (selection.text) params.set('q', selection.text);
+  if (selection.event) params.set('event', selection.event);
+  return `/live/${params.size > 0 ? `?${params}` : ''}`;
 }
 
-export function liveReadAllowed(selection: LiveSelection, workspaceId: string | null): boolean {
-  return (
-    workspaceId !== null &&
-    !selection.invalid &&
-    (!selection.requested || selection.workspaceId === workspaceId)
-  );
-}
-
-type LiveResolution =
-  | {
-      kind:
-        | 'invalid'
-        | 'workspace-mismatch'
-        | 'disconnected'
-        | 'loading'
-        | 'overview'
-        | 'missing-job'
-        | 'missing-proof';
-    }
-  | { kind: 'job'; job: LiveJob }
-  | { kind: 'proof'; agent: LiveAgent; proof: NonNullable<LiveState['agents'][number]['proof']> };
-
-/** Exact links never resolve to another attempt, including after server eviction/restart. */
-export function resolveLiveSelection(
-  selection: LiveSelection,
-  state: LiveState | null,
-  workspaceId: string | null,
-): LiveResolution {
-  if (selection.invalid) return { kind: 'invalid' };
-  if (!workspaceId) return { kind: 'disconnected' };
-  if (selection.requested && selection.workspaceId !== workspaceId)
-    return { kind: 'workspace-mismatch' };
-  if (!state) return { kind: 'loading' };
-  if (selection.jobId) {
-    const job = state.jobs.find((item) => item.id === selection.jobId);
-    return job ? { kind: 'job', job } : { kind: 'missing-job' };
-  }
-  if (selection.agent) {
-    const proof = state.agents.find((item) => item.id === selection.agent)?.proof;
-    return proof ? { kind: 'proof', agent: selection.agent, proof } : { kind: 'missing-proof' };
-  }
-  return { kind: 'overview' };
+/** The address of one recorded decision: by its journal line's digest when it has one, else its number. */
+export function liveEventHref(call: Pick<ToolCall, 'id' | 'evidenceSha'>): string {
+  const number = /^audit-([1-9]\d*)$/.exec(call.id)?.[1];
+  const event =
+    call.evidenceSha !== undefined && /^[a-f0-9]{64}$/.test(call.evidenceSha)
+      ? call.evidenceSha
+      : number;
+  return liveHref(event === undefined ? {} : { event });
 }

@@ -8,65 +8,34 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import { AGENTS, KEYS, TODAY, type Agent, type ToolCall, type KeyFinding } from '@/lib/data';
-import { DEMO_CALLS } from '@/lib/platform';
+import { NOT_CONNECTED, type Snapshot } from '@/lib/connection';
 import { validateSnapshot } from '@/lib/snapshot';
 import { validateLocalContext, type LocalContext } from '@/lib/local-context';
 import { isLocalOperation } from '@/lib/local-operations';
-import { TASK_ACCESS_ERROR_MESSAGES } from '@/lib/task-access';
-import { WORKSPACE_REVIEW_ERROR_MESSAGES } from '@/lib/workspace-review-errors';
-import { WORKSPACE_MONITOR_ERROR_MESSAGES } from '@/lib/workspace-monitor-errors';
-import { WORKSPACE_TASK_ERROR_MESSAGES } from '@/lib/workspace-task-controls';
-import { SESSION_TAINT_ERROR_MESSAGES } from '@/lib/session-taint';
-import { INCIDENT_ASSESSMENT_ERROR_MESSAGES } from '@/lib/incident-assessments';
-import { createSessionTaintRefusal } from '@/lib/session-taint-error';
 import { POLICY_HISTORY_ERROR_MESSAGES } from '@/lib/policy-history-errors';
 import { TRY_ERROR_MESSAGES } from '@/lib/try-action';
 import { JOURNAL_ERROR_MESSAGES } from '@/lib/journal-view';
 import { POSTURE_ERROR_MESSAGES } from '@/lib/posture';
-import { TASK_LOCK_PAGE_ERROR_MESSAGES } from '@/lib/task-lock-page';
 import { MCP_TOOL_CONTRACT_ERROR_MESSAGES } from '@/lib/mcp-tool-contracts';
 import { MCP_CALL_CONTROL_ERROR_MESSAGES } from '@/lib/mcp-call-controls';
-import { CODEX_SKILL_CONTROL_ERROR_MESSAGES } from '@/lib/codex-skill-controls-client';
-import {
-  CODEX_NETWORK_ERROR_MESSAGES,
-  createCodexNetworkCheckStartRefusal,
-} from '@/lib/codex-network-client';
-import { CODEX_PATH_GUARD_MESSAGES } from '@/lib/codex-path-guard-client';
 import { MCP_GOVERNANCE_ERROR_MESSAGES } from '@/lib/mcp-governance-client';
 
-interface Snapshot {
-  source: 'demo' | 'local';
-  generatedAt: string;
-  calls: readonly ToolCall[];
-  agents: readonly Agent[];
-  keys: readonly KeyFinding[];
-  limitations: readonly string[];
-}
 interface Platform extends Snapshot {
+  /** False until the browser has looked for a token, so a page never claims "not connected" early. */
+  ready: boolean;
   loading: boolean;
   error: string | null;
   connectLocal: () => Promise<void>;
-  useDemo: () => void;
   refresh: () => Promise<void>;
   localAccess: boolean;
   localContext: LocalContext | null;
   requestLocal: (path: string, body?: unknown, signal?: AbortSignal) => Promise<unknown>;
 }
-const DEMO: Snapshot = {
-  source: 'demo',
-  generatedAt: `${TODAY}T14:30:00Z`,
-  calls: DEMO_CALLS,
-  agents: AGENTS,
-  keys: KEYS,
-  limitations: [
-    'Example workspace with synthetic events. These are not results from your machine.',
-  ],
-};
 const Context = createContext<Platform | null>(null);
 
 export function PlatformProvider({ children }: { children: ReactNode }) {
-  const [snapshot, setSnapshot] = useState<Snapshot>(DEMO);
+  const [snapshot, setSnapshot] = useState<Snapshot>(NOT_CONNECTED);
+  const [ready, setReady] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [localAccess, setLocalAccess] = useState(false);
@@ -100,14 +69,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
         const errors: Record<string, string> = {
           'operation-unavailable':
             'Complete current evidence is unavailable. No result was accepted.',
-          'task-unavailable': 'This exact task permission is no longer available. Recheck tasks.',
-          'task-page-stale': 'The task catalog changed. Refresh the first page before continuing.',
-          'task-page-expired': 'This page link expired. Refresh the first page to continue.',
-          'task-lookup-limit':
-            "The task catalog limit was reached. The requested permission's absence is not established.",
-          'task-lock-busy': 'Another task permission change is running. Wait, then recheck.',
-          'task-lock-failed':
-            'Task permission state could not be verified. Recheck before another change.',
           'write-unconfirmed':
             'The write may have completed. Recheck current state before preparing another change.',
           'unsafe-source': 'A source or its file identity could not be verified. Recheck first.',
@@ -153,10 +114,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
           'stale-evidence':
             'The journal evidence changed or left the captured window. Refresh before reviewing it.',
           'review-unavailable': 'The review store could not be read or updated safely.',
-          'live-check-busy':
-            'A live check is already running. Reopen the test dialog to inspect it.',
-          'subscription-ack-required':
-            'Confirm the request budget and subscription usage before starting.',
           'agent-status-unavailable': 'Current agent configuration could not be read safely.',
           'server-stopped': 'The local server is stopping. Reconnect after it restarts.',
           'custom-home-unsupported':
@@ -242,46 +199,11 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
           'write-failed':
             'The configuration could not be written. Recheck its state before retrying.',
         };
-        const accessErrors: Readonly<Record<string, string>> = TASK_ACCESS_ERROR_MESSAGES;
-        const workspaceErrors: Readonly<Record<string, string>> = WORKSPACE_REVIEW_ERROR_MESSAGES;
-        const workspaceTaskErrors: Readonly<Record<string, string>> = WORKSPACE_TASK_ERROR_MESSAGES;
         const policyHistoryErrors: Readonly<Record<string, string>> = POLICY_HISTORY_ERROR_MESSAGES;
-        if (
-          path.startsWith('/api/session-taint/') &&
-          report !== null &&
-          typeof report === 'object' &&
-          !Array.isArray(report) &&
-          Object.keys(report).length === 1 &&
-          Object.hasOwn(report, 'error')
-        ) {
-          const refusal = createSessionTaintRefusal(code, res.status);
-          if (refusal) throw refusal;
-        }
-        if (
-          path === '/api/codex-network-checks/start' &&
-          res.status === 409 &&
-          report !== null &&
-          typeof report === 'object' &&
-          !Array.isArray(report) &&
-          Object.keys(report).length === 1 &&
-          Object.hasOwn(report, 'error')
-        ) {
-          const refusal = createCodexNetworkCheckStartRefusal(code, res.status);
-          if (refusal) throw refusal;
-        }
         throw new Error(
           (path === '/api/policy/try' ? TRY_ERROR_MESSAGES[code] : undefined) ??
             (path.startsWith('/api/journal/') ? JOURNAL_ERROR_MESSAGES[code] : undefined) ??
             (path === '/api/posture' ? POSTURE_ERROR_MESSAGES[code] : undefined) ??
-            (path === '/api/incident-assessments' || path.startsWith('/api/incident-assessments/')
-              ? INCIDENT_ASSESSMENT_ERROR_MESSAGES[
-                  code as keyof typeof INCIDENT_ASSESSMENT_ERROR_MESSAGES
-                ]
-              : undefined) ??
-            (path === '/api/session-taint' || path.startsWith('/api/session-taint/')
-              ? SESSION_TAINT_ERROR_MESSAGES[code as keyof typeof SESSION_TAINT_ERROR_MESSAGES]
-              : undefined) ??
-            (path.startsWith('/api/task-locks/access/') ? accessErrors[code] : undefined) ??
             (path.startsWith('/api/mcp-tool-contracts')
               ? MCP_TOOL_CONTRACT_ERROR_MESSAGES[code]
               : undefined) ??
@@ -291,31 +213,8 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
             (path === '/api/mcp-governance' || path.startsWith('/api/mcp-governance/')
               ? MCP_GOVERNANCE_ERROR_MESSAGES[code as keyof typeof MCP_GOVERNANCE_ERROR_MESSAGES]
               : undefined) ??
-            (path === '/api/inventory/codex-controls' ||
-            /^\/api\/inventory\/codex-control-(?:preview|apply|recheck)$/.test(path)
-              ? CODEX_SKILL_CONTROL_ERROR_MESSAGES[
-                  code as keyof typeof CODEX_SKILL_CONTROL_ERROR_MESSAGES
-                ]
-              : undefined) ??
-            (/^\/api\/codex-network-(?:guard|checks)(?:\/|$)/.test(path)
-              ? CODEX_NETWORK_ERROR_MESSAGES[code]
-              : undefined) ??
-            (/^\/api\/codex-path-guard(?:\/|$)/.test(path)
-              ? CODEX_PATH_GUARD_MESSAGES[code as keyof typeof CODEX_PATH_GUARD_MESSAGES]
-              : undefined) ??
-            (path === '/api/task-locks/page' ? TASK_LOCK_PAGE_ERROR_MESSAGES[code] : undefined) ??
             (path === '/api/policy/history' || path.startsWith('/api/policy/restore/')
               ? policyHistoryErrors[code]
-              : undefined) ??
-            (path === '/api/workspace-review' || path.startsWith('/api/workspace-review/')
-              ? workspaceErrors[code]
-              : undefined) ??
-            (path === '/api/workspace-task-controls' ||
-            path.startsWith('/api/workspace-task-controls/')
-              ? workspaceTaskErrors[code]
-              : undefined) ??
-            (path === '/api/workspace-monitor' || path.startsWith('/api/workspace-monitor/')
-              ? WORKSPACE_MONITOR_ERROR_MESSAGES[code]
               : undefined) ??
             errors[code] ??
             (res.status === 401
@@ -358,11 +257,6 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
         throw new Error('The local server returned an unsupported snapshot. No data was loaded.');
       if (active.current !== controller) return;
       setSnapshot(data);
-      try {
-        sessionStorage.setItem('stroq-console-source', 'local');
-      } catch {
-        /* Browsing remains available without storage. */
-      }
     } catch (e) {
       if (active.current === controller)
         setError(
@@ -395,39 +289,27 @@ export function PlatformProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const hash = new URLSearchParams(window.location.hash.slice(1));
     const incoming = hash.get('token');
-    let preferredSource: string | null = null;
     try {
       token.current = incoming ?? sessionStorage.getItem('stroq-console-token') ?? '';
-      preferredSource = sessionStorage.getItem('stroq-console-source');
       if (incoming) sessionStorage.setItem('stroq-console-token', incoming);
     } catch {
       token.current = incoming ?? '';
     }
     if (incoming) history.replaceState(null, '', location.pathname + location.search);
     setLocalAccess(Boolean(token.current));
-    if (token.current && (incoming || preferredSource !== 'demo')) void connectLocal();
+    // A token always means the real source.
+    if (token.current) void connectLocal();
+    setReady(true);
     return () => active.current?.abort();
   }, [connectLocal]);
-  const useDemo = useCallback(() => {
-    active.current?.abort();
-    active.current = null;
-    setSnapshot(DEMO);
-    try {
-      sessionStorage.setItem('stroq-console-source', 'demo');
-    } catch {
-      /* Optional browser preference. */
-    }
-    setError(null);
-    setLoading(false);
-  }, []);
   return (
     <Context.Provider
       value={{
         ...snapshot,
+        ready,
         loading,
         error,
         connectLocal,
-        useDemo,
         refresh: connectLocal,
         localAccess,
         localContext,

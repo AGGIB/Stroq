@@ -21,9 +21,7 @@ The separate [workspace task control](workspace-task-controls.md) changes only t
 | Inspect local skill/archive | `packages/cli/src/install/skill-confirm.ts`: `inspectSkillSource`; `install/inspect/index.ts`: `inspectTree`; CLI `vet --from ... --kind skill --json` | Static analysis, no unpacked code execution. Complete report does not mean safe. `--probe` is a separate execution operation and is not enabled by a static scan.                                                                                                                                                |
 | Inspect repository          | `packages/cli/src/commands/inspect.ts`: `runInspect`; `exposure/repo-surface.ts`: `repoSurface`, `folderSurface`                                       | Preflight of repository execution surfaces; reports can include command/config text. Project IDs must resolve to server-selected roots.                                                                                                                                                                          |
 | Install hooks               | `packages/cli/src/commands/init.ts`: `runInit`; `init-agent.ts`: `runInitCommand`                                                                      | Explicit agent/scope only. Dry-run output contains merged host config and must not be forwarded. OpenClaw can run an installer and requires a separate operation boundary.                                                                                                                                       |
-| Harden agent settings       | `packages/cli/src/commands/harden-plan.ts`: `prepare`; `harden/apply.ts`: `applyPlan`; `harden/recheck.ts`: `assertUnchanged`                          | Existing plan/apply transaction supports `claude-read-deny` and `cursor-ignore`. Preserve before-state checks and required acknowledgements. Undo weakens a control.                                                                                                                                             |
 | Install skill/MCP           | `packages/cli/src/install/skill-install.ts`: `addSkill`, `removeSkill`; `mcp-prepare.ts`: `prepareMcp`; `mcp-install.ts`: `addMcp`, `removeMcp`        | Existing interactive digest confirmation, target/source checks, backups, and compare-before-write must be preserved. Extract an explicit prepare/commit API; do not fabricate a terminal or auto-answer it. `prepareSkill` is currently private.                                                                 |
-| Live proof                  | `packages/cli/src/commands/prove.ts`: `runProve`; `prove-flow.ts`                                                                                      | Explicit launch and request-budget disclosure. Default max 3 requests, ceiling 6. Claude driving supports non-Windows; Codex driving supports Windows. Dry-run exits zero without establishing proof.                                                                                                            |
 | Secret exposure             | `packages/cli/src/commands/sent.ts`: `runSent`                                                                                                         | Deliberate scoped action: reads actual local credential values and transcripts in memory to match them. No values may reach browser, logs, or exported results. Not an automatic dashboard refresh.                                                                                                              |
 | Audit integrity             | `packages/core/src/audit/audit-log.ts`: `AuditLog.verify`; CLI `verify`                                                                                | Chain integrity is not authenticity or protection against tail truncation. Use structured verify result, not terminal text.                                                                                                                                                                                      |
 
@@ -82,8 +80,8 @@ and security headers remain in force.
 ## Apply architecture for later operations
 
 Checks and static analysis can run on request without an additional approval prompt.
-Enabling hooks or hardening needs a concrete preview and an explicit Apply action. Disabling,
-unwrapping, uninstalling, undoing hardening, trusting content, clearing taint, or loosening
+Enabling hooks needs a concrete preview and an explicit Apply action. Disabling,
+unwrapping, uninstalling, trusting content, clearing taint, or loosening
 policy requires deliberate review of the specific weakening change. Cloaking is opt-in because
 it introduces a reversible on-disk dictionary.
 
@@ -98,7 +96,7 @@ from repeating an installation. No raw host config or backup contents should lea
 
 Use temporary homes and synthetic host configurations; do not inspect real credentials to test
 the platform. Relevant existing suites are `packages/cli/test/policy`, `test/attack`,
-`test/install`, `test/live`, `test/sent`, and `test/commands`. `ProveDeps`, `VetDeps`, and
-`HardenDeps` already support injected dependencies. The console's `scripts/*.test.mjs` cover
+`test/install`, `test/live`, `test/sent`, and `test/commands`. `VetDeps` already supports
+injected dependencies. The console's `scripts/*.test.mjs` cover
 authentication, Host/Origin, traversal, bounded reports and redaction. Tests using fabricated
 host data establish parser and transaction behavior only, never actual host enforcement.

@@ -18,7 +18,7 @@ Plans expire after five minutes and are bounded to eight previews and 8 MiB in s
 
 Changes affecting a user source, including a home directory opened as a workspace, require separate shared-scope acknowledgement. Changes retaining preexisting configuration or installation-record bytes require explicit full-copy acknowledgement. Opening a page or generating a preview writes nothing.
 
-The writer holds the same Stroq configuration lock as native file filters and hook removal. It finishes recovery copies before changing the configuration and advisory record, checks the resulting bytes and file identities, and refuses to roll back over a concurrent editor. Portable check/rename does not provide an OS-level compare-and-swap against a malicious process running as the same user.
+The writer holds the same Stroq configuration lock as hook removal and the other writers of agent settings. It finishes recovery copies before changing the configuration and advisory record, checks the resulting bytes and file identities, and refuses to roll back over a concurrent editor. Portable check/rename does not provide an OS-level compare-and-swap against a malicious process running as the same user.
 
 ## Recovery and limits
 

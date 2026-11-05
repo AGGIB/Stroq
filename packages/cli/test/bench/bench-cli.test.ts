@@ -1,13 +1,13 @@
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it, vi } from 'vitest';
 import { runBenchCommand } from '../../src/commands/bench.js';
-import { commandHelp } from '../../src/help.js';
-import { CLI_ENTRY } from '../helpers/cli-entry.js';
+import { devHelp } from '../../src/dev-help.js';
+import { REPO_ROOT, devToolArgv } from '../helpers/dev-tool.js';
 import { stroqVersion } from '../../src/version.js';
 
-describe('bench command CLI', () => {
+describe('the bench tool', () => {
   it('documents --latency, --n, --warmup in help', () => {
-    const help = commandHelp('bench');
+    const help = devHelp('bench');
     expect(help).toContain('--latency');
     expect(help).toContain('--n <count>');
     expect(help).toContain('--warmup <count>');
@@ -80,11 +80,11 @@ describe('bench command CLI', () => {
     }
   });
 
-  it('runs --latency with --n 1 and --warmup 0 via built CLI', () => {
+  it('runs --latency with --n 1 and --warmup 0 through scripts/dev/bench.ts', () => {
     const res = spawnSync(
       process.execPath,
-      [CLI_ENTRY, 'bench', '--latency', '--n', '1', '--warmup', '0'],
-      { encoding: 'utf8' },
+      devToolArgv('bench', '--latency', '--n', '1', '--warmup', '0'),
+      { cwd: REPO_ROOT, encoding: 'utf8' },
     );
     expect(res.status).toBe(0);
     expect(res.stdout).toContain('Stroq Hook Latency Benchmark');
@@ -93,11 +93,11 @@ describe('bench command CLI', () => {
     expect(res.stdout).toContain('PostToolUse (heavy ~60KB content)');
   }, 30_000);
 
-  it('emits valid json when --json is passed with --latency via built CLI', () => {
+  it('emits valid json when --json is passed with --latency through scripts/dev/bench.ts', () => {
     const res = spawnSync(
       process.execPath,
-      [CLI_ENTRY, 'bench', '--latency', '--n', '1', '--warmup', '0', '--json'],
-      { encoding: 'utf8' },
+      devToolArgv('bench', '--latency', '--n', '1', '--warmup', '0', '--json'),
+      { cwd: REPO_ROOT, encoding: 'utf8' },
     );
     expect(res.status).toBe(0);
     const parsed = JSON.parse(res.stdout);

@@ -13,10 +13,12 @@ import {
   hitsForRead,
   inAgentFolder,
   isAgentDir,
+  isSkillDataFile,
   isSurfacePath,
   type SourceRead,
 } from './agent-surface.js';
 import { linkMatters } from './git-tree.js';
+import { scanLargeFile } from './large-text.js';
 
 /**
  * What a working tree runs by itself, read from the disk: `stroq inspect` without a base, on a
@@ -202,6 +204,26 @@ function brokenLink(
     : undefined;
 }
 
+/**
+ * A file over the cap of bytes read whole. A skill's data file is scanned all through, in pieces, for
+ * characters nobody would see, when the reads are plain reads of the disk, and its size is charged to
+ * the budget like a file read whole: one the budget cannot pay for is not scanned and fails, as one
+ * past the scan's own cap does.
+ */
+function tooLarge(
+  candidate: Candidate,
+  size: number,
+  left: { bytes: number },
+  io: SurfaceReadContext,
+): SourceRead {
+  if (io.plainDisk !== true || !isSkillDataFile(candidate.rel)) return { kind: 'too-large', size };
+  if (size > left.bytes) return { kind: 'over-budget', budget: MAX_TOTAL_BYTES };
+  const scan = scanLargeFile(candidate.real, candidate.rel);
+  if (scan === undefined) return { kind: 'too-large', size };
+  left.bytes -= size;
+  return { kind: 'too-large', size, scan };
+}
+
 /** Reads one file, charging its size to what is `left` of the budget. */
 function readCandidate(
   candidate: Candidate,
@@ -215,7 +237,7 @@ function readCandidate(
     if (size <= MAX_FILE_BYTES && size > left.bytes)
       return { kind: 'over-budget', budget: MAX_TOTAL_BYTES };
     const read = io.read(candidate.real, MAX_FILE_BYTES);
-    if (read.kind === 'too-large') return { kind: 'too-large', size: read.size };
+    if (read.kind === 'too-large') return tooLarge(candidate, read.size, left, io);
     if (read.kind !== 'text') return { kind: 'unreadable' };
     left.bytes -= Buffer.byteLength(read.text);
     return { kind: 'text', text: read.text };

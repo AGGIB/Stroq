@@ -10,6 +10,7 @@
 //   blocked      BLOCKED BEFORE IT RAN      Claude Code records the call as refused by you or blocked by Stroq
 //
 // A key that turns up in several places is reported under the most external one it reached.
+import { hostname, networkInterfaces } from 'node:os';
 import { isOwnHost, storesContent, type KeyLabel } from './own-service.js';
 
 export type Tier = 'third_party' | 'maybe' | 'seen' | 'own_service' | 'blocked';
@@ -31,6 +32,7 @@ export const placeRank = (place: Pick<Place, 'tier' | 'wouldBe'>): number =>
 export type Route =
   | 'command'
   | 'command-near'
+  | 'linked'
   | 'command-ran'
   | 'command-unread'
   | 'post'
@@ -53,10 +55,54 @@ export type Route =
   | 'cut';
 
 /**
+ * How a call that made a request came to be linked to a key whose value it does not hold: it used a
+ * variable the key was once put in (`variable`), ran where the environment was printed
+ * (`environment`), named a folder the key's file is in (`folder`), named files by a pattern or `.` that
+ * may take in the key's file (`pattern`), or ran after a step that named the file or printed the
+ * environment (`earlier-step`). None of these is a send of the key: a maybe, with words of its own.
+ */
+export type Via = 'variable' | 'environment' | 'folder' | 'pattern' | 'earlier-step';
+
+/**
  * What a bound of the check dropped, on a `cut` place: a variable past those a session follows,
  * a key file past those a pattern is checked against, a folder past those a session follows.
  */
 export type Cut = 'variables' | 'key-files' | 'folders';
+
+/**
+ * What in a call linked it to a key, for the person who checks a place: the spelling of the key's value that
+ * the call holds (`value` as it is written, `value-json` JSON-escaped, `value-url` URL-encoded, `value-joined`
+ * with the quotes and backslashes of the shell taken out), the key's file (`file`), a folder it is in
+ * (`folder`) or a pattern that takes it in (`pattern`) named in the call's words, the environment the call
+ * printed (`environment`), a variable an earlier call put the key in (`variable`), or a file the AI wrote the
+ * key into that a later call used (`written-file`).
+ */
+export const MATCHED = [
+  'value',
+  'value-json',
+  'value-url',
+  'value-joined',
+  'file',
+  'folder',
+  'pattern',
+  'environment',
+  'variable',
+  'written-file',
+] as const;
+export type Matched = (typeof MATCHED)[number];
+
+/**
+ * The evidence for a place that says a key was sent, or may have been: the call's own text with every
+ * value of a traced key taken out (`[NAME]` in its place), cut around the first, and made safe to print;
+ * and what linked the call to the key. Never a value. Made only when a caller asks for it (the card does).
+ */
+export interface Evidence {
+  /** The masked text; empty when the call's text is not kept (a later call that used a written file). */
+  readonly text: string;
+  readonly matched: Matched;
+  /** The word of the call that named the key's file, folder or pattern, or the variable it used. */
+  readonly word?: string;
+}
 
 /**
  * What became of a file the AI wrote with the key: the command in it (`write-script`), the call
@@ -107,12 +153,16 @@ export interface Place {
   readonly saidStopped?: true;
   /** A claude.ai connector: the MCP server runs at Anthropic for another service. */
   readonly connector?: true;
+  /** For `linked`: how the call that made the request came to be linked to a key it does not hold. */
+  readonly via?: Via;
   /** For `secret-store`: the hosting service the key was stored at, by a name from a table. */
   readonly service?: string;
   /** For `write-script`, `write-sent` and `write-push`: what became of the written file. */
   readonly then?: Then;
   /** For `cut`: which bound of the check dropped what may have carried the key. */
   readonly cut?: Cut;
+  /** What the call said and how it was linked to the key, when asked for (`Evidence`). */
+  readonly evidence?: Evidence;
 }
 
 /** IPv4 in dotted form, each part 0-255. */
@@ -123,15 +173,60 @@ function ipv4(host: string): number[] | null {
   return nums.every((n) => n <= 255) ? nums : null;
 }
 
+/** A host as it is compared: lower case, no brackets, no trailing dot, no zone (`fe80::1%en0`). */
+const normalHost = (host: string): string =>
+  host
+    .toLowerCase()
+    .replace(/^\[/, '')
+    .replace(/\]$/, '')
+    .replace(/\.$/, '')
+    .replace(/%[^%]*$/, '');
+
 /**
- * Whether a host is this machine itself: `localhost`, a loopback address. Not the local network:
- * a private address or a `.local` name is another machine, which ssh logs in to.
+ * Whether a host is this machine's loopback: `localhost`, a loopback address. Not the local network:
+ * a private address or a `.local` name is another machine, which ssh logs in to (`isThisMachine` adds
+ * the addresses this machine's own network cards have).
  */
 export function isLoopback(host: string): boolean {
-  const h = host.toLowerCase().replace(/^\[/, '').replace(/\]$/, '').replace(/\.$/, '');
+  const h = normalHost(host);
   if (h === 'localhost' || h.endsWith('.localhost') || h === '::1' || h === '0.0.0.0') return true;
   const ip = ipv4(h);
   return ip !== null && ip[0] === 127;
+}
+
+/** The addresses and names this machine has beside loopback, read once. */
+let ownAddresses: ReadonlySet<string> | null = null;
+
+function readOwnAddresses(): ReadonlySet<string> {
+  const found = new Set<string>();
+  try {
+    for (const list of Object.values(networkInterfaces()))
+      for (const one of list ?? []) found.add(normalHost(one.address));
+    // A full name (`macbook.local`, `host.corp.example`) and the `.local` name of its first label.
+    const name = normalHost(hostname());
+    if (name.includes('.')) found.add(name);
+    const first = name.split('.')[0] ?? '';
+    if (first !== '' && name.endsWith('.local')) found.add(`${first}.local`);
+  } catch {
+    // A machine that will not say what it is called has only its loopback.
+  }
+  found.delete('');
+  return found;
+}
+
+/**
+ * The addresses and names to take as this machine's own, in place of those read from its network
+ * cards (a test's own); null reads them again.
+ */
+export function setOwnAddresses(addresses: readonly string[] | null): void {
+  ownAddresses = addresses === null ? null : new Set(addresses.map(normalHost));
+}
+
+/** Whether a host is this machine: loopback, or an address or name one of its network cards has. */
+export function isThisMachine(host: string): boolean {
+  if (isLoopback(host)) return true;
+  ownAddresses ??= readOwnAddresses();
+  return ownAddresses.has(normalHost(host));
 }
 
 /** A key's name and source, and its value, for the pieces of it no host may hold. */
@@ -171,12 +266,12 @@ export function hostPlace(
   facts: RequestFacts = {},
 ): Place {
   const usable = hosts.map((h) => h.toLowerCase()).filter((h) => h !== '');
-  const foreign = usable.find((h) => !isLoopback(h) && !isOwnHost(key, h));
+  const foreign = usable.find((h) => !isThisMachine(h) && !isOwnHost(key, h));
   if (foreign !== undefined) return { ...base, tier: 'third_party', host: foreign };
   if (usable.length === 0 || facts.unread === true || facts.routed === true)
     return { ...base, tier: 'third_party' };
   const first = usable[0] as string;
-  if (usable.every(isLoopback)) return { ...base, tier: 'maybe', host: first, local: true };
+  if (usable.every(isThisMachine)) return { ...base, tier: 'maybe', host: first, local: true };
   // Own hosts beside this machine's: not all of it was the key's own use.
   if (!usable.every((h) => isOwnHost(key, h))) return { ...base, tier: 'third_party' };
   if (usable.some((h) => holdsPiece(h, key))) return { ...base, tier: 'third_party', host: first };
@@ -196,3 +291,14 @@ const CALL_ORDER: readonly Tier[] = ['third_party', 'maybe', 'own_service', 'see
 /** The farther of two places one call reached; the first when they tie. */
 export const farther = (a: Place, b: Place): Place =>
   CALL_ORDER.indexOf(b.tier) < CALL_ORDER.indexOf(a.tier) ? b : a;
+
+/**
+ * A place that a call put a key in without holding its value, as a maybe: the call made a request,
+ * and what links it to the key is `via`, which is no proof that the key went. The host and the program
+ * are the request's. Any place that is not a send is as it was.
+ */
+export function linkedPlace(place: Place, via: Via): Place {
+  if (place.tier !== 'third_party') return place;
+  const { then: _then, ...rest } = place;
+  return { ...rest, tier: 'maybe', route: 'linked', via };
+}

@@ -50,6 +50,10 @@ await build({
 });
 const { PlatformProvider, effects } = await import(pathToFileURL(join(output, 'client.mjs')).href);
 
+/** The operations a test asked for; the provider also reads its own snapshot and workspace context. */
+const operationCalls = (f) =>
+  f.calls.filter((call) => !['/api/snapshot', '/api/context'].includes(call.path));
+
 /** Exercises the actual provider callback, with React lifecycle and transport stubs. */
 async function client(t) {
   const globals = ['window', 'sessionStorage', 'fetch'].map((key) => [
@@ -90,27 +94,9 @@ async function client(t) {
   };
 }
 
-test('the actual client can reach implemented task, hook-check and incident operations', async (t) => {
+test('the actual client can reach the implemented hook-check operations', async (t) => {
   const f = await client(t);
   const operations = [
-    ['/api/session-taint'],
-    ['/api/session-taint/inspect', { id: 'fixture', expectedEvidenceSha: 'fixture' }],
-    ['/api/session-taint/preview', { expectedRevisionSha256: 'fixture' }],
-    ['/api/session-taint/clear', { previewId: 'fixture' }],
-    ['/api/session-taint/recheck', { recordId: 'fixture' }],
-    ['/api/task-locks'],
-    ['/api/task-locks/page'],
-    ['/api/task-locks/page', { cursor: '11111111-1111-4111-8111-111111111111' }],
-    [
-      '/api/task-locks/page',
-      { id: `task-${'a'.repeat(64)}`, expectedPermitSha256: 'b'.repeat(64) },
-    ],
-    ['/api/task-locks/preview', { id: 'fixture' }],
-    ['/api/task-locks/apply', { previewId: 'fixture' }],
-    ['/api/task-locks/access/preview', { id: 'fixture' }],
-    ['/api/task-locks/access/issue', { previewId: 'fixture' }],
-    [`/api/task-locks/access/task-${'a'.repeat(64)}/${'b'.repeat(64)}`],
-    ['/api/incidents/task', { id: 'fixture' }],
     ['/api/hook-checks'],
     ['/api/hook-checks/preview', { agent: 'claude-code' }],
     ['/api/hook-checks/start', { previewId: 'fixture' }],
@@ -128,131 +114,41 @@ test('the actual client can reach implemented task, hook-check and incident oper
     assert.equal(call.cache, 'no-store');
     assert.equal(call.body, input === undefined ? undefined : JSON.stringify(input));
   }
-  assert.equal(f.calls.length, operations.length);
+  assert.equal(operationCalls(f).length, operations.length);
 });
 
 test('the actual client refuses unbounded paths without sending the private token', async (t) => {
   const f = await client(t);
   for (const path of [
-    'https://foreign.invalid/api/task-locks',
-    '//foreign.invalid/api/task-locks',
-    '/api/task-locks/access/issue?token=private',
-    '/api/task-locks/access/../issue',
-    '/api/task-locks/page?cursor=private',
-    '/api/task-locks/page/extra',
+    'https://foreign.invalid/api/hook-checks',
+    '//foreign.invalid/api/hook-checks',
+    '/api/task-locks',
+    '/api/task-locks/page',
+    '/api/task-locks/access/issue',
+    '/api/live/start',
+    '/api/credential-filters/apply',
+    '/api/threats',
     '/api/hook-checks/jobs/../../private',
     '/api/session-taint/clear?session=private',
     '/api/session-taint/../clear',
     '/api/session-taint/all',
   ])
     await assert.rejects(f.request(path), { message: 'Unsupported local operation.' });
-  assert.equal(f.calls.length, 0);
+  assert.equal(operationCalls(f).length, 0);
 });
 
-test('Codex skill control refusals use finite scoped messages without exposing arbitrary server text', async (t) => {
+test('the actual client does not send its token to the routes of the pages the console no longer has', async (t) => {
   const f = await client(t);
-  f.fail('codex-control-write-unconfirmed', 503);
-  await assert.rejects(f.request('/api/inventory/codex-control-apply', {}), {
-    message: 'Completion is unknown. Recheck this exact change.',
-  });
-  f.fail('codex-control-conflict', 409);
-  await assert.rejects(f.request('/api/inventory/codex-control-preview', {}), {
-    message: 'The owned declaration changed. Review the current configuration.',
-  });
-  f.fail('/private/config/SECRET_SENTINEL', 503);
-  await assert.rejects(
-    f.request('/api/inventory/codex-controls'),
-    (error) =>
-      !error.message.includes('SECRET_SENTINEL') && !error.message.includes('/private/config'),
-  );
-});
-
-test('task page gaps use finite recovery messages without exposing private cursor details', async (t) => {
-  const f = await client(t);
-  for (const [code, expected] of [
-    ['task-page-stale', /catalog changed.*first page/],
-    ['task-page-expired', /page link expired.*first page/],
-    ['task-lookup-limit', /catalog limit.*absence/],
-  ]) {
-    f.fail(code);
-    await assert.rejects(
-      f.request('/api/task-locks/page', { cursor: '11111111-1111-4111-8111-111111111111' }),
-      expected,
-    );
-  }
-});
-
-test('task file controls use finite recovery errors without forwarding server text', async (t) => {
-  const f = await client(t);
-  for (const [code, expected] of [
-    ['recovery-full', /Recovery storage is full/],
-    ['recovery-required', /Recheck the previous change/],
-    ['unsupported-task-config', /cannot be safely edited automatically/],
-    ['no-automatic-tasks', /No supported automatic task triggers/],
-    ['history-unavailable', /Recovery storage could not be verified/],
-  ]) {
-    f.fail(code, 503);
-    await assert.rejects(f.request('/api/workspace-task-controls/preview', {}), expected);
-  }
-  f.fail('PRIVATE_SERVER_DETAIL', 503);
-  await assert.rejects(
-    f.request('/api/workspace-task-controls/preview', {}),
-    (error) => !error.message.includes('PRIVATE_SERVER_DETAIL'),
-  );
-});
-
-test('taint controls show scoped finite errors and never raw session or storage details', async (t) => {
-  const f = await client(t);
-  for (const [code, expected] of [
-    ['stale-state', /session state changed.*fresh preview/],
-    ['not-tainted', /No stored session taint/],
-    ['provenance-unavailable', /Learned-origin state could not be verified/],
-    ['write-unconfirmed', /Clear completion is unknown.*recorded change/],
-    ['recovery-full', /private recovery limit/],
-  ]) {
-    f.fail(code);
-    await assert.rejects(f.request('/api/session-taint/clear', { previewId: 'fixture' }), expected);
-  }
-  f.fail('/PRIVATE/session-raw/provenance', 503);
-  await assert.rejects(
-    f.request('/api/session-taint/inspect', {}),
-    (error) => !error.message.includes('PRIVATE') && !error.message.includes('session-raw'),
-  );
-});
-
-test('only exact finite taint refusal codes and statuses carry a no-write error identity', async (t) => {
-  const f = await client(t);
-  f.fail('stale-state', 409);
-  await assert.rejects(
-    f.request('/api/session-taint/clear', { previewId: 'fixture' }),
-    (error) => error.code === 'stale-state' && error.status === 409,
-  );
-  for (const [code, status] of [
-    ['stale-state', 500],
-    ['write-unconfirmed', 422],
-    ['PRIVATE', 409],
-  ]) {
-    f.fail(code, status);
-    await assert.rejects(
-      f.request('/api/session-taint/clear', { previewId: 'fixture' }),
-      (error) => error.code === undefined && error.status === undefined,
-    );
-  }
-});
-
-test('uncertain writes and unavailable signed evidence have fixed actionable errors', async (t) => {
-  const f = await client(t);
-  for (const [code, expected] of [
-    ['write-unconfirmed', /completion is unknown.*Recheck existing permissions/],
-    ['legacy-refusal', /No signed request is available/],
-    ['permission-active', /extension file already exists/],
-    ['signing-key-unavailable', /signing key is unavailable/],
-    ['task-unavailable', /current task permit is unavailable/],
-  ]) {
-    f.fail(code);
-    await assert.rejects(
-      f.request('/api/task-locks/access/issue', { previewId: 'fixture' }),
-      expected,
-    );
-  }
+  for (const path of [
+    '/api/session-taint',
+    '/api/session-taint/clear',
+    '/api/incident-assessments',
+    '/api/workspace-task-controls/apply',
+    '/api/workspace-review/check',
+    '/api/workspace-monitor',
+    '/api/inventory-monitor/apply',
+    '/api/secrets/start',
+  ])
+    await assert.rejects(f.request(path, {}), { message: 'Unsupported local operation.' }, path);
+  assert.equal(operationCalls(f).length, 0);
 });

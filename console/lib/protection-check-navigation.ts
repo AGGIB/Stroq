@@ -21,6 +21,6 @@ export function protectionRunHref(
     new URLSearchParams({ run: runId ?? '', workspace: workspaceId ?? '' }),
   );
   return selection.invalid
-    ? '/protection/'
-    : `/protection/?${new URLSearchParams({ workspace: workspaceId!, run: runId! })}${step ? `#protection-check-${step}` : '#protection-check'}`;
+    ? '/'
+    : `/?${new URLSearchParams({ workspace: workspaceId!, run: runId! })}${step ? `#protection-check-${step}` : '#protection-check'}`;
 }

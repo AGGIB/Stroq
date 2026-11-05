@@ -18,7 +18,7 @@ Developers who let AI coding agents (Claude Code, Codex CLI, Cursor, Copilot CLI
 
 1. Text an agent reads (a README, an issue, an MCP result) can decide what it does next.
 2. A prompt or a command filter cannot see that; Stroq keeps the link from the text to the action and names it in the decision.
-3. Every number on the page can be re-run (`stroq bench`, `stroq attack`, `pnpm test`), and the limits are written down first.
+3. Every number on the page can be re-run (`pnpm dev:bench`, `stroq attack`, `pnpm test`), and the limits are written down first.
 
 ## Proof the page may use
 

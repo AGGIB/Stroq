@@ -90,11 +90,10 @@ describe('a word that sends the request somewhere the command does not name', ()
 });
 
 describe('a request to this machine or the key’s own service alone', () => {
-  // This machine's own address is no strict proof of the key's own use: another company's, and
-  // the report says it was this machine.
-  it('this machine, at an address the core reads: another company', () => {
+  // This machine's own address is not another company: a maybe, on this machine.
+  it('this machine, at an address the core reads: a maybe, on this machine', () => {
     expect(bash(`curl -d ${S} http://localhost:8080/x`)).toMatchObject({
-      tier: 'third_party',
+      tier: 'maybe',
       local: true,
     });
   });

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { DEMO_CALLS, inRange, sessionFor } from './platform';
-import type { ToolCall } from './data';
+import { inRange, sessionFor } from './platform';
+import type { ToolCall } from './platform-types';
 
 const row = (date: string, time: string): ToolCall => ({
   id: `${date}-${time}`,
@@ -38,11 +38,5 @@ describe('calendar ranges and attribution', () => {
     expect(
       sessionFor({ ...row('2026-10-21', '12:00'), sessionId: 'session-0123456789abcdef' }).project,
     ).toBe('Project not recorded');
-  });
-  it('demo rows have unique identities and sort in descending time order', () => {
-    expect(new Set(DEMO_CALLS.map((c) => c.id)).size).toBe(DEMO_CALLS.length);
-    const times = DEMO_CALLS.map((c) => `${c.date}T${c.time}`);
-    expect(times).toEqual([...times].sort().reverse());
-    expect(inRange(DEMO_CALLS, 7, '2026-10-21T14:30:00Z')).toHaveLength(DEMO_CALLS.length);
   });
 });

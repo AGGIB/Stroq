@@ -30,68 +30,6 @@ describe('local API operation allowlist', () => {
     ])
       expect(isLocalOperation(path), path).toBe(false);
   });
-  it('admits only fixed local operator-assessment routes without journal or file selectors', () => {
-    for (const suffix of ['', '/preview', '/apply', '/recheck']) {
-      const path = '/api/incident-assessments' + suffix;
-      expect(isLocalOperation(path), path).toBe(true);
-      for (const unsafe of [
-        path + '/',
-        path + '/extra',
-        path + '?id=private',
-        path + '#private',
-        path + '-evil',
-        'https://foreign.invalid' + path,
-      ])
-        expect(isLocalOperation(unsafe), unsafe).toBe(false);
-    }
-    for (const action of ['resolve', 'clear', 'trust', 'delete', 'apply/all', '../apply'])
-      expect(isLocalOperation('/api/incident-assessments/' + action)).toBe(false);
-  });
-  it('admits only exact taint inspection, preview, clear and record recheck operations', () => {
-    for (const suffix of ['', '/inspect', '/preview', '/clear', '/recheck']) {
-      const path = '/api/session-taint' + suffix;
-      expect(isLocalOperation(path), path).toBe(true);
-      for (const unsafe of [
-        path + '/',
-        path + '/extra',
-        path + '?session=private',
-        path + '#private',
-        path + '-evil',
-        '//foreign.invalid' + path,
-        'https://foreign.invalid' + path,
-      ])
-        expect(isLocalOperation(unsafe), unsafe).toBe(false);
-    }
-    for (const path of [
-      '/api/session-taint/all',
-      '/api/session-taint/untaint',
-      '/api/session-taint/restore',
-      '/api/session-taint/../clear',
-    ])
-      expect(isLocalOperation(path), path).toBe(false);
-  });
-  it('permits only fixed workspace task operations without browser file selectors', () => {
-    for (const suffix of ['', '/preview', '/apply', '/restore-preview', '/restore', '/recheck']) {
-      const path = '/api/workspace-task-controls' + suffix;
-      expect(isLocalOperation(path), path).toBe(true);
-      for (const unsafe of [
-        path + '/',
-        path + '/extra',
-        path + '?path=private',
-        path + '#private',
-        path + '-evil',
-        'https://foreign.invalid' + path,
-      ])
-        expect(isLocalOperation(unsafe), unsafe).toBe(false);
-    }
-    for (const path of [
-      '/api/workspace-task-controls/run',
-      '/api/workspace-task-controls/../apply',
-      '/api/workspace-task-controls/restore/apply',
-      '/api/workspace-task-controls/delete',
-    ])
-      expect(isLocalOperation(path), path).toBe(false);
-  });
   it('admits only the fixed protection-check cancellation route', () => {
     expect(isLocalOperation('/api/runs/cancel')).toBe(true);
     for (const path of [
@@ -102,28 +40,20 @@ describe('local API operation allowlist', () => {
     ])
       expect(isLocalOperation(path)).toBe(false);
   });
-  it('permits only the fixed manual Codex source inspection without selectors in its URL', () => {
-    expect(isLocalOperation('/api/inventory/codex-sources')).toBe(true);
+  it('no longer admits the removed Codex guard and source routes', () => {
     for (const path of [
-      '/api/inventory/codex-sources?path=private',
-      '/api/inventory/codex-sources/extra',
-      '/api/inventory/codex-sources/apply',
-      '/api/inventory/codex-sources-evil',
-      '/api/inventory/../codex-sources',
-      'https://foreign.invalid/api/inventory/codex-sources',
+      '/api/inventory/codex-sources',
+      '/api/inventory/codex-controls',
+      '/api/inventory/codex-control-preview',
+      '/api/inventory/codex-control-apply',
+      '/api/inventory/codex-control-recheck',
+      '/api/codex-network-guard',
+      '/api/codex-network-guard/preview',
+      '/api/codex-network-checks/start',
+      '/api/codex-path-guard',
+      '/api/codex-path-guard/apply',
     ])
       expect(isLocalOperation(path), path).toBe(false);
-  });
-  it('admits only the fixed task page endpoint, keeping cursors and selectors out of URLs', () => {
-    expect(isLocalOperation('/api/task-locks/page')).toBe(true);
-    for (const path of [
-      '/api/task-locks/page?cursor=private',
-      '/api/task-locks/page/extra',
-      '/api/task-locks/pages',
-      '/api/task-locks/../page',
-      '//foreign.invalid/api/task-locks/page',
-    ])
-      expect(isLocalOperation(path)).toBe(false);
   });
   it('permits only the fixed journal tail and summary reads', () => {
     expect(isLocalOperation('/api/journal/tail')).toBe(true);
@@ -157,17 +87,55 @@ describe('local API operation allowlist', () => {
     ])
       expect(isLocalOperation(path), path).toBe(false);
   });
-  it('permits the fixed threat feed read and nothing shaped like it', () => {
-    expect(isLocalOperation('/api/threats')).toBe(true);
-    for (const path of [
-      '/api/threats/',
-      '/api/threats/fetch',
-      '/api/threats?url=https://x',
-      '/api/threats#x',
-      '/api/threat',
-      '/api/../threats',
-      'https://pwn.watch/api/threats',
+  it('no longer admits the routes of the pages the console no longer has', () => {
+    const job = '11111111-1111-4111-8111-111111111111';
+    for (const base of [
+      '/api/incident-assessments',
+      '/api/session-taint',
+      '/api/workspace-task-controls',
+      '/api/workspace-review',
+      '/api/workspace-monitor',
+      '/api/inventory-monitor',
+      '/api/secrets',
     ])
+      for (const suffix of [
+        '',
+        '/preview',
+        '/apply',
+        '/start',
+        '/cancel',
+        '/check',
+        '/review',
+        `/jobs/${job}`,
+      ])
+        expect(isLocalOperation(base + suffix), base + suffix).toBe(false);
+  });
+  it('admits the card routes and nothing shaped like them', () => {
+    expect(isLocalOperation('/api/card')).toBe(true);
+    expect(isLocalOperation('/api/card/start')).toBe(true);
+    for (const path of [
+      '/api/card/',
+      '/api/card/start/',
+      '/api/card/run',
+      '/api/card?days=3650',
+      '/api/card/../start',
+      '/api/cards',
+      'https://foreign.invalid/api/card',
+    ])
+      expect(isLocalOperation(path), path).toBe(false);
+  });
+  it('no longer admits the removed live-check routes', () => {
+    for (const path of [
+      '/api/live',
+      '/api/live/preview',
+      '/api/live/start',
+      '/api/live/cancel',
+      '/api/live/jobs/11111111-1111-4111-8111-111111111111',
+    ])
+      expect(isLocalOperation(path), path).toBe(false);
+  });
+  it('no longer admits the removed threat feed route', () => {
+    for (const path of ['/api/threats', '/api/threats/fetch', '/api/threats?url=https://x'])
       expect(isLocalOperation(path), path).toBe(false);
   });
   it('permits the fixed try-an-action operation and nothing shaped like it', () => {
@@ -212,55 +180,34 @@ describe('local API operation allowlist', () => {
     ])
       expect(isLocalOperation(path)).toBe(false);
   });
-  it('permits only the fixed workspace review operations', () => {
-    for (const path of [
-      '/api/workspace-review',
-      '/api/workspace-review/check',
-      '/api/workspace-review/cancel',
-      '/api/workspace-review/review',
-    ])
-      expect(isLocalOperation(path), path).toBe(true);
-    for (const path of [
-      '/api/workspace-review/run',
-      '/api/workspace-review/check/extra',
-      '/api/workspace-review?path=private',
-      '/api/workspace-review/../review',
-      '/api/workspace-review-evil',
-      '//foreign.invalid/api/workspace-review',
-    ])
-      expect(isLocalOperation(path), path).toBe(false);
-  });
-  it('allows the implemented hook checks, permission controls and exact finding lookup', () => {
+  it('allows the implemented hook checks', () => {
     for (const path of [
       '/api/hook-checks',
       '/api/hook-checks/preview',
       '/api/hook-checks/start',
       '/api/hook-checks/cancel',
       '/api/hook-checks/jobs/11111111-1111-4111-8111-111111111111',
-      '/api/task-locks',
-      '/api/task-locks/preview',
-      '/api/task-locks/apply',
-      '/api/incidents/task',
-      '/api/task-locks/access/preview',
-      '/api/task-locks/access/issue',
-      `/api/task-locks/access/task-${'a'.repeat(64)}/${'b'.repeat(64)}`,
     ])
       expect(isLocalOperation(path), path).toBe(true);
   });
-  it('rejects ambiguous permission, access and hook-check paths before sending a token', () => {
+  it('rejects ambiguous hook-check paths before sending a token', () => {
     for (const path of [
-      '/api/task-locks/extend',
-      '/api/task-locks/access',
-      '/api/task-locks/access/issue/extra',
-      '/api/task-locks/access/issue?fingerprint=private',
-      '/api/task-locks/access/../issue',
-      `/api/task-locks/access/task-${'A'.repeat(64)}/${'b'.repeat(64)}`,
-      `/api/task-locks/access/task-${'a'.repeat(63)}/${'b'.repeat(64)}`,
-      `/api/task-locks/access/task-${'a'.repeat(64)}/${'b'.repeat(65)}`,
       '/api/hook-checks/jobs/../../private',
       '/api/hook-checks/run',
       '/api/hook-checks/jobs/' + '-'.repeat(36),
-      '/api/incidents/task/extra',
+    ])
+      expect(isLocalOperation(path), path).toBe(false);
+  });
+  it('no longer admits the removed task permission and finding lookup routes', () => {
+    for (const path of [
+      '/api/task-locks',
+      '/api/task-locks/page',
+      '/api/task-locks/preview',
+      '/api/task-locks/apply',
+      '/api/task-locks/access/preview',
+      '/api/task-locks/access/issue',
+      `/api/task-locks/access/task-${'a'.repeat(64)}/${'b'.repeat(64)}`,
+      '/api/incidents/task',
     ])
       expect(isLocalOperation(path), path).toBe(false);
   });
@@ -290,20 +237,13 @@ describe('local API operation allowlist', () => {
     ])
       expect(isLocalOperation(path)).toBe(false);
   });
-  it('permits fixed credential-filter routes and rejects lookalikes', () => {
+  it('no longer admits the removed credential-filter routes', () => {
     for (const path of [
       '/api/credential-filters',
       '/api/credential-filters/preview',
       '/api/credential-filters/apply',
     ])
-      expect(isLocalOperation(path)).toBe(true);
-    for (const path of [
-      '/api/credential-filters/run',
-      '/api/credential-filters?target=claude-user',
-      '/api/credential-filters-evil',
-      '/api/credential-filters/apply/extra',
-    ])
-      expect(isLocalOperation(path)).toBe(false);
+      expect(isLocalOperation(path), path).toBe(false);
   });
   it('permits only fixed MCP call control operations', () => {
     for (const path of [
@@ -342,9 +282,6 @@ describe('local API operation allowlist', () => {
       '/api/inventory/inspect',
       '/api/agent-setup/preview',
       '/api/policy/apply',
-      '/api/live/start',
-      '/api/secrets/cancel',
-      '/api/live/jobs/11111111-1111-4111-8111-111111111111',
       '/api/runs/11111111-1111-4111-8111-111111111111',
     ])
       expect(isLocalOperation(path), path).toBe(true);
@@ -358,7 +295,6 @@ describe('local API operation allowlist', () => {
       '/api/mcp-containment/../apply',
       '//foreign.invalid/api/mcp-containment',
       'https://foreign.invalid/api/mcp-containment',
-      '/api/live/jobs/' + '-'.repeat(36),
       '',
       null,
     ])
@@ -383,25 +319,4 @@ it('admits only exact selected skill signal state, preview and apply routes', ()
   }
   expect(isLocalOperation('/api/inventory/signals')).toBe(false);
   expect(isLocalOperation('/api/inventory/signals/review')).toBe(false);
-});
-it('permits only the fixed inventory watch read, preview and apply operations', () => {
-  for (const suffix of ['', '/preview', '/apply']) {
-    const path = '/api/inventory-monitor' + suffix;
-    expect(isLocalOperation(path)).toBe(true);
-    for (const unsafe of [
-      path + '/',
-      path + '/extra',
-      path + '?scope=user',
-      path + '#private',
-      path + '-evil',
-      'https://foreign.invalid' + path,
-    ])
-      expect(isLocalOperation(unsafe), unsafe).toBe(false);
-  }
-  for (const path of [
-    '/api/inventory-monitor/check',
-    '/api/inventory-monitor/run',
-    '/api/inventory-monitor/../apply',
-  ])
-    expect(isLocalOperation(path), path).toBe(false);
 });

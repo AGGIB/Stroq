@@ -132,6 +132,71 @@ describe('buildReplay', () => {
     expect(out).toContain('DEMO_API_KEY from ./.env');
   });
 
+  // A provenance record keeps the first 120 characters of what a read named, the audit 300.
+  describe('a read of a path longer than a provenance record keeps', () => {
+    const deep = (tail: string): string => `/srv/app/node_modules/${'d'.repeat(160)}/${tail}`;
+    const flagged = { verdict: 'suspect' as const, score: 1, ruleIds: ['STROQ-2026-00001'] };
+
+    it('is one source, named in full, with the action that carried it', () => {
+      const path = deep('README.md');
+      const read = entry({ phase: 'post', tool: 'Read', summary: path, scan: flagged });
+      const action = entry({
+        summary: 'npx @evil/pkg',
+        decision: deny,
+        provenance: [ev({ source: path.slice(0, 120) })],
+      });
+
+      const model = buildReplay([read, action], 's');
+
+      expect(model.sources).toHaveLength(1);
+      expect(model.sources[0]?.source).toBe(path);
+      expect(model.sources[0]?.read?.seq).toBe(read.seq);
+      expect(model.sources[0]?.consequences.map((c) => c.action.seq)).toEqual([action.seq]);
+    });
+
+    it('is not merged with a read that merely begins the same way, and is not guessed between two', () => {
+      const first = deep('README.md');
+      const second = deep('CHANGELOG.md');
+      const reads = [first, second].map((summary) =>
+        entry({ phase: 'post', tool: 'Read', summary, scan: flagged }),
+      );
+      const action = entry({
+        summary: 'npx @evil/pkg',
+        decision: deny,
+        provenance: [ev({ source: first.slice(0, 120) })],
+      });
+
+      const model = buildReplay([...reads, action], 's');
+
+      const carrying = model.sources.filter((source) => source.consequences.length > 0);
+      expect(carrying).toHaveLength(1);
+      expect(carrying[0]?.source).toBe(first.slice(0, 120));
+      expect(model.sources.filter((source) => source.source === first)).toHaveLength(1);
+      expect(model.sources.filter((source) => source.source === second)).toHaveLength(1);
+    });
+
+    it('leaves a short name alone when another file merely begins with it', () => {
+      const reads = ['/w/README', '/w/README.md'].map((summary) =>
+        entry({ phase: 'post', tool: 'Read', summary, scan: flagged }),
+      );
+      const action = entry({
+        summary: 'npx @evil/pkg',
+        decision: deny,
+        provenance: [ev({ source: '/w/README' })],
+      });
+
+      const model = buildReplay([...reads, action], 's');
+
+      expect(model.sources.map((source) => source.source).sort()).toEqual([
+        '/w/README',
+        '/w/README.md',
+      ]);
+      expect(
+        model.sources.find((source) => source.source === '/w/README')?.consequences,
+      ).toHaveLength(1);
+    });
+  });
+
   it('ignores entries from other sessions', () => {
     const mine = entry({ sessionId: 'a', summary: 'ls', decision: allow });
     const theirs = entry({ sessionId: 'b', summary: 'rm -rf /', decision: deny });
