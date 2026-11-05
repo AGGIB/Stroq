@@ -2,6 +2,7 @@ import type { ActionClass } from '../types.js';
 import { powershellSignals } from './classify-powershell.js';
 import { stroqStateReading } from './stroq-state.js';
 import { isDangerousRmTarget } from './dangerous-target.js';
+import { cutsAWordApart, isNamedTempTarget, lineFacts, type LineFacts } from './temp-delete.js';
 import { remoteClassification, remoteTextClassification } from './classify-remote.js';
 import { isTooCostly } from './reading-cost.js';
 import { anyOf, followedBy, type PatternTest, type TextTest } from './followed-by.js';
@@ -304,7 +305,13 @@ export const GH_REPO_CREATE_PUSH = followedBy(/\bgh\s+repo\s+create\b/, /--push\
 // without importing this one; `dangerous-target.ts` explains why it moved.
 export { isDangerousRmTarget } from './dangerous-target.js';
 
-function rmIsDangerous(segment: string, cwd: string): boolean {
+/** A target that is a credential file or a folder of them (`/tmp/.ssh`, `/tmp/server.pem`) is never routine. */
+const namesASecret = (target: string): boolean => SECRET_PATTERNS.some((re) => re.test(target));
+
+/** `--no-preserve-root`, or any spelling of it that `rm` would read as that option. */
+const NO_PRESERVE_ROOT = /^--no/;
+
+function rmIsDangerous(segment: string, cwd: string, line: LineFacts): boolean {
   const tokens = tokenize(segment);
   const rmIndex = tokens.findIndex((t) => t.replace(/^.*\//, '').toLowerCase() === 'rm');
   if (rmIndex < 0) return false;
@@ -313,7 +320,18 @@ function rmIsDangerous(segment: string, cwd: string): boolean {
     (a) => a === '--recursive' || (/^-[A-Za-z]+$/.test(a) && /[rR]/.test(a)),
   );
   if (!recursive) return false;
-  return args.filter((a) => !a.startsWith('-')).some((a) => isDangerousRmTarget(a, cwd));
+  // A name in scratch space is routine to delete (`temp-delete.ts`), unless the delete is told not to
+  // protect the root, or a quote or an escape holds a blank, so that the words read here are not the
+  // ones the shell passes.
+  const scratch =
+    !args.some((a) => NO_PRESERVE_ROOT.test(a.replace(/["']/g, ''))) && !cutsAWordApart(segment);
+  return args
+    .filter((a) => !a.startsWith('-'))
+    .some(
+      (a) =>
+        isDangerousRmTarget(a, cwd) &&
+        !(scratch && !namesASecret(a) && isNamedTempTarget(a, line, cwd)),
+    );
 }
 
 /** What `find` tests that limits what it removes: a name, a time, a size, an owner. `-type` does not. */
@@ -786,11 +804,12 @@ function signalsOf(
  * remote reader stops at, the local reading is all there is, and it stays.
  */
 function destructiveSignals(segments: readonly string[], cwd: string, depth: number): string[] {
+  const line = lineFacts(segments);
   return segments.flatMap((seg) => {
     if (depth < 2 && /^ssh(?:pass)?$/.test(commandWord(seg))) return [];
     const found = DESTRUCTIVE.filter(([re]) => re.test(seg)).map(([, name]) => name);
     if (findDeletesDangerousRoot(seg, cwd)) found.push('find-delete-dangerous-root');
-    return rmIsDangerous(seg, cwd) ? [...found, 'rm-dangerous-target'] : found;
+    return rmIsDangerous(seg, cwd, line) ? [...found, 'rm-dangerous-target'] : found;
   });
 }
 

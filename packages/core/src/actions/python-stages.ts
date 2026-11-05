@@ -1,4 +1,5 @@
 import { inlinePython, type PipeConsumer } from './pipe-consumer.js';
+import { printsOnly } from './print-only.js';
 import { quote, readPythonProcesses, type PythonProcess } from './python-processes.js';
 import type { Lexed, Stage } from './shell-lex.js';
 import { argv } from './shell-word-reader.js';
@@ -128,7 +129,9 @@ export function readPythonStages(context: PythonStageContext): PythonStages {
     (process.stdin === 'inherit' && !input) ||
     (!MORE_THAN_ONE_COMMAND.test(process.command) && consumer(process.command) === 'none');
   stages.forEach((pipelines, textIndex) => {
-    for (const stage of pipelines.flat()) {
+    for (const [pipeline, at, stage] of pipelines.flatMap((p) =>
+      p.map((s, i) => [p, i, s] as const),
+    )) {
       const program = inlinePython(stage.text);
       if (program === undefined) continue;
       const seen = payload(stage.text);
@@ -153,6 +156,9 @@ export function readPythonStages(context: PythonStageContext): PythonStages {
         // Where the old pattern sees the program, it answers unless every module it imports is known.
         (seen && reading.unknownModules) ||
         (reading.opaque && (reading.processes.length > 0 || seen)) ||
+        // What it decodes goes to its output; where that goes is known only when the line is that one program
+        // and filters that print (`print-only.ts`).
+        (reading.decodes && seen && !printsOnly(stages, textIndex, pipeline, at)) ||
         !reading.processes.every((process) => readsOnly(process, input));
       if (notRead) {
         if (seen) signals.push(PAYLOAD);
