@@ -82,7 +82,7 @@ function Navigation({ close }: { close?: () => void }) {
         <div className="sidebar-user">
           <Monitor size={14} aria-hidden="true" />
           <span>On this machine</span>
-          <span className="version">v0.29.0</span>
+          <span className="version">v0.30.0</span>
         </div>
       </div>
     </>

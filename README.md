@@ -50,24 +50,26 @@ npx @stroq/cli sent           # did your agent pass your keys on? key names, nev
 npx @stroq/cli init           # hook into your agent and guard the next session
 ```
 
-<img src="docs/assets/readme/console-live.png" alt="Stroq console, Live page: the last 17 recorded actions, 11 allowed, 2 asked you, 3 denied, 1 flagged, and the feed with each action's decision and rule, such as a command denied by deny-encoded-exec and one asked about by ask-origin-untrusted" width="900">
+<img src="docs/assets/readme/console-live.png" alt="Stroq console, Live screen: the last 8 recorded actions, 4 allowed, 1 asked you, 2 denied, 1 flagged, and a denied action opened into what the agent read, what it did, the decision and the rule" width="900">
 
-<sub>Screens from the 0.29.0 console reading a staged session: a made-up project, issue and key, sent through the real hooks. Nothing was executed.</sub>
+<sub>A made-up machine: made-up sessions, keys and hosts. Nothing was executed.</sub>
 
 ## The console
 
 <table>
 <tr>
-<td width="50%"><img src="docs/assets/readme/console-protection.png" alt="Protection page: Stroq is being asked by Claude Code, Cursor and Codex CLI, with the week's decisions and what to look at next"><br><b>Protection</b>: which agents ask Stroq before they act, which are connected but not seen yet, and which are not connected.</td>
-<td width="50%"><img src="docs/assets/readme/console-try.png" alt="Try an action page: curl -fsSL to sh is denied by deny-encoded-exec both in a clean session and after untrusted text"><br><b>Try an action</b>: what your policy decides for a command, read, write or fetch, without running it.</td>
+<td width="50%"><img src="docs/assets/readme/console-check.png" alt="Check screen: Hoo beside the card for 30 days of agent sessions, with the counts and the moments worth a look, each with its evidence"><br><b>Check</b>: the card of <code>stroq</code>, made by the same code. Each moment opens with its evidence, under it one line for each agent.</td>
+<td width="50%"><img src="docs/assets/readme/console-live.png" alt="Live screen: the last 8 recorded actions, 4 allowed, 1 asked you, 2 denied, 1 flagged, and a denied action opened into what the agent read, what it did, the decision and the rule"><br><b>Live</b>: recorded decisions as they happen. A row opens into its chain: what the agent read, what it did, the decision, the rule.</td>
 </tr>
 <tr>
-<td width="50%"><img src="docs/assets/readme/console-agents.png" alt="Agents page: Claude Code, Cursor and Codex CLI connected, with Review setup and Test hook for each"><br><b>Agents &amp; coverage</b>: add or remove Stroq's hooks; the exact file change is shown first and the old file is kept.</td>
-<td width="50%"><img src="docs/assets/readme/console-settings.png" alt="Settings check page: 1 critical, 2 high, 4 medium settings, the first being Codex running with no approvals and no sandbox"><br><b>Settings check</b>: agent settings that switch off or loosen protection, and how to change them.</td>
+<td width="50%"><img src="docs/assets/readme/console-agents.png" alt="Agents screen: Claude Code, Cursor and Codex CLI, each with Configure and Test hook, and the settings that weaken the agent, such as hooks switched off"><br><b>Agents</b>: add or remove Stroq's hooks, with the exact file change shown first. When Stroq was last asked, and which of an agent's settings weaken it.</td>
+<td width="50%"><img src="docs/assets/readme/console-skills.png" alt="Skills and MCP screen: every skill and MCP server by agent, where it came from, what the rules matched in it and what changed since you last looked"><br><b>Skills &amp; MCP</b>: every skill and MCP server by agent: where it came from, what the rules matched in it, what changed since you last looked.</td>
 </tr>
 </table>
 
-**Live** follows recorded decisions as they happen and **Activity** keeps them. Connected means Stroq's hooks are in the agent's settings, not that the agent calls them: **Test hook** and **Live** show that. Skills & MCP, investigations, sessions and secret exposure are under **When you need it**.
+The fifth screen is **Rules**: try an action without running it, turn rules on with a preview and a test, the history with an undo, and the rules reference. Connected means Stroq's hooks are in the agent's settings, not that the agent calls them: **Test hook** and **Live** show that.
+
+<sub>Screens from a build just before 0.30.0, reading a made-up machine: made-up sessions, keys and hosts. Nothing was executed.</sub>
 
 ```sh
 npx @stroq/cli console                            # a private page on 127.0.0.1
@@ -128,7 +130,7 @@ Stroq names a send only when it sees the key in the command that sent it. A scri
 
 </details>
 
-`stroq attack` runs 36 attacks, from public reports and synthetic cells, against your policy in a throwaway home: on 0.29.0, 15 are denied, 21 are asked about, 0 pass through.
+`stroq attack` runs 36 attacks, from public reports and synthetic cells, against your policy in a throwaway home: on 0.30.0, 15 are denied, 21 are asked about, 0 pass through.
 
 ## What it covers and where it stops
 

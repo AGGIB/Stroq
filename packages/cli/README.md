@@ -51,7 +51,7 @@ npx @stroq/cli sent --try        # a built-in sample with a made-up key; reads n
 npx @stroq/cli init              # hook into your agent and guard the next session
 ```
 
-<img src="https://raw.githubusercontent.com/AGGIB/Stroq/main/docs/assets/readme/console-live.png" alt="Stroq console, Live page: the last 17 recorded actions, 11 allowed, 2 asked you, 3 denied, 1 flagged, each with its decision and rule" width="860">
+<img src="https://raw.githubusercontent.com/AGGIB/Stroq/main/docs/assets/readme/console-live.png" alt="Stroq console, Live screen: the last 8 recorded actions, 4 allowed, 1 asked you, 2 denied, 1 flagged, and a denied action opened into what the agent read, what it did, the decision and the rule" width="860">
 
 **Did your AI agent pass your keys on?** `stroq sent` reads the Claude Code, Codex and Cursor sessions on your machine and looks for the exact values of your keys in them. For each key it finds, it says where the key went: sent to another company, maybe sent, seen by the AI, used with its own service, or blocked before it ran. It prints key names, never values, and writes nothing.
 
