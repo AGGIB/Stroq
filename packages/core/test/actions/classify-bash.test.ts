@@ -78,6 +78,8 @@ describe('isDangerousRmTarget', () => {
         fc.array(fc.constantFrom('/', '//', 'build', '.', 'x'), { maxLength: 12 }),
         (head, rest) => {
           const t = head + rest.join('');
+          // Two dots the generator joins (`/` `.` `.`) are a climb, judged apart (`rm-traversal.test.ts`).
+          fc.pre(!t.split('/').includes('..'));
           const expected = t === '/' || !t.replace(/\/+$/, '').startsWith(`${cwd}/`);
           expect(isDangerousRmTarget(t, cwd)).toBe(expected);
         },

@@ -108,8 +108,8 @@ async function deriveBench(): Promise<string> {
       'after — because every rule this corpus convicts reads every surface. What moved ' +
       'the rate afterwards was narrowing six of those rules, described below.',
     '',
-    'None of the rules named above is scoped away from documentation, and that is still a ' +
-      'deliberate choice rather than an oversight: every rule this corpus convicts is a ' +
+    'Until 2026-11-01 none of the rules named above was scoped away from documentation, and ' +
+      'that was a deliberate choice rather than an oversight: every rule this corpus convicted was a ' +
       'loose pattern rather than a rule reading the wrong surface — a pattern that would ' +
       'be just as wrong on a tool description or a command line, so declaring a surface ' +
       'for it would remove it from this measurement while leaving it exactly as wrong ' +
@@ -129,6 +129,69 @@ async function deriveBench(): Promise<string> {
       'quietly widen it back. The four vendored rules are patched through ' +
       '[`rules/atr-overrides.yaml`](../rules/atr-overrides.yaml) rather than by editing ' +
       'rules/atr, which is imported verbatim from upstream.',
+    '',
+    'On 2026-11-01 the rate went from 14.9% (18 of 121) to 5.0% (6 of 121), in two steps. ' +
+      'First, the scanner no longer raises a rule to the encoded-variant score when the ' +
+      'percent-decoded copy of the page matches what the page had already matched as ' +
+      'written (a base64 or hex payload keeps the floor, whatever the page says in the ' +
+      'open): a page with two percent-escapes anywhere is also read with every escape ' +
+      'decoded, and `STROQ-2026-00005` (`curl … | sh`, ' +
+      'medium) was lifted to suspect by the decoded copy of an install line it had ' +
+      'matched as written. That alone cleared four files (ClickHouse, APISIX, Pulumi, ' +
+      'PrivateGPT). Second, a fetched page now reads a pattern of its own (`web:` in ' +
+      '[`rules/atr-overrides.yaml`](../rules/atr-overrides.yaml)) in the vendored rules whose ' +
+      'broad form is evidence only in a tool, not in a README: a credential path, ' +
+      '`/etc/passwd`, the word "Keychain" or a `file://` path named in a README ' +
+      '(`ATR-2026-00113`, `ATR-2026-00161`, `ATR-2026-00568`), an HTTP method beside an API ' +
+      'key (`ATR-2026-00114`), "a drop-in replacement for" (`ATR-2026-00060`), a bare ' +
+      'private key header (`ATR-2026-00150`) and "disable all security checks for" ' +
+      '(`ATR-2026-00163`). A page pattern fails closed: it is the vendored pattern with only ' +
+      'the benign shapes the bench shows let through, never a list of the verbs an attack ' +
+      'uses, so a phrasing nobody listed stays flagged. The shapes are few: a credential path ' +
+      'in the first cell of a table row or in a list of places (and even there the line is ' +
+      'read when it holds a program that moves a file or a host, or, for a table row, when ' +
+      "the next line does), \"set X to 'true' to disable\" or a flag's own description, " +
+      '`POST /api/...` on a line with no host, `.env.example`, a placeholder after a private ' +
+      'key header that no key follows. The exemptions that let a theft through in review ' +
+      '(a description of the file, an assignment, a docker volume, `/etc/passwd` alone on a ' +
+      'line, `file://` after "from" or "at", the build-log lines of a package manager) are ' +
+      "gone: the words before such a path are written by whoever wrote the page. fd's " +
+      "README, which lists `/etc/passwd`, and uv's, which prints a build log with a " +
+      '`file://` path, are false flags for it. Two rules keep a positive form because ' +
+      'the broad one is every README (the word "keychain", "replacement for"), with the ' +
+      'verbs two reviews widened. ' +
+      'The page pattern is read on `web_content` and nowhere else: a file ' +
+      'Read from a cloned repository, a `cat`, an MCP result and a CLAUDE.md are scanned as ' +
+      '`repo_content`, `command_output`, `tool_result` and `instruction_file`, and read ' +
+      'exactly what they read at 0.29.0, because a planted instruction arrives by every ' +
+      'one of them. Two Stroq rules were tightened outright: `STROQ-2026-00002` needs "you ' +
+      'must" or "must now" and an action beside the assistant\'s name, and a comment that ' +
+      'instructs someone; `STROQ-2026-00004` leaves `copy .env.example to .env` alone. Twelve ' +
+      'files cleared. ' +
+      'Each narrow form keeps every documented true positive of its rule on every surface ' +
+      '([`surface-recall.test.ts`](../packages/core/test/rules/surface-recall.test.ts)), ' +
+      'every text two independent reviews found it to lose is pinned as suspect on the ' +
+      'surfaces where 0.29.0 called it suspect ' +
+      '([`detection-parity.test.ts`](../packages/core/test/rules/detection-parity.test.ts)), ' +
+      'and a planted instruction still taints the session when it arrives by a fetched page ' +
+      'and is still noted when it arrives by `Read`, `cat` or `git log` ' +
+      '([`engine-planted-instruction.test.ts`](../packages/core/test/engine-planted-instruction.test.ts)). ' +
+      'The six files still flagged are documentation that is byte-identical to what the ' +
+      'rule is for: a README that tells the user to add a `SessionStart` hook to ' +
+      '`~/.claude/settings.json` (`ATR-2026-00523`), an Ollama chat template that contains ' +
+      '`<|im_start|>system` (four rules), a course README that describes prompt injection ' +
+      "(`ATR-2026-02002`), a README that names `secret-tool` (`ATR-2026-00113`), fd's, " +
+      'which lists `/etc/passwd` alone on a line (`ATR-2026-00113`, `ATR-2026-00161`), and ' +
+      "uv's, which prints `Built example @ file:///home/user/example` (`ATR-2026-00568`).",
+    '',
+    'The number above is a plain string read through the rules. A real WebFetch result is an ' +
+      'object, and the hook also scans its serialised JSON, so the corpus was run a second ' +
+      'way as well: each file as a `WebFetch` `PostToolUse` event through the built hook ' +
+      '(`stroq hook claude-code`, a fresh HOME per file). 0.29.0 flags 19 of the 121 that ' +
+      'way and this version 6, the same six files. On a second set that none of the rules ' +
+      'was tuned on, 392 documentation tool results (READMEs, changelogs, docs) of 500 ' +
+      'public coding-agent sessions read as a fetched page, 0.29.0 flags 17 and this ' +
+      'version 9, none of them new.',
     '',
     'The corpus grew on 2026-09-25, and the rate rose with it: 16.0% on the first 25 ' +
       'files, 24.0% on the 121 that replaced them (before the change below). The first ' +
@@ -155,8 +218,9 @@ async function deriveBench(): Promise<string> {
       'a bare `-----BEGIN PRIVATE KEY-----` header, and its own documented true ' +
       'positives are bare headers too, with no key body — exactly like the TLS ' +
       'configuration example it flags. The difference between those two is the surface ' +
-      'the text arrived on, which is a scan_target question rather than a regex one, and ' +
-      'it is open.',
+      'the text arrived on, which is a scan_target question rather than a regex one; ' +
+      'since 2026-11-01 a fetched page does not read that condition, and a tool result, ' +
+      "an instruction file, the developer's own files and command output do.",
     '',
     'Production scans under a 4,000 ms wall-clock budget (`DEFAULT_BUDGET_MS`, ' +
       '[`packages/core/src/scan/scanner.ts`](../packages/core/src/scan/scanner.ts)) and ' +

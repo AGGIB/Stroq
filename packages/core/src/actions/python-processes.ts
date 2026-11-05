@@ -11,6 +11,7 @@ import {
 import {
   DISTINCT_RUNS,
   ENVIRONMENTS,
+  FRAME_NAMES,
   INERT,
   OPAQUE_ATTRIBUTES,
   OPAQUE_NAMES,
@@ -73,10 +74,16 @@ export interface PythonProcesses {
   /** A process is started in a way whose command is not read. */
   readonly unread: boolean;
   /**
-   * The program reaches names through strings, runs or loads code it makes, decodes data, or changes
-   * the environment its processes get.
+   * The program reaches names through strings, runs or loads code it makes, changes the environment
+   * its processes get, or decodes data that can go somewhere (to a process it starts, a file it writes,
+   * or a frame or tracer it reaches).
    */
   readonly opaque: boolean;
+  /**
+   * The program decodes data (`base64`, `binascii`) and is not opaque for it, since it has nowhere to send
+   * the result but its own output. Whether the output goes somewhere that runs it is for the caller to say.
+   */
+  readonly decodes: boolean;
   /** A string that is not a command the program starts holds a word that marks code: it may be run. */
   readonly hiddenPayload: boolean;
   /** The program imports a module that is not a known standard one (`KNOWN_MODULES`): what it does is not read. */
@@ -564,7 +571,8 @@ export function readPythonProcesses(program: string): PythonProcesses | null {
   );
   // A program that may write a file and starts a process may run what it wrote (`sh x.sh` after writing
   // `x.sh`): what runs is not on disk before it starts, so it is not read.
-  const writesAndRuns = reader.processes.length > 0 && writesFiles(tokens, match);
+  const writes = writesFiles(tokens, match);
+  const writesAndRuns = reader.processes.length > 0 && writes;
   // And one that may fetch: what it starts may be what it fetched.
   const fetchesAndRuns =
     reader.processes.length > 0 &&
@@ -595,7 +603,18 @@ export function readPythonProcesses(program: string): PythonProcesses | null {
       writesAndRuns ||
       fetchesAndRuns ||
       (reader.movesUnread && processes.length > 0),
-    opaque: names.opaque || reader.opaque || rebound,
+    // Decoded data is run by what it is given to: a process (it may be the decoded text), a file (it may be
+    // run later), a frame or a tracer (it may change what a process is given). A program with none of them has
+    // nowhere to send it but its own output.
+    opaque:
+      names.opaque ||
+      reader.opaque ||
+      rebound ||
+      (names.decodes &&
+        (reader.processes.length > 0 ||
+          writes ||
+          tokens.some((tok) => tok.kind === 'name' && FRAME_NAMES.has(tok.text)))),
+    decodes: names.decodes,
     hiddenPayload,
   };
 }

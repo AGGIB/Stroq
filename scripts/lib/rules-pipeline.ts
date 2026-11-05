@@ -79,6 +79,16 @@ export interface OverrideCondition {
    * the surfaces that keep the broad pattern, and `local` is read on every other one.
    */
   readonly surfaces?: readonly string[];
+  /**
+   * A pattern read on `web_content` only, a page the agent fetched, and nowhere else: a fetched page
+   * is documentation far more often than an attack, and what a person can say about a credential
+   * file in a README is not what a tool's description or a cloned repository's file says. The
+   * condition keeps whatever it read on every other surface (`to`, `local`, `surfaces`, or the
+   * vendored pattern), and loses a fetched page; `off` drops it there altogether. Narrowing for
+   * documentation here, and not in `local`, leaves `repo_content` and `command_output` (a file Read
+   * from a cloned repository, a `cat`) exactly as they were.
+   */
+  readonly web?: string;
 }
 
 /** Where the broad pattern of a `local:` condition stays unless it names `surfaces`; `local` is read elsewhere. */
@@ -150,19 +160,22 @@ export function loadRuleOverrides(file: string): ReadonlyMap<string, RuleOverrid
         throw new RulesBuildError(`${at}: "from" must be a non-empty string`);
       const to: unknown = c['to'];
       const local: unknown = c['local'];
+      const web: unknown = c['web'];
       const scoped = parseSurfaces(at, c['surfaces']);
       if (to !== undefined && !isNonEmptyString(to))
         throw new RulesBuildError(`${at}: "to" must be a non-empty string`);
       if (local !== undefined && !isNonEmptyString(local))
         throw new RulesBuildError(`${at}: "local" must be a pattern or "off"`);
-      if (to === undefined && local === undefined && scoped === undefined)
+      if (web !== undefined && !isNonEmptyString(web))
+        throw new RulesBuildError(`${at}: "web" must be a pattern or "off"`);
+      if (to === undefined && local === undefined && scoped === undefined && web === undefined)
         throw new RulesBuildError(
-          `${at}: "to" must be a non-empty string (or name "local" or "surfaces")`,
+          `${at}: "to" must be a non-empty string (or name "local", "surfaces" or "web")`,
         );
       if (local === 'off' && scoped !== undefined)
         throw new RulesBuildError(`${at}: "local: off" with "surfaces" is "surfaces" alone`);
       const unknown = Object.keys(c).filter(
-        (k) => !['index', 'from', 'to', 'local', 'surfaces'].includes(k),
+        (k) => !['index', 'from', 'to', 'local', 'surfaces', 'web'].includes(k),
       );
       if (unknown.length > 0)
         throw new RulesBuildError(`${at}: unknown field(s): ${unknown.join(', ')}`);
@@ -172,6 +185,7 @@ export function loadRuleOverrides(file: string): ReadonlyMap<string, RuleOverrid
         ...(to === undefined ? {} : { to: to as string }),
         ...(local === undefined ? {} : { local: local as string }),
         ...(scoped === undefined ? {} : { surfaces: scoped }),
+        ...(web === undefined ? {} : { web: web as string }),
       } satisfies OverrideCondition;
     });
     const unknown = Object.keys(raw).filter(
@@ -204,6 +218,43 @@ function parseSurfaces(where: string, raw: unknown): readonly string[] | undefin
     }
   }
   return raw as string[];
+}
+
+interface Placement {
+  /** The surfaces the vendored (or `to`) pattern keeps; absent, every surface. */
+  readonly broad?: readonly string[];
+  /** The narrow pattern of `local:` and the surfaces it reads; absent for `off` or no `local`. */
+  readonly local?: { readonly value: string; readonly surfaces: readonly string[] };
+  /** The pattern read on a fetched page; absent for `off` or no `web`. */
+  readonly web?: string;
+}
+
+/**
+ * Where each pattern of an override condition is read. The broad pattern stays where it is evidence
+ * (`surfaces`, or by default text somebody else wrote and instruction files); `local` is read on the
+ * rest; `web` is read on a fetched page and a fetched page is read by nothing else, so that the
+ * condition's other surfaces are exactly what they would be without `web`.
+ */
+function placeCondition(c: OverrideCondition): Placement {
+  let broad: readonly string[] | undefined;
+  let narrow: readonly string[] | undefined;
+  if (c.local !== undefined) {
+    broad = c.surfaces ?? OTHERS_SURFACES;
+    narrow = OVERRIDE_SURFACES.filter((surface) => !(broad as readonly string[]).includes(surface));
+  } else {
+    broad = c.surfaces;
+  }
+  if (c.web !== undefined) {
+    broad = (broad ?? OVERRIDE_SURFACES).filter((surface) => surface !== 'web_content');
+    narrow = narrow?.filter((surface) => surface !== 'web_content');
+  }
+  return {
+    ...(broad === undefined ? {} : { broad }),
+    ...(c.local === undefined || c.local === 'off' || narrow === undefined
+      ? {}
+      : { local: { value: c.local, surfaces: narrow } }),
+    ...(c.web === undefined || c.web === 'off' ? {} : { web: c.web }),
+  };
 }
 
 /**
@@ -261,27 +312,24 @@ export function applyRuleOverrides(
         );
       }
       const value = c.to ?? current.value;
-      if (c.surfaces !== undefined && c.local === undefined) {
-        conditions[c.index] = { ...current, value, stroq_surfaces: [...c.surfaces] };
-        continue;
-      }
-      if (c.local === undefined) {
-        conditions[c.index] = { ...current, value };
-        continue;
-      }
-      if (rule.detection.condition === 'all') {
+      if ((c.local !== undefined || c.web !== undefined) && rule.detection.condition === 'all') {
         throw new RulesBuildError(
-          `rule override for ${rule.id} condition ${c.index}: "local" needs an "any" rule`,
+          `rule override for ${rule.id} condition ${c.index}: "${c.local === undefined ? 'web' : 'local'}" needs an "any" rule`,
         );
       }
-      // The broad pattern stays where it is evidence: the surfaces named, or by default text somebody
-      // else wrote and instruction files; the narrow one is read everywhere else.
-      const broad = c.surfaces ?? OTHERS_SURFACES;
-      conditions[c.index] = { ...current, value, stroq_surfaces: [...broad] };
-      if (c.local !== 'off') {
-        const narrow = OVERRIDE_SURFACES.filter((surface) => !broad.includes(surface));
-        appended.push({ ...current, value: c.local, stroq_surfaces: narrow });
-      }
+      const placed = placeCondition(c);
+      conditions[c.index] =
+        placed.broad === undefined
+          ? { ...current, value }
+          : { ...current, value, stroq_surfaces: [...placed.broad] };
+      if (placed.local !== undefined)
+        appended.push({
+          ...current,
+          value: placed.local.value,
+          stroq_surfaces: placed.local.surfaces,
+        });
+      if (placed.web !== undefined)
+        appended.push({ ...current, value: placed.web, stroq_surfaces: ['web_content'] });
     }
     conditions.push(...appended);
     applied.push(rule.id);
