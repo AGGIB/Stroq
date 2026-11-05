@@ -1,6 +1,7 @@
 import type { PythonToken } from './inline-python.js';
 import {
   ASSIGNMENT,
+  DECODER_MODULES,
   ENVIRONMENTS,
   INERT,
   OPAQUE_ATTRIBUTES,
@@ -70,6 +71,8 @@ export interface Names {
   starImport: boolean;
   unread: boolean;
   opaque: boolean;
+  /** A decoder module is imported (`DECODER_MODULES`): the program decodes data. */
+  decodes: boolean;
 }
 
 /** A dotted name `a.b.c` at `i`, and the index after it. */
@@ -90,6 +93,7 @@ function judgeModule(names: Names, module: string): void {
   const root = rootOf(module);
   if (UNREAD_MODULES.has(root)) names.unread = true;
   if (OPAQUE_MODULES.has(root)) names.opaque = true;
+  if (DECODER_MODULES.has(root)) names.decodes = true;
 }
 
 /** `import a.b as c, d`: from `i` (the `import`), and the index after it. */
@@ -202,6 +206,7 @@ export function readImports(tokens: readonly PythonToken[]): Names {
     starImport: false,
     unread: false,
     opaque: false,
+    decodes: false,
   };
   for (let i = 0; i < tokens.length; i += 1) {
     // `from . import x`, `from .m import x`: a module of the program's own package.
