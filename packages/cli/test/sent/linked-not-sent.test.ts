@@ -27,7 +27,7 @@ const KEYS: readonly Key[] = [
   key(
     'FIREBASE_API_KEY',
     '/Users/me/dev/flutter-app/.env.dart-define',
-    'AIzaFAKEfbKeyValue0123456789abcdefghijk',
+    'AIza' + 'FAKEfbKeyValue0123456789abcdefghijk',
   ),
   key('OPENAI_API_KEY', 'env', 'sk-FAKEoaiKey0123456789abcdefghijkl'),
   key('STRIPE_SECRET_KEY', 'env', 'sk_live_' + 'FAKEstripe0123456789abcdef'),

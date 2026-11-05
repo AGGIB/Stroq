@@ -76,7 +76,7 @@ describe('a value that looks like a secret is traced', () => {
     ['FAKEnpmTokenValue0123456789abcdefXYZ'],
     ['FAKEtoken1Value0123456789abcdefXYZ'],
     ['sk-FAKEoaiKey0123456789abcdefghijkl'],
-    ['AIzaFAKEfbKeyValue0123456789abcdefghijk'],
+    ['AIza' + 'FAKEfbKeyValue0123456789abcdefghijk'],
   ])('and so is a made-up test key, %s', (value) => {
     expect(judgeValue(value)).toEqual({ traced: true });
   });
