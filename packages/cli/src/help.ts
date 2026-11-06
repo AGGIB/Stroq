@@ -355,7 +355,7 @@ export const COMMANDS: readonly CommandHelp[] = [
     ],
     flags: [
       ['--list', 'list trusted files'],
-      ['--folder <dir>', 'stop asking about what a folder holds now; anything new asks again'],
+      ['--folder <dir>', 'stop asking about what a folder holds now; a change asks again'],
       ['--remove <path>', 'stop trusting a file or a folder'],
       ['--json', 'machine-readable output'],
     ],

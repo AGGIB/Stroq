@@ -8,7 +8,9 @@
 //
 // The folder is read as a hostile input: nothing is followed, a pipe is never opened, every file is
 // read through `readRegularFile` under a cap, and a run of the walk stops at its limits and says what
-// it did not reach. Only fixed phrases and a made-safe path come out, never text from a file.
+// it did not reach. What comes out is fixed phrases, a digest and a path made safe for a terminal. A
+// path is still words the folder's author chose: it goes to a person and not to a model.
+import { createHash } from 'node:crypto';
 import { lstatSync, readdirSync, type Dirent } from 'node:fs';
 import { basename, join } from 'node:path';
 import { classifyCommand, readRegularFile } from '@stroq/core';
@@ -18,6 +20,7 @@ import { entriesOf, ownObject, parseJsonObject } from '../install/inspect/json.j
 import { LONG_LINE, obfuscationReasons } from '../install/inspect/obfuscation.js';
 import { showable } from '../install/inspect/safe-text.js';
 import { languageOf } from '../install/inspect/source-lines.js';
+import { shebangInterpreter } from '../install/inspect/shell-sources.js';
 import { LineIndex, type TextFile } from '../install/inspect/text-files.js';
 
 export type CodeSignalKind =
@@ -40,6 +43,8 @@ export interface CodeSignal {
   /** The path in the folder, with `/` between its parts, made safe to print. */
   readonly file: string;
   readonly line: number | null;
+  /** A digest of what the file holds, so that what was said of it can be held to those bytes. */
+  readonly pin: string;
 }
 
 export interface ProjectCodeReading {
@@ -70,7 +75,15 @@ const PATH_SHOWN = 300;
 const MAX_COMMANDS_PER_FILE = 50;
 /** The longest piece of a line handed to the classifier. */
 const COMMAND_MAX = 2000;
-const COMMAND_DEADLINE_MS = 500;
+const COMMAND_DEADLINE_MS = 200;
+/** The most lines handed to the classifier in one reading, whatever the files. */
+const MAX_COMMANDS = 400;
+/** The most places of one `package.json`. */
+const MAX_MANIFEST_PLACES = 20;
+/** How far blanks at the start of a line are looked past to find a comment's mark. */
+const MAX_INDENT = 512;
+/** How many names go by between two looks at the clock and the other limits of the walk. */
+const NAMES_BETWEEN_LOOKS = 256;
 /** This many blanks in a row and then more on the line is not how anyone formats code. */
 const HIDING_BLANKS = 200;
 
@@ -136,37 +149,66 @@ const FEEDS_TEXT = {
 } as const;
 
 const COMMENT_START = { js: '//', py: '#' } as const;
-const FETCH_WORD = /\b(?:curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod)\b/g;
+const FETCH_WORD = /\b(?:curl|wget|iwr|irm|Invoke-WebRequest|Invoke-RestMethod|base64)\b/g;
 /** A line with a fetch in it and nothing that could hand it to anything is not worth a classifier's time. */
 const HANDS_ON = /\||\b(?:sh|bash|zsh|iex|python3?|node|eval|source)\b/;
 const CODE_WORDS = /\brequire\s*\(|\bfunction\b|\bimport\s|\beval\s*\(|=>|\bexec\s*\(|\bfetch\s*\(/;
 const FFI_ON = /^[ \t]*ffi[ \t]*=[ \t]*true\b/m;
-const SHEBANG_SHELL = /^#!\s*\S*(?:\/env\s+)?(?:\S*\/)?(?:ba|z|da)?sh\b/;
+const SHELLS: ReadonlySet<string> = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh']);
 
 /** A NUL, or bytes that did not decode as UTF-8 (`readRegularFile` decodes and marks them): not text. */
 const isText = (text: string): boolean => !text.includes('\u0000') && !text.includes('\ufffd');
 
-/** The line a place is on, and the text of that line. */
-function lineAround(file: TextFile, index: number): { line: number; text: string } {
-  const line = file.lines.lineAt(index);
-  const from = file.lines.lineStart(line);
-  const end = file.text.indexOf('\n', from);
-  return { line, text: file.text.slice(from, end === -1 ? file.text.length : end) };
+/** What one run of the reading has left: a file can hold more work than a walk can see coming. */
+interface Run {
+  readonly deadline: number;
+  commands: number;
+  commandsCut: number;
+  timedOut: boolean;
+}
+
+/** The time left, marking the run when there is none. */
+function timeLeft(run: Run): number {
+  const left = run.deadline - performance.now();
+  if (left <= 0) run.timedOut = true;
+  return left;
+}
+
+/** The text from a place to the end of its line, cut short: a line can be a megabyte long. */
+function restOfLine(text: string, from: number): string {
+  const end = Math.min(text.length, from + COMMAND_MAX);
+  for (let at = from; at < end; at += 1) {
+    if (text.charCodeAt(at) === 0x0a) return text.slice(from, at);
+  }
+  return text.slice(from, end);
+}
+
+/** Whether the first thing on a line is the mark of a comment. Blanks are looked past only so far. */
+function startsWith(text: string, lineStart: number, mark: string): boolean {
+  let at = lineStart;
+  const end = Math.min(text.length, lineStart + MAX_INDENT);
+  while (at < end && (text.charCodeAt(at) === 0x20 || text.charCodeAt(at) === 0x09)) at += 1;
+  return text.startsWith(mark, at);
 }
 
 /** Takes off what closes a string or a sentence around a command: `os.system('curl … | sh')`. */
 const withoutClosers = (text: string): string => text.replace(/['"`)\],;.\s]+$/, '');
 
 /** Whether the words from a fetch on, as a shell would read them, fetch text and run it. */
-function fetchesIntoShell(text: string): boolean {
+function fetchesIntoShell(text: string, run: Run): boolean {
+  const left = timeLeft(run);
+  if (left <= 0) return false;
+  if (run.commands >= MAX_COMMANDS) {
+    run.commandsCut += 1;
+    return false;
+  }
+  run.commands += 1;
   try {
     const { classes } = classifyCommand(
       withoutClosers(text.slice(0, COMMAND_MAX)),
       '/stroq/read',
       0,
-      {
-        deadlineMs: COMMAND_DEADLINE_MS,
-      },
+      { deadlineMs: Math.max(1, Math.min(COMMAND_DEADLINE_MS, left)) },
     );
     return classes.includes('shell.exec_encoded');
   } catch {
@@ -175,18 +217,32 @@ function fetchesIntoShell(text: string): boolean {
   }
 }
 
-/** The first line of a file on which a fetch is handed to a shell, or null. */
-function firstFetchIntoShell(file: TextFile, keep: (lineText: string) => boolean): number | null {
+/**
+ * The first line of a file on which a fetch is handed to a shell, or null. A line is tried once, from
+ * its first fetch to its end, and `keep` is given where it starts, so a long line costs no more than a
+ * short one.
+ */
+function firstFetchIntoShell(
+  file: TextFile,
+  run: Run,
+  keep: (lineStart: number) => boolean,
+): number | null {
   let tried = 0;
+  let last = 0;
   for (const match of file.text.matchAll(FETCH_WORD)) {
-    const { line, text } = lineAround(file, match.index);
-    if (!keep(text)) continue;
-    const from = text.indexOf(match[0]);
-    const rest = from === -1 ? text : text.slice(from);
+    const line = file.lines.lineAt(match.index);
+    if (line === last) continue;
+    last = line;
+    if (!keep(file.lines.lineStart(line))) continue;
+    const rest = restOfLine(file.text, match.index);
     if (!HANDS_ON.test(rest)) continue;
     tried += 1;
-    if (tried > MAX_COMMANDS_PER_FILE) return null;
-    if (fetchesIntoShell(rest)) return line;
+    if (tried > MAX_COMMANDS_PER_FILE) {
+      run.commandsCut += 1;
+      return null;
+    }
+    if (fetchesIntoShell(rest, run)) return line;
+    if (run.timedOut) return null;
   }
   return null;
 }
@@ -216,8 +272,8 @@ function firstHiddenLine(text: string): number | null {
 /** The first place text is run as code outside a comment, or null. */
 function firstRun(file: TextFile, language: 'js' | 'py'): number | null {
   for (const match of file.text.matchAll(RUNS_TEXT[language])) {
-    const { line, text } = lineAround(file, match.index);
-    if (!text.trimStart().startsWith(COMMENT_START[language])) return line;
+    const line = file.lines.lineAt(match.index);
+    if (!startsWith(file.text, file.lines.lineStart(line), COMMENT_START[language])) return line;
   }
   return null;
 }
@@ -228,7 +284,7 @@ function firstRun(file: TextFile, language: 'js' | 'py'): number | null {
 
 type Add = (kind: CodeSignalKind, strength: CodeSignalStrength, line: number | null) => void;
 
-function readCode(file: TextFile, language: 'js' | 'py', add: Add): void {
+function readCode(file: TextFile, language: 'js' | 'py', run: Run, add: Add): void {
   const tool = TOOL_FILE.test(basename(file.path));
   const reasons = obfuscationReasons(file.text);
   if (reasons.length > 0) add('obfuscated', 'look', null);
@@ -237,32 +293,48 @@ function readCode(file: TextFile, language: 'js' | 'py', add: Add): void {
 
   const fetched = firstFetchIntoShell(
     file,
-    (text) => !text.trimStart().startsWith(COMMENT_START[language]),
+    run,
+    (start) => !startsWith(file.text, start, COMMENT_START[language]),
   );
   if (fetched !== null) add(tool ? 'tool-file-runs-code' : 'fetched-text-runs', 'strong', fetched);
-  const run = firstRun(file, language);
-  if (run === null) return;
+  const textRun = firstRun(file, language);
+  if (textRun === null) return;
   if (!FEEDS_TEXT[language].test(file.text)) {
-    add('text-runs', 'look', run);
+    add('text-runs', 'look', textRun);
     return;
   }
   // A bundle holds a whole program's fetches and evals in one file, whatever it does.
   const bundled = reasons.includes(`a line of thousands of characters`) && file.size > LONG_LINE;
-  add(tool ? 'tool-file-runs-code' : 'fetched-text-runs', bundled ? 'look' : 'strong', run);
+  add(tool ? 'tool-file-runs-code' : 'fetched-text-runs', bundled ? 'look' : 'strong', textRun);
 }
 
-function readManifest(file: TextFile, add: Add): void {
+function readManifest(file: TextFile, run: Run, add: Add): void {
   const manifest = parseJsonObject(file.text);
   if (manifest === null) return;
-  const lineOf = (key: string, after: string): number | null => {
-    const from = file.text.indexOf(`"${after}"`);
+  // Each name is looked for from where its group starts, and only for what is reported, up to a limit.
+  let placed = 0;
+  const report = (
+    kind: CodeSignalKind,
+    strength: CodeSignalStrength,
+    key: string,
+    group: string,
+  ) => {
+    placed += 1;
+    if (placed > MAX_MANIFEST_PLACES) return;
+    const from = file.text.indexOf(`"${group}"`);
     const at = file.text.indexOf(`"${key}"`, Math.max(from, 0));
-    return at === -1 ? null : file.lines.lineAt(at);
+    add(kind, strength, at === -1 ? null : file.lines.lineAt(at));
   };
   const scripts = ownObject(manifest, 'scripts');
   for (const [name, text] of scripts === null ? [] : entriesOf(scripts)) {
-    if (typeof text === 'string' && fetchesIntoShell(text))
-      add('script-fetches-and-runs', 'strong', lineOf(name, 'scripts'));
+    if (
+      typeof text === 'string' &&
+      text.search(FETCH_WORD) !== -1 &&
+      HANDS_ON.test(text) &&
+      fetchesIntoShell(text, run)
+    ) {
+      report('script-fetches-and-runs', 'strong', name, 'scripts');
+    }
   }
   for (const field of ['dependencies', 'devDependencies', 'optionalDependencies'] as const) {
     const group = ownObject(manifest, field);
@@ -270,13 +342,13 @@ function readManifest(file: TextFile, add: Add): void {
       const address = typeof spec === 'string' ? addressOf(spec) : null;
       // A dependency on a folder of the same repository is how a monorepo is built.
       if (address !== null && address.kind !== 'file')
-        add('raw-dependency', 'look', lineOf(name, field));
+        report('raw-dependency', 'look', name, field);
     }
   }
 }
 
 /** Reads one file for what it is. False when what it holds is not text. */
-function readFile(path: string, text: string, size: number, add: Add): boolean {
+function readFile(path: string, text: string, size: number, run: Run, add: Add): boolean {
   if (!isText(text)) return false;
   const file: TextFile = {
     path,
@@ -292,7 +364,7 @@ function readFile(path: string, text: string, size: number, add: Add): boolean {
     return true;
   }
   if (name === 'package.json') {
-    readManifest(file, add);
+    readManifest(file, run, add);
     return true;
   }
   if (name === 'foundry.toml') {
@@ -301,22 +373,22 @@ function readFile(path: string, text: string, size: number, add: Add): boolean {
     return true;
   }
   if (isInstruction(path)) {
-    const line = firstFetchIntoShell(file, () => true);
+    const line = firstFetchIntoShell(file, run, () => true);
     if (line !== null) add('instruction-runs-code', 'strong', line);
     return true;
   }
   if (MAKE_FILE.test(name)) {
-    const line = firstFetchIntoShell(file, (t) => t.startsWith('\t'));
+    const line = firstFetchIntoShell(file, run, (start) => text.charCodeAt(start) === 0x09);
     if (line !== null) add('script-fetches-and-runs', 'strong', line);
     return true;
   }
-  if (SHELL_FILE.test(name) || SHEBANG_SHELL.test(text)) {
-    const line = firstFetchIntoShell(file, (t) => !t.trimStart().startsWith('#'));
+  if (SHELL_FILE.test(name) || SHELLS.has(shebangInterpreter(text) ?? '')) {
+    const line = firstFetchIntoShell(file, run, (start) => !startsWith(text, start, '#'));
     if (line !== null) add('script-fetches-and-runs', 'look', line);
     return true;
   }
   const language = languageOf(file);
-  if (language !== null) readCode(file, language, add);
+  if (language !== null) readCode(file, language, run, add);
   return true;
 }
 
@@ -340,12 +412,19 @@ const order = (a: CodeSignal, b: CodeSignal): number =>
   (a.file < b.file ? -1 : a.file > b.file ? 1 : 0) ||
   (a.line ?? 0) - (b.line ?? 0);
 
+const OUT_OF_TIME = 'the time this reading may take ran out';
+
 /** Reads a folder as far as its limits allow. Throws nothing: what it could not do is in `notRead`. */
 export function readProjectCode(dir: string, options: ProjectCodeOptions = {}): ProjectCodeReading {
   const budgetMs = options.budgetMs ?? BUDGET_MS;
   const maxFiles = options.maxFiles ?? MAX_FILES;
   const maxBytes = options.maxBytes ?? MAX_BYTES;
-  const started = performance.now();
+  const run: Run = {
+    deadline: performance.now() + budgetMs,
+    commands: 0,
+    commandsCut: 0,
+    timedOut: false,
+  };
 
   const signals: CodeSignal[] = [];
   const counts = { tooBig: 0, dataTooBig: 0, unreadable: 0, notText: 0, links: 0, cut: 0 };
@@ -355,12 +434,14 @@ export function readProjectCode(dir: string, options: ProjectCodeOptions = {}): 
   let bytesRead = 0;
   let filesRead = 0;
 
-  const addFor =
-    (path: string): Add =>
-    (kind, strength, line) => {
+  const addFor = (path: string, text: string): Add => {
+    let pin: string | null = null;
+    return (kind, strength, line) => {
+      pin ??= createHash('sha256').update(text).digest('hex');
       if (signals.length >= MAX_SIGNALS) counts.cut += 1;
-      else signals.push({ kind, strength, file: showable(path, PATH_SHOWN), line });
+      else signals.push({ kind, strength, file: showable(path, PATH_SHOWN), line, pin });
     };
+  };
 
   const readOne = (relative: string, full: string): void => {
     const data = DATA_FILE.test(basename(relative));
@@ -379,11 +460,12 @@ export function readProjectCode(dir: string, options: ProjectCodeOptions = {}): 
     }
     filesRead += 1;
     bytesRead += read.size;
-    if (!readFile(relative, read.text, read.size, addFor(relative)) && !data) counts.notText += 1;
+    const add = addFor(relative, read.text);
+    if (!readFile(relative, read.text, read.size, run, add) && !data) counts.notText += 1;
   };
 
   const limitReached = (): string | null => {
-    if (performance.now() - started > budgetMs) return 'the time this reading may take ran out';
+    if (timeLeft(run) <= 0) return OUT_OF_TIME;
     if (filesRead >= maxFiles) return `the reading stopped after ${maxFiles} files`;
     if (bytesRead >= maxBytes) return 'the reading reached the most it may read in all';
     if (visited >= MAX_VISITED) return 'the folder has more names than this reading looks at';
@@ -404,6 +486,10 @@ export function readProjectCode(dir: string, options: ProjectCodeOptions = {}): 
       }
       for (const entry of entries) {
         visited += 1;
+        if (visited % NAMES_BETWEEN_LOOKS === 0) {
+          stopped = limitReached();
+          if (stopped !== null) break;
+        }
         const relative = folder === '' ? entry.name : `${folder}/${entry.name}`;
         if (entry.isSymbolicLink()) {
           counts.links += 1;
@@ -422,7 +508,11 @@ export function readProjectCode(dir: string, options: ProjectCodeOptions = {}): 
     queue = next;
   }
   const notRead = [
+    ...(stopped === null && run.timedOut ? [OUT_OF_TIME] : []),
     ...(stopped === null ? [] : [stopped]),
+    ...(run.commandsCut > 0
+      ? [`${run.commandsCut} files or commands past the most one reading looks at`]
+      : []),
     ...(moduleFolders > 0 ? ['node_modules: what it holds was not read'] : []),
     ...(counts.tooBig > 0
       ? [`${counts.tooBig} files of code over 1 MiB, which a reading does not take`]

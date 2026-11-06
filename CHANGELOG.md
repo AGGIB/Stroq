@@ -10,8 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - **`stroq inspect` reads the code of a folder someone sent you.** It points at text run as code when it was fetched or decoded, code hidden far to the right of a line, code named as a font or an image, scripts and Makefile recipes that fetch into a shell, config files a tool runs by itself, and instruction files that tell an agent to fetch and run something. These are places to read, not verdicts, and they do not change the exit code. `--json` carries them as `code`, `codeNotRead` and `codeFilesRead`.
-- **The hook makes the same reading once in a session.** The first time an agent runs git or the project's code in a folder holding something of the kind, Stroq asks first (`ask-foreign-folder`). It never refuses on this and never lifts a refusal.
-- **`stroq trust --folder <dir>` stops the question** for what a folder holds now; anything new asks again. An agent cannot run it through its shell.
+- **The hook makes the same reading once in a session.** The first time an agent runs git or the project's code in a folder holding something of the kind, Stroq asks first (`ask-foreign-folder`). A question counts as answered when the host reports that the command ran. It cannot lift a refusal. Codex and Windsurf hooks cannot ask, so there it is a refusal until you run `stroq trust --folder`.
+- **`stroq trust --folder <dir>` stops the question** for what a folder holds now; a change to one of those files, or anything new, asks again. The state gate refuses it through an agent's shell.
 - **[Stroq and a sandbox](docs/SANDBOXES.md)**: what a hook does, what isolation does, and why a repository you did not write belongs behind walls.
 
 ### Changed

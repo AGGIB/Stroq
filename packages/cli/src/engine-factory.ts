@@ -174,7 +174,11 @@ export function createEngine(): StroqEngine {
     home,
     userHome,
     policy: loadPolicy(),
-    folderCheck: async (input) =>
-      (await import('./folder-check.js')).checkFolder(input, { home, userHome }),
+    folderCheck: {
+      ask: async (input) =>
+        (await import('./folder-check.js')).checkFolder(input, { home, userHome }),
+      ran: async (input) =>
+        (await import('./folder-check.js')).noteFolderRan(input, { home, userHome }),
+    },
   });
 }

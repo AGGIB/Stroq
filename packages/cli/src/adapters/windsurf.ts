@@ -88,7 +88,9 @@ const askAsDeny = (decision: Decision): string => {
   const reason = decision.reason.endsWith('.') ? decision.reason.slice(0, -1) : decision.reason;
   return (
     `Stroq would ask before this action (${decision.ruleId}): ${reason}. ` +
-    'Windsurf hooks cannot prompt, so it is denied; run it yourself or relax the rule in ~/.stroq/policy.yaml.'
+    (decision.ruleId === 'ask-foreign-folder'
+      ? 'Windsurf hooks cannot prompt, so it is denied until you do.'
+      : 'Windsurf hooks cannot prompt, so it is denied; run it yourself or relax the rule in ~/.stroq/policy.yaml.')
   );
 };
 

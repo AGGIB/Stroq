@@ -1,4 +1,5 @@
 import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
@@ -95,21 +96,33 @@ function trustFolder(dir: string): { code: number; message: string } {
   if (!existsSync(path)) {
     return { code: 1, message: `stroq trust: no such folder: ${path}\n` };
   }
-  const top = topOf(path);
-  const { places, found } = readFolder(top);
-  if (places.length === 0) {
-    return { code: 0, message: `${top}: the reading points at nothing here — nothing to trust\n` };
+  const top = topOf(path, homedir());
+  const { labels, ids, notRead } = readFolder(top);
+  const skipped =
+    notRead.length === 0
+      ? []
+      : ['Not read, so not covered:', ...notRead.map((what) => `  ${what}`)];
+  if (ids.length === 0) {
+    return {
+      code: 0,
+      message: [
+        `${top}: the reading points at nothing here — nothing to trust`,
+        ...skipped,
+        '',
+      ].join('\n'),
+    };
   }
   const file = trustedFoldersFile();
-  writeTrustedFolders(file, { ...readTrustedFolders(file), [top]: found });
-  const more = places.length - PLACES_SHOWN;
+  writeTrustedFolders(file, { ...readTrustedFolders(file), [top]: ids });
+  const more = labels.length - PLACES_SHOWN;
   return {
     code: 0,
     message: [
       `trusted ${top}, for what it holds now:`,
-      ...places.slice(0, PLACES_SHOWN).map((place) => `  ${place}`),
+      ...labels.slice(0, PLACES_SHOWN).map((place) => `  ${place}`),
       ...(more > 0 ? [`  and ${more} more`] : []),
-      'Anything new found here is asked about again.',
+      ...skipped,
+      'A change to one of these files, or anything new found here, is asked about again.',
       '',
     ].join('\n'),
   };
@@ -136,9 +149,17 @@ export function runTrust(argv: readonly string[], now: () => Date = () => new Da
 
   if (values.remove !== undefined) {
     const path = resolve(values.remove);
+    // A file that was trusted by name is what was meant, even in a folder that is trusted too.
+    const current = read(file);
+    const entries = current.entries.filter((e) => e.source !== path);
+    if (entries.length < current.entries.length) {
+      write(file, { version: 1, entries });
+      process.stdout.write(`removed ${path}\n`);
+      return 0;
+    }
     const folders = trustedFoldersFile();
     const trusted = readTrustedFolders(folders);
-    const top = topOf(path);
+    const top = topOf(path, homedir());
     if (trusted[top] !== undefined) {
       writeTrustedFolders(
         folders,
@@ -147,15 +168,8 @@ export function runTrust(argv: readonly string[], now: () => Date = () => new Da
       process.stdout.write(`removed ${top}\n`);
       return 0;
     }
-    const current = read(file);
-    const entries = current.entries.filter((e) => e.source !== path);
-    if (entries.length === current.entries.length) {
-      process.stdout.write(`${path} was not trusted\n`);
-      return 1;
-    }
-    write(file, { version: 1, entries });
-    process.stdout.write(`removed ${path}\n`);
-    return 0;
+    process.stdout.write(`${path} was not trusted\n`);
+    return 1;
   }
 
   if (values.list === true || positionals.length === 0) {

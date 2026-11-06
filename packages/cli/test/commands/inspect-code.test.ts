@@ -68,6 +68,9 @@ describe('stroq inspect on the code of a folder', () => {
     expect(run.out).not.toContain('READ THIS BEFORE YOU RUN IT');
     expect(run.out).toContain('ALSO WORTH A LOOK (1)');
     expect(run.out).toContain('a.js:1  runs text as code');
+    expect(run.out).not.toContain('Reading found nothing to point at');
+    expect(run.out).toContain('Nothing stronger than the places above was found');
+    expect(run.out).toContain('does not make this folder safe');
   });
 
   it('nothing found is not said to be safe', () => {

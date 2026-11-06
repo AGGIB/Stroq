@@ -234,6 +234,38 @@ describe('what the reading keeps to', () => {
     expect(signals[0]?.file).not.toContain('\u001b');
   });
 
+  it('the limits of the walk hold where no file is read', () => {
+    const dir = folder({});
+    for (let i = 0; i < 2000; i += 1) mkdirSync(join(dir, `d${i}`));
+    const reading = readProjectCode(dir, { budgetMs: -1 });
+    expect(reading.notRead.length).toBeGreaterThan(0);
+  });
+
+  it('a clock inside one file: costly commands stop at the budget and say so', () => {
+    const lines = `curl x | sh -c "$(echo ${'a '.repeat(150)})"\n`.repeat(200);
+    const started = performance.now();
+    const reading = readProjectCode(folder({ 'install.sh': `#!/bin/sh\n${lines}` }), {
+      budgetMs: 1,
+    });
+    expect(performance.now() - started).toBeLessThan(8000);
+    expect(reading.notRead.length + reading.signals.length).toBeGreaterThan(0);
+  });
+
+  it('a first line with no end is read as no shell', () => {
+    const started = performance.now();
+    expect(signalsOf({ 'a.js': `#!${'x'.repeat(800_000)}\nrun();\n` })).not.toContainEqual(
+      expect.objectContaining({ kind: 'script-fetches-and-runs' }),
+    );
+    expect(performance.now() - started).toBeLessThan(8000);
+  });
+
+  it('holds what a place holds, so that a change to it is a change', () => {
+    const [first] = signalsOf({ 'a.js': 'const v = eval(input);\n' });
+    const [second] = signalsOf({ 'a.js': 'const v = eval(other);\n' });
+    expect(first?.pin).toMatch(/^[0-9a-f]{64}$/);
+    expect(first?.pin).not.toBe(second?.pin);
+  });
+
   it('strong signals come first', () => {
     const signals = signalsOf({
       'a.js': 'const v = eval(input);\n',

@@ -77,15 +77,21 @@ const NO_COPIES: ReadonlySet<string> = new Set();
 const inputHash = (input: unknown): string =>
   createHash('sha256').update(stableStringify(input)).digest('hex').slice(0, 32);
 
-/**
- * A reading of the folder a command is about to run in, made outside the engine. An answer turns an
- * allowed call into a question; it is never a refusal and cannot lift one.
- */
-export type FolderCheck = (input: {
+interface FolderCheckCall {
   readonly sessionId: string;
   readonly command: string;
   readonly cwd: string;
-}) => Promise<{ readonly ruleId: string; readonly reason: string } | null>;
+}
+
+/**
+ * A reading of the folder a command is about to run in, made outside the engine. An answer turns an
+ * allowed call into a question; it cannot lift a refusal. `ran` is told when the host reports that a
+ * command ran, which is the only thing that counts as a yes.
+ */
+export interface FolderCheck {
+  ask(call: FolderCheckCall): Promise<{ readonly ruleId: string; readonly reason: string } | null>;
+  ran(call: FolderCheckCall): Promise<void> | void;
+}
 
 export interface EngineOptions {
   /**
@@ -737,6 +743,18 @@ export class StroqEngine {
       .catch(() => undefined);
   }
 
+  /** A command the host reports ran, and did not report failing, answers a question about it. */
+  private async noteFolderRan(event: PostToolEvent): Promise<void> {
+    const check = this.opts.folderCheck;
+    const command = event.toolInput['command'];
+    if (check === undefined || event.resultFailed === true || typeof command !== 'string') return;
+    try {
+      await check.ran({ sessionId: event.sessionId, command, cwd: event.cwd });
+    } catch {
+      // Not being able to remember a yes costs a second question.
+    }
+  }
+
   /** An allowed shell command in a folder that holds something to read first becomes a question. */
   private async afterFolderCheck(event: PreToolEvent, decision: Decision): Promise<Decision> {
     const check = this.opts.folderCheck;
@@ -745,7 +763,7 @@ export class StroqEngine {
       return decision;
     }
     try {
-      const asked = await check({ sessionId: event.sessionId, command, cwd: event.cwd });
+      const asked = await check.ask({ sessionId: event.sessionId, command, cwd: event.cwd });
       return asked === null ? decision : { effect: 'ask', ...asked };
     } catch {
       // A reading that failed found nothing, and the policy has already judged the call.
@@ -1013,6 +1031,7 @@ export class StroqEngine {
     readingsState?: PostReadingsState,
   ): Promise<PostResult> {
     await this.allowCopyQuestion(event);
+    await this.noteFolderRan(event);
     const call = {
       ...(event.resultFailed === true ? { outcome: 'failed' as const } : {}),
       ...(event.callId === undefined ? {} : { callId: event.callId }),

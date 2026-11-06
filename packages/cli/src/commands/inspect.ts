@@ -206,7 +206,7 @@ export function formatInspect(
         ? 'Read the entries above before you open this folder in an agent or editor. They take effect by themselves once you trust the folder.'
         : strong.length > 0
           ? 'Read the places above before you run anything from this folder, or let an agent do it.'
-          : 'Reading found nothing to point at. That does not make this folder safe: code that hides what it does, fetches it later, or is in a language other than JavaScript, TypeScript, Python or shell is not seen here.',
+          : `${code.signals.length > 0 ? 'Nothing stronger than the places above was found.' : 'Reading found nothing to point at.'} That does not make this folder safe: code that hides what it does, fetches it later, or is in a language other than JavaScript, TypeScript, Python or shell is not seen here.`,
   );
   return `${lines.join('\n')}\n`;
 }
@@ -351,7 +351,7 @@ function inspectCheckout(dir: string, format: InspectFormat, failOn: FailOn): nu
       failing,
       agent: withFailing(hits, failOn),
       agentCapped: agent.capped,
-      code: code.signals,
+      code: code.signals.map(({ kind, strength, file, line }) => ({ kind, strength, file, line })),
       codeNotRead: code.notRead,
       codeFilesRead: code.filesRead,
     }),
