@@ -26,7 +26,7 @@ afterEach(() => {
 });
 
 function temp(): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'stroq-folder-check-')));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'stroq-folder-check-')));
   made.push(dir);
   return dir;
 }
@@ -73,16 +73,25 @@ describe('which commands look at the folder', () => {
     ['./gradlew build'],
     ['node_modules/.bin/jest'],
     ['mvn test'],
+    ['vitest run'],
+    ['. ./x.sh'],
+    ['source ./x.sh'],
   ])('%s does', (command) => {
     expect(folderOfCommand(command, '/work/a')).toBe('/work/a');
   });
 
-  it.each([['ls -la'], ['cat package.json'], ['grep -r eval src'], ['echo npm test'], ['']])(
-    '%s does not',
-    (command) => {
-      expect(folderOfCommand(command, '/work/a')).toBeNull();
-    },
-  );
+  it.each([
+    ['ls -la'],
+    ['cat package.json'],
+    ['grep -r eval src'],
+    ['echo npm test'],
+    [''],
+    ['git --version'],
+    ['node -v'],
+    ['npm --help'],
+  ])('%s does not', (command) => {
+    expect(folderOfCommand(command, '/work/a')).toBeNull();
+  });
 
   it.skipIf(WINDOWS).each([
     ['cd sub/y && npm test', '/work/a/sub/y'],
@@ -99,6 +108,11 @@ describe('which commands look at the folder', () => {
     ['pnpm -C sub test', '/work/a/sub'],
     ['npm --prefix sub test', '/work/a/sub'],
     ['yarn --cwd sub test', '/work/a/sub'],
+    ['cd -- sub && make', '/work/a/sub'],
+    ['npm --prefix=sub test', '/work/a/sub'],
+    ['yarn --cwd=sub test', '/work/a/sub'],
+    ['make --directory=sub', '/work/a/sub'],
+    ['( cd sub ) && npm test', '/work/a'],
   ])('%s runs in %s', (command, where) => {
     expect(folderOfCommand(command, '/work/a', '/home/me')).toBe(where);
   });
@@ -168,6 +182,52 @@ describe('what it asks about', () => {
   });
 });
 
+describe('the top of a project', () => {
+  it('an empty .git below a repository does not end the climb, as it does not for git', () => {
+    const dir = folder({ 'sub/.git/x': '', 'sub/a.js': 'run();\n' });
+    expect(topOf(join(dir, 'sub'))).toBe(dir);
+  });
+
+  it('a question at the top cannot be walked around from a folder below it', async () => {
+    const dir = folder({ 'sub/.git/x': '', 'src/auth.js': FETCHED });
+    expect(await ask(join(dir, 'sub'), 'git status')).not.toBeNull();
+  });
+
+  it('a folder far below the repository is still in it', () => {
+    const dir = folder({});
+    const deep = join(dir, ...Array.from({ length: 40 }, () => 'd'));
+    mkdirSync(deep, { recursive: true });
+    expect(topOf(deep)).toBe(dir);
+  });
+
+  it('with no git, the nearest folder with a project file is the project', async () => {
+    const dir = folder(
+      { 'package.json': JSON.stringify({ scripts: { test: FETCH_INTO_SHELL } }), 'src/a.txt': '' },
+      false,
+    );
+    expect(topOf(join(dir, 'src'))).toBe(dir);
+    expect(await ask(join(dir, 'src'), 'npm test')).not.toBeNull();
+  });
+
+  it('a folder that is not there is in the one that is', () => {
+    const dir = folder({});
+    expect(topOf(join(dir, 'x', 'y'))).toBe(dir);
+  });
+
+  it('a folder that holds projects is not one', async () => {
+    const parent = folder({ 'mine/.git/hooks/pre-commit': `#!/bin/sh\nnpm test\n` }, false);
+    git(join(parent, 'mine'), 'init', '-q', '.');
+    expect(await ask(parent, 'docker ps')).toBeNull();
+    expect(await ask(parent, 'node --version')).toBeNull();
+  });
+
+  it('but a program in it, or named from it, is read', async () => {
+    const parent = folder({ 'run.js': FETCHED }, false);
+    expect(await ask(parent, 'node run.js')).not.toBeNull();
+    expect(await ask(parent, './run.js', temp())).not.toBeNull();
+  });
+});
+
 describe('the home folder', () => {
   it('is never read, nor the root', async () => {
     const home = folder({ 'a.js': FETCHED }, false);
@@ -197,7 +257,10 @@ describe('the home folder', () => {
   });
 
   it('with dotfiles in git does not make every folder below it one project', async () => {
-    const home = folder({ 'projects/sent/src/auth.js': FETCHED });
+    const home = folder({
+      'projects/sent/src/auth.js': FETCHED,
+      'projects/sent/package.json': '{}',
+    });
     const below = join(home, 'projects/sent');
     expect(topOf(below, home)).toBe(below);
     expect(
@@ -247,6 +310,18 @@ describe('a question is answered by the command running', () => {
     expect(await ask(dir, 'npm test', home, 's2')).not.toBeNull();
   });
 
+  it('a report of another call of the same command answers nothing', async () => {
+    const dir = folder({ 'src/auth.js': FETCHED });
+    const home = temp();
+    const options = { home, userHome: temp() };
+    const call = (callId: string) => ({ sessionId: 's1', command: 'npm test', cwd: dir, callId });
+    expect(await checkFolder(call('c2'), options)).not.toBeNull();
+    noteFolderRan(call('c1'), options);
+    expect(await checkFolder(call('c3'), options)).not.toBeNull();
+    noteFolderRan(call('c3'), options);
+    expect(await checkFolder(call('c4'), options)).toBeNull();
+  });
+
   it('a report with no question out does nothing', () => {
     const dir = folder({ 'a.js': 'run();\n' });
     const home = temp();
@@ -285,6 +360,20 @@ describe('what is new', () => {
     await answered(dir, home);
     writeFileSync(join(dir, 'package.json'), '{ "name": "changed" }');
     expect(await ask(dir, 'npm test', home)).toBeNull();
+  });
+
+  it.skipIf(WINDOWS)('a hook that is a link is held to what it points at', async () => {
+    const dir = folder({});
+    const target = join(temp(), 'hook.sh');
+    writeFileSync(target, `#!/bin/sh\n${FETCH_INTO_SHELL}\n`, { mode: 0o755 });
+    mkdirSync(join(dir, '.git/hooks'), { recursive: true });
+    symlinkSync(target, join(dir, '.git/hooks/post-checkout'));
+    const home = temp();
+    expect(await ask(dir, 'git status', home)).not.toBeNull();
+    ran(dir, 'git status', home);
+    writeFileSync(target, `#!/bin/sh\n# another\n${FETCH_INTO_SHELL}\n`, { mode: 0o755 });
+    writeFileSync(join(dir, '.git/config'), '[core]\n\tbare = false\n');
+    expect(await ask(dir, 'git status', home)).not.toBeNull();
   });
 
   it('a clean folder that later gets a bad hook asks then', async () => {
@@ -365,11 +454,37 @@ describe('its markers', () => {
   });
 });
 
+describe('a command made to be slow', () => {
+  it.each([
+    ['closing brackets', `echo ${')'.repeat(200_000)}x`],
+    ['closing braces', `echo ${'}'.repeat(200_000)}x`],
+    ['many folders', 'cd a;'.repeat(20_000)],
+  ])('%s are looked at in a time that does not grow with them', (_what, command) => {
+    const started = performance.now();
+    folderOfCommand(command, '/work/a');
+    expect(performance.now() - started).toBeLessThan(8000);
+  });
+});
+
 describe('a folder made to be slow', () => {
   it.each([
     ['a first line with no end', { 'a.js': `#!${'x'.repeat(400_000)}\nrun();\n` }],
     ['a long line of fetches', { 'a.js': `// ${'curl '.repeat(120_000)}\n` }],
     ['a comment of evals', { 'a.js': `// ${'eval(a); '.repeat(100_000)}\n` }],
+    [
+      'configs that name the same thing thousands of times',
+      Object.fromEntries(
+        Array.from({ length: 6 }, (_, n) => [
+          [`sub${n}/.git/HEAD`, 'ref: refs/heads/main\n'],
+          [`sub${n}/.git/objects/x`, ''],
+          [`sub${n}/.git/refs/x`, ''],
+          [
+            `sub${n}/.git/config`,
+            Array.from({ length: 8000 }, (_v, i) => `[filter "f${i}"]\n\tclean = x\n`).join(''),
+          ],
+        ]).flat(),
+      ),
+    ],
     [
       'a package with many dependencies',
       {

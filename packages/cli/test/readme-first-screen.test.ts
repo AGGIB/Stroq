@@ -79,7 +79,13 @@ describe.each(PAGES)('the first screen of $name', ({ firstScreen, pictureBase })
       summary: m[2] ?? '',
     }));
     const named = help.filter((line) => line.name !== undefined);
-    expect(named.map((line) => line.name)).toEqual(['init', 'inspect', 'why', 'attack', 'uninstall']);
+    expect(named.map((line) => line.name)).toEqual([
+      'init',
+      'inspect',
+      'why',
+      'attack',
+      'uninstall',
+    ]);
     const block = /```text\n((?:npx @stroq\/cli.*\n)+)```/.exec(firstScreen)?.[1] ?? '';
     expect(block.trimEnd().split('\n')).toHaveLength(6);
     for (const { name, summary } of named)

@@ -1,4 +1,4 @@
-import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
@@ -159,7 +159,8 @@ export function runTrust(argv: readonly string[], now: () => Date = () => new Da
     }
     const folders = trustedFoldersFile();
     const trusted = readTrustedFolders(folders);
-    const top = topOf(path, homedir());
+    // A file nobody trusted, or a typo, inside a trusted folder is not a way to untrust the folder.
+    const top = existsSync(path) && statSync(path).isDirectory() ? topOf(path, homedir()) : path;
     if (trusted[top] !== undefined) {
       writeTrustedFolders(
         folders,

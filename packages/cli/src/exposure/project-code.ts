@@ -478,6 +478,8 @@ export function readProjectCode(dir: string, options: ProjectCodeOptions = {}): 
   while (queue.length > 0 && stopped === null) {
     const next: string[] = [];
     for (const folder of queue) {
+      visited += 1;
+      stopped = limitReached();
       if (stopped !== null) break;
       const entries = listOf(folder === '' ? dir : join(dir, folder));
       if (entries === null) {

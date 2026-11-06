@@ -116,6 +116,12 @@ describe('the check of a folder, after a call', () => {
     expect(seen).toEqual([{ sessionId: 's1', command: 'npm test', cwd: '/work/a' }]);
   });
 
+  it('the id of the call goes with it', async () => {
+    const { check, seen } = recording();
+    await engineWith(check).post(after({ callId: 'c1' }));
+    expect(seen).toEqual([{ sessionId: 's1', command: 'npm test', cwd: '/work/a', callId: 'c1' }]);
+  });
+
   it('a call that failed is no yes', async () => {
     const { check, seen } = recording();
     await engineWith(check).post(after({ resultFailed: true }));

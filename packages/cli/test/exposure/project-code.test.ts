@@ -222,7 +222,7 @@ describe('what the reading keeps to', () => {
   });
 
   it('a missing folder reads as nothing read, not as nothing found', () => {
-    const reading = readProjectCode(join(tmpdir(), 'project-code-no-such-folder'));
+    const reading = readProjectCode(join(folder({}), 'gone'));
     expect(reading.filesRead).toBe(0);
     expect(reading.notRead.length).toBeGreaterThan(0);
   });
@@ -239,6 +239,13 @@ describe('what the reading keeps to', () => {
     for (let i = 0; i < 2000; i += 1) mkdirSync(join(dir, `d${i}`));
     const reading = readProjectCode(dir, { budgetMs: -1 });
     expect(reading.notRead.length).toBeGreaterThan(0);
+  });
+
+  it('empty folders use up the clock, and it says so', () => {
+    const dir = folder({});
+    for (let i = 0; i < 3000; i += 1) mkdirSync(join(dir, `d${i}`));
+    const reading = readProjectCode(dir, { budgetMs: 1 });
+    expect(reading.notRead.join(' ')).toContain('time');
   });
 
   it('a clock inside one file: costly commands stop at the budget and say so', () => {

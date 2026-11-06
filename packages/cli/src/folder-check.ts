@@ -14,12 +14,14 @@
 // the command are looked at until one does, and the readers are loaded then.
 import { createHash } from 'node:crypto';
 import {
+  existsSync,
   lstatSync,
   mkdirSync,
   readdirSync,
   realpathSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from 'node:fs';
 import { basename, dirname, join, parse, resolve } from 'node:path';
@@ -31,6 +33,8 @@ export interface FolderCheckInput {
   readonly sessionId: string;
   readonly command: string;
   readonly cwd: string;
+  /** The host's id for this call, when it gives one: a report of another call answers nothing. */
+  readonly callId?: string;
 }
 
 export interface FolderCheckOptions {
@@ -51,8 +55,13 @@ const BUDGET_MS = 1500;
 const MARKERS = 'folder-checks';
 const MARKER_MAX = 256 * 1024;
 const GIT_FILE_MAX = 4096;
-/** The most folders walked up to find the top of a repository. */
-const MAX_UP = 32;
+/** The most folders walked up to find the top of a repository: a path has an end, and this is past it. */
+const MAX_UP = 4096;
+/** How much of a command is looked at. It is read again here, on every call that is allowed. */
+const MAX_COMMAND_TEXT = 256 * 1024;
+const MAX_SEGMENTS = 1000;
+const MAX_SEGMENT_TEXT = 8192;
+const MAX_WORDS_LOOKED_AT = 16;
 /** A marker is about one session: past this many of them, the ones this old go. */
 const MARKERS_KEPT = 2000;
 const MARKER_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -100,7 +109,39 @@ const RUNS_PROJECT: ReadonlySet<string> = new Set([
   'perl',
   'php',
   'composer',
+  'vitest',
+  'jest',
+  'mocha',
+  'tsx',
+  'ts-node',
+  'source',
+  '.',
 ]);
+
+/** The files that say a folder with no git is a project. */
+const PROJECT_FILES: readonly string[] = [
+  'package.json',
+  'Makefile',
+  'makefile',
+  'GNUmakefile',
+  'Justfile',
+  'justfile',
+  'pyproject.toml',
+  'setup.py',
+  'requirements.txt',
+  'conftest.py',
+  'tox.ini',
+  'foundry.toml',
+  'hardhat.config.js',
+  'hardhat.config.ts',
+  'Cargo.toml',
+  'go.mod',
+  'pom.xml',
+  'build.gradle',
+  'build.gradle.kts',
+  'Gemfile',
+  'composer.json',
+];
 
 /** The option that says where a program works, for those that have one. */
 const FOLDER_OPTION: Readonly<Record<string, readonly string[]>> = {
@@ -124,11 +165,18 @@ function writtenPath(word: string | undefined, userHome: string): string | null 
   return inner.includes('~') || NOT_WRITTEN_OUT.test(inner) ? null : inner;
 }
 
-/** The words of a segment, a quoted run as one, without the brackets of a group or a subshell. */
-const wordsOf = (segment: string): string[] =>
-  (segment.match(/"[^"]*"|'[^']*'|\S+/g) ?? [])
-    .map((word) => word.replace(/^[({]+/, '').replace(/[)}]+$/, ''))
-    .filter((word) => word !== '');
+/** A word without the brackets of a group or a subshell. A loop: a pattern here would be quadratic. */
+function withoutBrackets(word: string): string {
+  let from = 0;
+  let to = word.length;
+  while (from < to && (word[from] === '(' || word[from] === '{')) from += 1;
+  while (to > from && (word[to - 1] === ')' || word[to - 1] === '}')) to -= 1;
+  return word.slice(from, to);
+}
+
+/** The words of a segment as written, a quoted run as one. A segment is looked at only so far. */
+const rawWordsOf = (segment: string): string[] =>
+  segment.slice(0, MAX_SEGMENT_TEXT).match(/"[^"]*"|'[^']*'|\S+/g) ?? [];
 
 const nameOf = (word: string): string =>
   word
@@ -140,31 +188,68 @@ const nameOf = (word: string): string =>
 const isProjectPath = (word: string): boolean =>
   /[\\/]/.test(word) && !word.startsWith('/') && !/^[A-Za-z]:/.test(word) && !word.startsWith('~');
 
-/** Where a command runs git or the project's code, or null when it does neither. */
-export function folderOfCommand(command: string, cwd: string, userHome = ''): string | null {
+const ASKS_ABOUT_ITSELF: ReadonlySet<string> = new Set(['--version', '-v', '-V', '--help', '-h']);
+
+interface CommandTarget {
+  /** Where the command runs the project's code. */
+  readonly folder: string;
+  /** What comes after the program's name. */
+  readonly words: readonly string[];
+  /** Whether the program itself is named by a path in the folder. */
+  readonly programInFolder: boolean;
+}
+
+/** The first thing a command runs of a project, and where. */
+function targetOf(command: string, cwd: string, userHome: string): CommandTarget | null {
+  if (command.length > MAX_COMMAND_TEXT) return null;
   let here = cwd;
-  for (const segment of splitSegments(command)) {
+  const outer: string[] = [];
+  for (const segment of splitSegments(command).slice(0, MAX_SEGMENTS)) {
     const name = nameOf(commandWord(segment));
-    if (name === '') continue;
-    const words = wordsOf(segment);
+    const raw = rawWordsOf(segment);
+    // A `cd` inside a subshell lasts as long as the subshell.
+    const opens = raw[0]?.startsWith('(') === true;
+    const closes = raw[raw.length - 1]?.endsWith(')') === true;
+    if (opens) outer.push(here);
+    const words = raw.map(withoutBrackets).filter((word) => word !== '');
     const at = words.findIndex((word) => nameOf(basename(word)) === name);
     const after = words.slice(at + 1);
     if (name === 'cd' || name === 'pushd') {
       const path = writtenPath(
-        after.find((word) => !/^-[A-Za-z@]*$/.test(word)),
+        after.find((word) => !/^-[A-Za-z@]*$/.test(word) && word !== '--'),
         userHome,
       );
       if (path !== null) here = resolve(here, path);
-    } else if (RUNS_PROJECT.has(name) || isProjectPath(words[at] ?? '')) {
-      for (const option of FOLDER_OPTION[name] ?? []) {
-        const index = after.indexOf(option);
-        const path = index === -1 ? null : writtenPath(after[index + 1], userHome);
-        if (path !== null) return resolve(here, path);
+    } else if (name !== '' && (RUNS_PROJECT.has(name) || isProjectPath(words[at] ?? ''))) {
+      const onlyAsks = after.length > 0 && after.every((word) => ASKS_ABOUT_ITSELF.has(word));
+      if (!onlyAsks) {
+        return {
+          folder: placedBy(name, after, here, userHome),
+          words: after,
+          programInFolder: isProjectPath(words[at] ?? ''),
+        };
       }
-      return here;
     }
+    if (closes) here = outer.pop() ?? here;
   }
   return null;
+}
+
+/** The folder an option of the program names, or the folder it starts in. */
+function placedBy(name: string, after: readonly string[], here: string, userHome: string): string {
+  for (const option of FOLDER_OPTION[name] ?? []) {
+    const index = after.indexOf(option);
+    const joined = after.find((word) => word.startsWith(`${option}=`));
+    const word = joined === undefined ? after[index + 1] : joined.slice(option.length + 1);
+    const path = index === -1 && joined === undefined ? null : writtenPath(word, userHome);
+    if (path !== null) return resolve(here, path);
+  }
+  return here;
+}
+
+/** Where a command runs git or the project's code, or null when it does neither. */
+export function folderOfCommand(command: string, cwd: string, userHome = ''): string | null {
+  return targetOf(command, cwd, userHome)?.folder ?? null;
 }
 
 /** The real path of a folder, so that two names of one folder are one folder. */
@@ -176,26 +261,64 @@ const realOf = (path: string): string => {
   }
 };
 
+const isThere = (path: string): boolean => {
+  try {
+    lstatSync(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+/** Whether a path is a folder, following a link as git does. */
+const isFolder = (path: string): boolean => {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+};
+
+/** Git's own test of a folder that holds a repository. An empty `.git` is nothing to it. */
+const isGitFolder = (path: string): boolean =>
+  isThere(join(path, 'HEAD')) && isFolder(join(path, 'objects')) && isFolder(join(path, 'refs'));
+
+/** Whether git would take this folder for the top of a repository. */
+function isRepositoryTop(folder: string): boolean {
+  const git = join(folder, '.git');
+  return isGitFolder(git) || firstLineOf(git)?.startsWith('gitdir:') === true;
+}
+
+/** What says a folder with no git is a project, and that a program started in it looks to. */
+const hasProjectFile = (folder: string): boolean =>
+  PROJECT_FILES.some((name) => isThere(join(folder, name))) || isGitFolder(folder);
+
+/** Walks up from a folder, not past the home folder, and gives the first one that passes. */
+function firstUp(start: string, home: string, passes: (folder: string) => boolean): string | null {
+  let at = start;
+  for (let up = 0; up < MAX_UP; up += 1) {
+    if (at === home) return null;
+    if (passes(at)) return at;
+    const parent = dirname(at);
+    if (parent === at) return null;
+    at = parent;
+  }
+  return null;
+}
+
 /**
- * The top of the repository a folder is in, or the folder when it is in none. The walk stops at the
+ * The top of the project a folder is in: its repository, or in no repository the nearest folder with
+ * a project file, which is where npm or make would look. Else the folder itself. The walk stops at the
  * home folder: dotfiles kept in git there do not make every folder below them one project.
  */
 export function topOf(folder: string, userHome = ''): string {
-  const start = realOf(folder);
+  let start = folder;
+  // `cd x && npm test` may be reported from inside x, and a folder that is not there has a parent.
+  while (!isThere(start) && dirname(start) !== start) start = dirname(start);
+  start = realOf(start);
   const home = userHome === '' ? '' : realOf(userHome);
-  let at = start;
-  for (let up = 0; up < MAX_UP; up += 1) {
-    if (at === home) return at === start ? at : start;
-    try {
-      lstatSync(join(at, '.git'));
-      return at;
-    } catch {
-      const parent = dirname(at);
-      if (parent === at) break;
-      at = parent;
-    }
-  }
-  return start;
+  if (start === home) return start;
+  return firstUp(start, home, isRepositoryTop) ?? firstUp(start, home, hasProjectFile) ?? start;
 }
 
 const stamp = (path: string): string => {
@@ -308,17 +431,34 @@ const markerPathOf = (home: string, sessionId: string, top: string): string =>
 
 /** Fixed words and a count: names in the folder are the folder author's text, and a model reads this. */
 function questionOf(count: number): string {
-  const places = count === 1 ? '1 place' : `${count} places`;
-  return `Stroq read this folder and found ${places} that run by themselves, run what they fetch, or hide what they do. It may be fine. Read them first: stroq inspect. If you have and they are fine, run this yourself in a terminal: stroq trust --folder .`;
+  const what =
+    count === 1
+      ? '1 place that runs by itself, runs what it fetches, or hides what it does'
+      : `${count} places that run by themselves, run what they fetch, or hide what they do`;
+  return `Stroq read this folder and found ${what}. It may be fine. Read it first: stroq inspect. If you have and it is fine, run this yourself in a terminal: stroq trust --folder .`;
 }
 
-/** The folder to look at for a command, or null for a command or a folder that is not looked at. */
+/**
+ * The folder to look at for a command, or null. A parent folder of projects is not a project: it is
+ * read only when the command runs something that is in it.
+ */
 function folderToRead(input: FolderCheckInput, userHome: string): string | null {
-  const folder = folderOfCommand(input.command, input.cwd, userHome);
-  if (folder === null) return null;
-  const top = topOf(folder, userHome);
-  return top === realOf(userHome) || top === parse(top).root ? null : top;
+  const target = targetOf(input.command, input.cwd, userHome);
+  if (target === null) return null;
+  const top = topOf(target.folder, userHome);
+  if (top === realOf(userHome) || top === parse(top).root) return null;
+  if (isRepositoryTop(top) || hasProjectFile(top) || target.programInFolder) return top;
+  const named = target.words
+    .slice(0, MAX_WORDS_LOOKED_AT)
+    .some((word) => !word.startsWith('-') && existsSync(resolve(target.folder, word)));
+  return named ? top : null;
 }
+
+const callOf = (input: FolderCheckInput): string =>
+  hashOf(`${input.command}\0${input.callId ?? ''}`);
+
+const trustedIn = (home: string, top: string): readonly string[] =>
+  readTrustedFolders(trustedFoldersFileIn(home))[top] ?? [];
 
 /** The question to ask before this command runs, or null. Reads; runs nothing. */
 export async function checkFolder(
@@ -330,22 +470,23 @@ export async function checkFolder(
   const markerPath = markerPathOf(options.home, input.sessionId, top);
   const marker = readMarker(markerPath);
   const signature = signatureOf(top);
-  const command = hashOf(input.command);
+  const command = callOf(input);
 
   if (marker?.signature === signature) {
     if (marker.pending.length === 0) return null;
-    writeMarker(markerPath, { ...marker, command });
-    return { ruleId: 'ask-foreign-folder', reason: marker.reason };
+    // The person may have read it and said so while the question was out.
+    const trusted = new Set(trustedIn(options.home, top));
+    const pending = marker.pending.filter((id) => !trusted.has(id));
+    const reason = pending.length === 0 ? '' : questionOf(pending.length);
+    writeMarker(markerPath, { ...marker, pending, command, reason });
+    return pending.length === 0 ? null : { ruleId: 'ask-foreign-folder', reason };
   }
 
   // Only the first command of a session in a folder pays for loading the readers.
   const { readFolder } = await import('./folder-reading.js');
   const { ids } = readFolder(top, options.budgetMs ?? BUDGET_MS);
   const known = marker?.known ?? [];
-  const answered = new Set([
-    ...known,
-    ...(readTrustedFolders(trustedFoldersFileIn(options.home))[top] ?? []),
-  ]);
+  const answered = new Set([...known, ...trustedIn(options.home, top)]);
   const pending = ids.filter((id) => !answered.has(id));
   const reason = pending.length === 0 ? '' : questionOf(pending.length);
   writeMarker(markerPath, { signature, known, pending, command, reason });
@@ -359,7 +500,7 @@ export function noteFolderRan(input: FolderCheckInput, options: FolderCheckOptio
   const markerPath = markerPathOf(options.home, input.sessionId, top);
   const marker = readMarker(markerPath);
   if (marker === null || marker.pending.length === 0) return;
-  if (marker.command !== hashOf(input.command)) return;
+  if (marker.command !== callOf(input)) return;
   writeMarker(markerPath, {
     ...marker,
     known: [...new Set([...marker.known, ...marker.pending])],

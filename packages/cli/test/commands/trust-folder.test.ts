@@ -16,7 +16,7 @@ const dirs: string[] = [];
 let home: string;
 
 function temp(): string {
-  const dir = realpathSync(mkdtempSync(join(tmpdir(), 'stroq-trust-folder-')));
+  const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'stroq-trust-folder-')));
   dirs.push(dir);
   return dir;
 }
@@ -63,6 +63,14 @@ describe('stroq trust --folder', () => {
     expect(run.out).toContain(dir);
     expect(run.out).toContain('src/auth.js:2');
     expect(await ask(dir, 's2')).toBeNull();
+  });
+
+  it('ends a question that is already out, in the same session', async () => {
+    const dir = folder({ 'src/auth.js': FETCHED });
+    expect(await ask(dir, 's1')).not.toBeNull();
+    trust('--folder', dir);
+    expect(await ask(dir, 's1')).toBeNull();
+    expect(await ask(dir, 's1')).toBeNull();
   });
 
   it('does not cover what is added later', async () => {
@@ -147,6 +155,14 @@ describe('stroq trust --folder', () => {
     expect(statSync(trustFile()).size).toBeGreaterThan(0);
     expect(trust('--list').out).toContain(`${dir}  (folder)`);
     expect(trust('--list').out).not.toContain('NOTES.md');
+  });
+
+  it('--remove of a file nobody trusted leaves the folder as it was', async () => {
+    const dir = folder({ 'src/auth.js': FETCHED });
+    trust('--folder', dir);
+    expect(trust('--remove', join(dir, 'src/auth.js')).code).toBe(1);
+    expect(trust('--remove', join(dir, 'typo.md')).code).toBe(1);
+    expect(trust('--list').out).toContain(`${dir}  (folder)`);
   });
 
   it.skipIf(process.platform === 'win32')('keeps its record private', () => {

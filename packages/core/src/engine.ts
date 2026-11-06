@@ -81,6 +81,7 @@ interface FolderCheckCall {
   readonly sessionId: string;
   readonly command: string;
   readonly cwd: string;
+  readonly callId?: string;
 }
 
 /**
@@ -749,7 +750,12 @@ export class StroqEngine {
     const command = event.toolInput['command'];
     if (check === undefined || event.resultFailed === true || typeof command !== 'string') return;
     try {
-      await check.ran({ sessionId: event.sessionId, command, cwd: event.cwd });
+      await check.ran({
+        sessionId: event.sessionId,
+        command,
+        cwd: event.cwd,
+        ...(event.callId === undefined ? {} : { callId: event.callId }),
+      });
     } catch {
       // Not being able to remember a yes costs a second question.
     }
@@ -763,7 +769,12 @@ export class StroqEngine {
       return decision;
     }
     try {
-      const asked = await check.ask({ sessionId: event.sessionId, command, cwd: event.cwd });
+      const asked = await check.ask({
+        sessionId: event.sessionId,
+        command,
+        cwd: event.cwd,
+        ...(event.callId === undefined ? {} : { callId: event.callId }),
+      });
       return asked === null ? decision : { effect: 'ask', ...asked };
     } catch {
       // A reading that failed found nothing, and the policy has already judged the call.

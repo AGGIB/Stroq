@@ -11,9 +11,9 @@ import { READ_CAP_BYTES } from './install/inspect/blind-spots.js';
 import { showable } from './install/inspect/safe-text.js';
 
 const PATH_SHOWN = 120;
-/** The most places remembered of one folder: past this, what is new is judged against these. */
-const MAX_IDS = 500;
-const ID_LENGTH = 16;
+/** The most of what git runs that is looked at: one file can name thousands, and one answer covers them. */
+const MAX_HITS = 300;
+const ID_LENGTH = 32;
 
 export interface FolderReading {
   /** The places to read first, made safe to print. They are for a person's terminal and never for a model. */
@@ -24,14 +24,19 @@ export interface FolderReading {
   readonly notRead: readonly string[];
 }
 
+const digestOf = (text: string): string => createHash('sha256').update(text).digest('hex');
 const idOf = (...parts: readonly string[]): string =>
-  createHash('sha256').update(parts.join('\0')).digest('hex').slice(0, ID_LENGTH);
+  digestOf(parts.join('\0')).slice(0, ID_LENGTH);
 
-/** What a file holds, or nothing for one that is not a file or cannot be read. */
-function contentOf(path: string): string {
+/**
+ * What a file holds, as a digest. A link is followed here and only here: it is the target that runs,
+ * only a digest of it is kept, and a pipe or a device is refused. Too big to read, its size stands in.
+ */
+function pinOf(path: string): string {
   try {
-    const read = readRegularFile(path, READ_CAP_BYTES, { noFollow: true });
-    return read.kind === 'text' ? read.text : '';
+    const read = readRegularFile(path, READ_CAP_BYTES);
+    if (read.kind === 'too-large') return `size:${read.size}`;
+    return read.kind === 'text' ? digestOf(read.text) : '';
   } catch {
     return '';
   }
@@ -45,17 +50,36 @@ export function readFolder(top: string, budgetMs?: number): FolderReading {
   const reading = readProjectCode(top, budgetMs === undefined ? {} : { budgetMs });
   // Where a hook manager keeps its hooks is said by a key whose hooks were each judged on their own;
   // the key itself is what every project with husky has.
-  const hits = surface.preTrust.filter(
+  const judged = surface.preTrust.filter(
     (hit) => !(hit.what.toLowerCase() === 'core.hookspath' && hit.hooksJudged === true),
   );
+  // One file can name the same thing thousands of times. Each is one place, and each file is read once.
+  const seen = new Map(judged.map((hit) => [`${hit.kind}\0${hit.file}\0${hit.what}`, hit]));
+  const hits = [...seen.values()].slice(0, MAX_HITS);
+  const pins = new Map<string, string>();
+  const pinFor = (file: string): string => {
+    const known = pins.get(file);
+    if (known !== undefined) return known;
+    const pin = pinOf(resolve(top, file));
+    pins.set(file, pin);
+    return pin;
+  };
   const strong = reading.signals.filter((signal) => signal.strength === 'strong');
   const labels = [
     ...hits.map((hit) => showable(hit.file, PATH_SHOWN)),
     ...strong.map((s) => `${showable(s.file, PATH_SHOWN)}${s.line === null ? '' : `:${s.line}`}`),
   ];
   const ids = new Set([
-    ...hits.map((hit) => idOf(hit.kind, hit.file, hit.what, contentOf(resolve(top, hit.file)))),
+    ...hits.map((hit) => idOf(hit.kind, hit.file, hit.what, pinFor(hit.file))),
     ...strong.map((s) => idOf(s.kind, s.file, s.pin)),
   ]);
-  return { labels, ids: [...ids].sort().slice(0, MAX_IDS), notRead: reading.notRead };
+  const cut = seen.size - hits.length;
+  return {
+    labels,
+    ids: [...ids].sort(),
+    notRead: [
+      ...reading.notRead,
+      ...(cut > 0 ? [`${cut} more things git would run, past the first ${MAX_HITS}`] : []),
+    ],
+  };
 }
