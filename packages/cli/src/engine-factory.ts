@@ -12,6 +12,7 @@ import {
   StroqEngine,
   loadBundledRules,
   parsePolicy,
+  type FolderCheck,
   type Policy,
   type ScopeGate,
   type TaskAccessRequestSigner,
@@ -129,6 +130,8 @@ export interface EngineLocation {
    * drives this from each recorded event's own timestamp.
    */
   readonly now?: () => Date;
+  /** The reading of a folder before a command runs in it. `stroq attack` runs without one. */
+  readonly folderCheck?: FolderCheck;
 }
 
 /** An engine with all stores under `home`; `stroq attack` points this at throwaway directories. */
@@ -139,6 +142,7 @@ export function createEngineAt(location: EngineLocation): StroqEngine {
     rules: loadBundledRules,
     policy: location.policy,
     ...(location.scope === undefined ? {} : { scope: location.scope }),
+    ...(location.folderCheck === undefined ? {} : { folderCheck: location.folderCheck }),
     ...(location.taskAccessSigner === undefined
       ? {}
       : { taskAccessSigner: location.taskAccessSigner }),
@@ -164,5 +168,13 @@ export function createEngineAt(location: EngineLocation): StroqEngine {
 }
 
 export function createEngine(): StroqEngine {
-  return createEngineAt({ home: stroqHome(), userHome: homedir(), policy: loadPolicy() });
+  const home = stroqHome();
+  const userHome = homedir();
+  return createEngineAt({
+    home,
+    userHome,
+    policy: loadPolicy(),
+    folderCheck: async (input) =>
+      (await import('./folder-check.js')).checkFolder(input, { home, userHome }),
+  });
 }

@@ -348,14 +348,15 @@ export const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'trust',
-    synopsis: 'trust [<file>] [--list] [--remove <file>] [--json]',
+    synopsis: 'trust [<file>] [--folder <dir>] [--list] [--remove <path>] [--json]',
     about: [
       "waive a false positive on a file's exact content; any change to the file taints",
       'again. Without arguments, list what is trusted',
     ],
     flags: [
       ['--list', 'list trusted files'],
-      ['--remove <file>', 'stop trusting a file'],
+      ['--folder <dir>', 'stop asking about what a folder holds now; anything new asks again'],
+      ['--remove <path>', 'stop trusting a file or a folder'],
       ['--json', 'machine-readable output'],
     ],
   },

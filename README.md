@@ -33,6 +33,7 @@ It reads your last 30 days of sessions, your key files and the folders your agen
 ```text
 npx @stroq/cli            a card of your own sessions, like the one above
 npx @stroq/cli init       stop it next time: guard your agent
+npx @stroq/cli inspect    read a folder you were sent before you run it
 npx @stroq/cli why        why an action was stopped
 npx @stroq/cli attack     watch Stroq stop 36 known attacks, in a sandbox
 npx @stroq/cli uninstall  remove Stroq
@@ -138,7 +139,7 @@ Stroq names a send only when it sees the key in the command that sent it. A scri
 - **Before each action.** Native hooks for Claude Code, Cursor, Codex, Copilot CLI, Windsurf and Antigravity, a plugin for OpenClaw, and a stdio MCP proxy. Supported outbound calls containing a known secret can be denied; provenance ties later actions to the tool output they repeat. A question about a value copied from text the agent read is asked once per session in Claude Code, unless the session has started something in the background.
 - **After the fact.** `replay` and `sent` read local session records, including sessions from before Stroq was installed. Old, rotated or unknown values may be missed, and a key that did not show in a command may still have left in a script, a file or a variable. A local transcript match does not by itself prove delivery to a model provider.
 - **Local.** No outbound network calls from the hooks; the hook of an older Task Lock run speaks only to its local parent controller. No telemetry.
-- **Limits.** A hook sees only what the host sends it, and that differs by agent and version. Matching is text-level, so a command the model writes from scratch does not trace back to a source. It is a filter, not a sandbox. Read the [integration limits](docs/AGENTS.md) before relying on a live hook.
+- **Limits.** A hook sees only what the host sends it, and that differs by agent and version. Matching is text-level, so a command the model writes from scratch does not trace back to a source. It is a filter, not a sandbox ([how the two fit](docs/SANDBOXES.md)). Read the [integration limits](docs/AGENTS.md) before relying on a live hook.
 
 ## Docs
 

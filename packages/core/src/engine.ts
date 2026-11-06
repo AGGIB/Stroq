@@ -77,6 +77,16 @@ const NO_COPIES: ReadonlySet<string> = new Set();
 const inputHash = (input: unknown): string =>
   createHash('sha256').update(stableStringify(input)).digest('hex').slice(0, 32);
 
+/**
+ * A reading of the folder a command is about to run in, made outside the engine. An answer turns an
+ * allowed call into a question; it is never a refusal and cannot lift one.
+ */
+export type FolderCheck = (input: {
+  readonly sessionId: string;
+  readonly command: string;
+  readonly cwd: string;
+}) => Promise<{ readonly ruleId: string; readonly reason: string } | null>;
+
 export interface EngineOptions {
   /**
    * The compiled rules, or the function that compiles them. A function is called once, the first
@@ -100,6 +110,7 @@ export interface EngineOptions {
   readonly canaryFiles?: CanaryFiles;
   /** Optional task contract. Without a gate the policy decision and audit shape are unchanged. */
   readonly scope?: ScopeGate;
+  readonly folderCheck?: FolderCheck;
   /** Parent-only signer. The engine never reads or creates signing keys. */
   readonly taskAccessSigner?: TaskAccessRequestSigner;
   readonly now?: () => Date;
@@ -726,6 +737,22 @@ export class StroqEngine {
       .catch(() => undefined);
   }
 
+  /** An allowed shell command in a folder that holds something to read first becomes a question. */
+  private async afterFolderCheck(event: PreToolEvent, decision: Decision): Promise<Decision> {
+    const check = this.opts.folderCheck;
+    const command = event.toolInput['command'];
+    if (check === undefined || decision.effect !== 'allow' || typeof command !== 'string') {
+      return decision;
+    }
+    try {
+      const asked = await check({ sessionId: event.sessionId, command, cwd: event.cwd });
+      return asked === null ? decision : { effect: 'ask', ...asked };
+    } catch {
+      // A reading that failed found nothing, and the policy has already judged the call.
+      return decision;
+    }
+  }
+
   async pre(event: PreToolEvent): Promise<PreResult> {
     const classified = classifyTool(event.toolName, event.toolInput, event.cwd);
     // Producer evidence denotes MCP even if a future tool spelling is not classified yet.
@@ -831,7 +858,8 @@ export class StroqEngine {
       decision: policyDecision,
     });
     // Task extensions and custom scope implementations cannot lift governance refusal.
-    const decision = governance ?? gated?.decision ?? policyDecision;
+    const settled = governance ?? gated?.decision ?? policyDecision;
+    const decision = gated === null ? await this.afterFolderCheck(event, settled) : settled;
     const provenance = origin.counted.map(toEvidence);
     const gaps = await this.recorder.gaps(unverified, event);
     const summary = await this.safeSummary(

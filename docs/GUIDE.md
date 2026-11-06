@@ -412,6 +412,23 @@ When you open or build it (1, ordinary — not findings)
 
 Exit 1 on anything in the first group, 0 otherwise; the second group never fails the command. A hook in `.git/hooks` other than `pre-commit`, `pre-push`, `commit-msg` or `prepare-commit-msg` is in the first group, and so is one of those four whose text downloads and runs code or could not be read: a folder downloaded with its `.git` runs `post-index-change` on the first `git status`. It reads `.git/config` as git does, without running git: comments and quotes, a key on the line of its section (`[core] fsmonitor = ...`), a quoted subsection that holds a `]` or an escaped quote, the escapes git takes in a value, and a value continued with a backslash, which git does only inside a value and never from a comment. Git refuses a whole config it cannot read and runs none of it, so the first line git would refuse is a finding of its own, to read in a text editor, and so is a config too large to read (over 256 KiB). Keys are named in lower case, as git names them. In a bare repository it finds in the folder, a config is read under every name it has on disk (`config` and `CONFIG` side by side), and a `commondir` that names a folder inside, one called `..x` included, is followed.
 
+**It reads the code too, for a folder someone sent you.** A repository that came with a job offer does its work when you run `npm test`, and neither git nor an editor has anything to say about that. So `inspect` also reads the project's JavaScript, TypeScript, Python and shell files, its `package.json` scripts, its Makefile, the config files a tool loads by itself (`hardhat.config.js`, `conftest.py`, `setup.py` and the like) and the instruction files an agent takes up (`CLAUDE.md`, `AGENTS.md`, `.cursor/rules`):
+
+```text
+READ THIS BEFORE YOU RUN IT (2)
+  src/auth.js:2  runs text it fetched or decoded as code
+  public/fa.woff2  is named as a font, image or media file and holds code
+
+ALSO WORTH A LOOK (1)
+  tools/build.js:14  runs text as code
+```
+
+These are places to read and not verdicts, so neither list changes the exit code. Honest code does some of this. What is listed is what the text shows: code that is encoded, put together at run time or fetched later is not seen, nor is anything in `node_modules`, in a file over 1 MiB, or in another language. `NOT READ` says what it skipped in this folder. When nothing is found, it says so and says that this does not make the folder safe.
+
+**In a session, the hook makes the same reading once.** The first time an agent in a session runs git, or a command that runs the project's code (`npm`, `node`, `python`, `pytest`, `make`, `forge` and the like), in a folder holding something from the first list above or from `BEFORE YOU APPROVE ANYTHING`, Stroq asks you first (`ask-foreign-folder`). It asks again when the folder is updated and what it finds has changed. The reading took about half a second on a repository of 2,500 files on one machine, once a session; a command that runs no project code does not read the folder. If you have read it and it is fine, run `stroq trust --folder .` yourself: that holds for what the folder has now, and anything new asks again. An agent cannot run it for you through its shell.
+
+This can't stand in for running `inspect` first. `git clone … && npm install` on one line runs before there is a folder to read, and what an agent runs at its own startup comes before any hook. To limit what a program does once it is running, see [Stroq and a sandbox](SANDBOXES.md).
+
 **Stroq's hooks cannot cover that moment, and this is the honest reason the command exists.** Agents run `git status` at startup to orient themselves. On Claude Code that happens before the workspace-trust prompt, and a `SessionStart` hook is gated on that same prompt, so no hook Stroq installs can get in front of it. A command you run first can.
 
 The other half is `--env`, which prints two git settings:

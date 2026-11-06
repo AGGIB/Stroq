@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
@@ -10,7 +10,10 @@ import {
   type TrustEntry,
   type TrustList,
 } from '@stroq/core';
-import { trustFile } from '../paths.js';
+import { topOf } from '../folder-check.js';
+import { readFolder } from '../folder-reading.js';
+import { readTrustedFolders, writeTrustedFolders } from '../folder-trust.js';
+import { trustFile, trustedFoldersFile } from '../paths.js';
 
 /**
  * `stroq trust <file>` — say that this content is documentation, not an instruction.
@@ -83,16 +86,67 @@ function formatList(entries: readonly TrustEntry[]): string {
     .join('\n')}\n`;
 }
 
+/** How many of a folder's places are named when it is trusted. */
+const PLACES_SHOWN = 20;
+
+/** Pins a folder to what the reading finds in it now. */
+function trustFolder(dir: string): { code: number; message: string } {
+  const path = resolve(dir);
+  if (!existsSync(path)) {
+    return { code: 1, message: `stroq trust: no such folder: ${path}\n` };
+  }
+  const top = topOf(path);
+  const { places, found } = readFolder(top);
+  if (places.length === 0) {
+    return { code: 0, message: `${top}: the reading points at nothing here — nothing to trust\n` };
+  }
+  const file = trustedFoldersFile();
+  writeTrustedFolders(file, { ...readTrustedFolders(file), [top]: found });
+  const more = places.length - PLACES_SHOWN;
+  return {
+    code: 0,
+    message: [
+      `trusted ${top}, for what it holds now:`,
+      ...places.slice(0, PLACES_SHOWN).map((place) => `  ${place}`),
+      ...(more > 0 ? [`  and ${more} more`] : []),
+      'Anything new found here is asked about again.',
+      '',
+    ].join('\n'),
+  };
+}
+
 export function runTrust(argv: readonly string[], now: () => Date = () => new Date()): number {
   const { values, positionals } = parseArgs({
     args: [...argv],
-    options: { list: { type: 'boolean' }, remove: { type: 'string' }, json: { type: 'boolean' } },
+    options: {
+      list: { type: 'boolean' },
+      remove: { type: 'string' },
+      folder: { type: 'string' },
+      json: { type: 'boolean' },
+    },
     allowPositionals: true,
   });
   const file = trustFile();
 
+  if (values.folder !== undefined) {
+    const { code, message } = trustFolder(values.folder);
+    process.stdout.write(message);
+    return code;
+  }
+
   if (values.remove !== undefined) {
     const path = resolve(values.remove);
+    const folders = trustedFoldersFile();
+    const trusted = readTrustedFolders(folders);
+    const top = topOf(path);
+    if (trusted[top] !== undefined) {
+      writeTrustedFolders(
+        folders,
+        Object.fromEntries(Object.entries(trusted).filter(([folder]) => folder !== top)),
+      );
+      process.stdout.write(`removed ${top}\n`);
+      return 0;
+    }
     const current = read(file);
     const entries = current.entries.filter((e) => e.source !== path);
     if (entries.length === current.entries.length) {
@@ -106,10 +160,11 @@ export function runTrust(argv: readonly string[], now: () => Date = () => new Da
 
   if (values.list === true || positionals.length === 0) {
     const entries = read(file).entries;
+    const folders = Object.keys(readTrustedFolders(trustedFoldersFile()));
     process.stdout.write(
       values.json === true
-        ? `${JSON.stringify({ version: 1, entries }, null, 2)}\n`
-        : formatList(entries),
+        ? `${JSON.stringify({ version: 1, entries, folders }, null, 2)}\n`
+        : formatList(entries) + folders.map((folder) => `${folder}  (folder)\n`).join(''),
     );
     return 0;
   }

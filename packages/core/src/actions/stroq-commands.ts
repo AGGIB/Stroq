@@ -143,7 +143,10 @@ export function subcommandChangesState(sub: string, args: readonly string[]): bo
   if (sub === 'vet') return args.some(isOnlineFlag);
   if (sub === 'exposure') return args.some(isProbeFlag);
   if (sub !== 'trust') return false;
-  return after.includes('--remove') || after.some((word) => !word.startsWith('-'));
+  return (
+    after.includes('--remove') ||
+    after.some((word) => !word.startsWith('-') || word.startsWith('--folder'))
+  );
 }
 
 // -------------------------------------------------------------------------------------------

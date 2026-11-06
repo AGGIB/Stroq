@@ -19,7 +19,7 @@ import { SCENARIOS } from '../src/attack/scenarios/index.js';
 // what coverage sees; this file pins the same functions in-process.
 
 /** The commands on the first screen, in the order it lists them. The bare `stroq` is above them. */
-const CORE = ['init', 'why', 'attack', 'uninstall'];
+const CORE = ['init', 'inspect', 'why', 'attack', 'uninstall'];
 /** What Stroq writes into an agent's config (no person runs these), and the card, which `stroq` runs. */
 const HIDDEN = ['hook', 'mcp', 'card', 'show'];
 
@@ -30,11 +30,12 @@ const listed = (text: string): string[] =>
 const linesOf = (text: string): string[] => text.trimEnd().split('\n');
 
 describe('usage: the first screen', () => {
-  it('is the owner’s five lines and a pointer to the rest, and nothing else', () => {
+  it('is the owner’s six lines and a pointer to the rest, and nothing else', () => {
     expect(usage()).toBe(
       [
         'stroq            who is really in charge of your agent? A card of your sessions',
         'stroq init       stop it next time: guard your agent',
+        'stroq inspect    read a folder you were sent before you run it',
         'stroq why        why an action was stopped',
         'stroq attack     watch Stroq stop 36 known attacks, in a sandbox',
         'stroq uninstall  remove Stroq',
@@ -86,7 +87,7 @@ describe('usageAll: stroq help --all', () => {
     for (const name of HIDDEN) expect(names).not.toContain(name);
   });
 
-  it('groups them by job, in this order, the five of the first screen first', () => {
+  it('groups them by job, in this order, the six of the first screen first', () => {
     const text = usageAll();
     const at = TITLES.map((title) => text.indexOf(`\n${title}\n`));
     for (const [i, where] of at.entries()) expect(where, TITLES[i]).toBeGreaterThan(0);
@@ -95,7 +96,7 @@ describe('usageAll: stroq help --all', () => {
     expect(groups).toEqual([
       CORE,
       ['sent', 'replay'],
-      ['inspect', 'vet', 'exposure'],
+      ['vet', 'exposure'],
       ['console', 'doctor', 'untaint', 'trust', 'log', 'verify', 'policy', 'canary'],
     ]);
   });
@@ -130,7 +131,6 @@ describe('tierOf', () => {
       [
         'sent',
         'replay',
-        'inspect',
         'vet',
         'exposure',
         'console',

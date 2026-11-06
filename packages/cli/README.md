@@ -33,6 +33,7 @@ It reads your last 30 days of sessions, your key files and the folders your agen
 ```text
 npx @stroq/cli            a card of your own sessions, like the one above
 npx @stroq/cli init       stop it next time: guard your agent
+npx @stroq/cli inspect    read a folder you were sent before you run it
 npx @stroq/cli why        why an action was stopped
 npx @stroq/cli attack     watch Stroq stop 36 known attacks, in a sandbox
 npx @stroq/cli uninstall  remove Stroq
