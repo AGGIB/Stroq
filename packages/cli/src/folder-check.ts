@@ -60,6 +60,7 @@ const MAX_UP = 4096;
 /** How much of a command is looked at. It is read again here, on every call that is allowed. */
 const MAX_COMMAND_TEXT = 256 * 1024;
 const MAX_SEGMENTS = 1000;
+const MAX_FOLDERS = 16;
 const MAX_SEGMENT_TEXT = 8192;
 const MAX_WORDS_LOOKED_AT = 16;
 /** A marker is about one session: past this many of them, the ones this old go. */
@@ -199,9 +200,10 @@ interface CommandTarget {
   readonly programInFolder: boolean;
 }
 
-/** The first thing a command runs of a project, and where. */
-function targetOf(command: string, cwd: string, userHome: string): CommandTarget | null {
-  if (command.length > MAX_COMMAND_TEXT) return null;
+/** What a command runs of projects, and where, in the order it reaches them. */
+function targetsOf(command: string, cwd: string, userHome: string): readonly CommandTarget[] {
+  if (command.length > MAX_COMMAND_TEXT) return [];
+  const targets: CommandTarget[] = [];
   let here = cwd;
   const outer: string[] = [];
   for (const segment of splitSegments(command).slice(0, MAX_SEGMENTS)) {
@@ -223,16 +225,16 @@ function targetOf(command: string, cwd: string, userHome: string): CommandTarget
     } else if (name !== '' && (RUNS_PROJECT.has(name) || isProjectPath(words[at] ?? ''))) {
       const onlyAsks = after.length > 0 && after.every((word) => ASKS_ABOUT_ITSELF.has(word));
       if (!onlyAsks) {
-        return {
+        targets.push({
           folder: placedBy(name, after, here, userHome),
           words: after,
           programInFolder: isProjectPath(words[at] ?? ''),
-        };
+        });
       }
     }
     if (closes) here = outer.pop() ?? here;
   }
-  return null;
+  return targets;
 }
 
 /** The folder an option of the program names, or the folder it starts in. */
@@ -249,7 +251,7 @@ function placedBy(name: string, after: readonly string[], here: string, userHome
 
 /** Where a command runs git or the project's code, or null when it does neither. */
 export function folderOfCommand(command: string, cwd: string, userHome = ''): string | null {
-  return targetOf(command, cwd, userHome)?.folder ?? null;
+  return targetsOf(command, cwd, userHome)[0]?.folder ?? null;
 }
 
 /** The real path of a folder, so that two names of one folder are one folder. */
@@ -430,11 +432,13 @@ const markerPathOf = (home: string, sessionId: string, top: string): string =>
   join(home, MARKERS, `${hashOf(`${sessionId}\0${top}`).slice(0, 32)}.json`);
 
 /** Fixed words and a count: names in the folder are the folder author's text, and a model reads this. */
-function questionOf(count: number): string {
+function questionOf(count: number, folders = 1): string {
   const what =
     count === 1
       ? '1 place that runs by itself, runs what it fetches, or hides what it does'
       : `${count} places that run by themselves, run what they fetch, or hide what they do`;
+  if (folders > 1)
+    return `Stroq read the folders this command reaches and found ${what}. They may be fine. Read each folder first: stroq inspect <dir>. If you have and it is fine, run this yourself in a terminal for that folder: stroq trust --folder <dir>.`;
   return `Stroq read this folder and found ${what}. It may be fine. Read it first: stroq inspect. If you have and it is fine, run this yourself in a terminal: stroq trust --folder .`;
 }
 
@@ -442,10 +446,7 @@ function questionOf(count: number): string {
  * The folder to look at for a command, or null. A parent folder of projects is not a project: it is
  * read only when the command runs something that is in it.
  */
-function folderToRead(input: FolderCheckInput, userHome: string): string | null {
-  const target = targetOf(input.command, input.cwd, userHome);
-  if (target === null) return null;
-  const top = topOf(target.folder, userHome);
+function topToRead(target: CommandTarget, top: string, userHome: string): string | null {
   if (top === realOf(userHome) || top === parse(top).root) return null;
   if (isRepositoryTop(top) || hasProjectFile(top) || target.programInFolder) return top;
   const named = target.words
@@ -454,57 +455,105 @@ function folderToRead(input: FolderCheckInput, userHome: string): string | null 
   return named ? top : null;
 }
 
+/** Distinct project tops, or null when the command reaches more folders than the hook can read. */
+function foldersToRead(input: FolderCheckInput, userHome: string): readonly string[] | null {
+  const folders = new Map<string, string>();
+  const tops = new Set<string>();
+  for (const target of targetsOf(input.command, input.cwd, userHome)) {
+    const folder = realOf(target.folder);
+    let top = folders.get(folder);
+    if (top === undefined) {
+      if (folders.size >= MAX_FOLDERS) return null;
+      top = topOf(folder, userHome);
+      folders.set(folder, top);
+    }
+    // A later command can name a program in a folder that an earlier command did not.
+    const project = topToRead(target, top, userHome);
+    if (project !== null) tops.add(project);
+  }
+  return [...tops];
+}
+
 const callOf = (input: FolderCheckInput): string =>
   hashOf(`${input.command}\0${input.callId ?? ''}`);
 
 const trustedIn = (home: string, top: string): readonly string[] =>
   readTrustedFolders(trustedFoldersFileIn(home))[top] ?? [];
 
-/** The question to ask before this command runs, or null. Reads; runs nothing. */
-export async function checkFolder(
+/** The unanswered places in one project. */
+async function pendingIn(
+  top: string,
   input: FolderCheckInput,
   options: FolderCheckOptions,
-): Promise<FolderQuestion | null> {
-  const top = folderToRead(input, options.userHome);
-  if (top === null) return null;
+  budgetMs: number,
+): Promise<number> {
   const markerPath = markerPathOf(options.home, input.sessionId, top);
   const marker = readMarker(markerPath);
   const signature = signatureOf(top);
   const command = callOf(input);
 
   if (marker?.signature === signature) {
-    if (marker.pending.length === 0) return null;
+    if (marker.pending.length === 0) return 0;
     // The person may have read it and said so while the question was out.
     const trusted = new Set(trustedIn(options.home, top));
     const pending = marker.pending.filter((id) => !trusted.has(id));
     const reason = pending.length === 0 ? '' : questionOf(pending.length);
     writeMarker(markerPath, { ...marker, pending, command, reason });
-    return pending.length === 0 ? null : { ruleId: 'ask-foreign-folder', reason };
+    return pending.length;
   }
 
   // Only the first command of a session in a folder pays for loading the readers.
   const { readFolder } = await import('./folder-reading.js');
-  const { ids } = readFolder(top, options.budgetMs ?? BUDGET_MS);
+  const { ids } = readFolder(top, budgetMs);
   const known = marker?.known ?? [];
   const answered = new Set([...known, ...trustedIn(options.home, top)]);
   const pending = ids.filter((id) => !answered.has(id));
   const reason = pending.length === 0 ? '' : questionOf(pending.length);
   writeMarker(markerPath, { signature, known, pending, command, reason });
-  return pending.length === 0 ? null : { ruleId: 'ask-foreign-folder', reason };
+  return pending.length;
+}
+
+/** Fixed words only: the folder author's paths and commands never become a model's instructions. */
+const incompleteQuestion = (): FolderQuestion => ({
+  ruleId: 'ask-foreign-folder',
+  reason:
+    'Stroq could not read every folder this command reaches. Run commands in one folder at a time, and read each folder first: stroq inspect.',
+});
+
+/** The question to ask before this command runs, or null. Reads; runs nothing. */
+export async function checkFolder(
+  input: FolderCheckInput,
+  options: FolderCheckOptions,
+): Promise<FolderQuestion | null> {
+  const tops = foldersToRead(input, options.userHome);
+  if (tops === null) return incompleteQuestion();
+  const deadline = performance.now() + (options.budgetMs ?? BUDGET_MS);
+  let pending = 0;
+  for (const [index, top] of tops.entries()) {
+    // One command gets one budget. Share what remains so that its first project cannot take it all.
+    const budgetMs = (deadline - performance.now()) / (tops.length - index);
+    const count = await pendingIn(top, input, options, budgetMs);
+    pending += count;
+  }
+  return pending === 0
+    ? null
+    : { ruleId: 'ask-foreign-folder', reason: questionOf(pending, tops.length) };
 }
 
 /** The host reports that a command ran: a question out about that command was answered yes. */
 export function noteFolderRan(input: FolderCheckInput, options: FolderCheckOptions): void {
-  const top = folderToRead(input, options.userHome);
-  if (top === null) return;
-  const markerPath = markerPathOf(options.home, input.sessionId, top);
-  const marker = readMarker(markerPath);
-  if (marker === null || marker.pending.length === 0) return;
-  if (marker.command !== callOf(input)) return;
-  writeMarker(markerPath, {
-    ...marker,
-    known: [...new Set([...marker.known, ...marker.pending])],
-    pending: [],
-    reason: '',
-  });
+  const tops = foldersToRead(input, options.userHome);
+  if (tops === null) return;
+  for (const top of tops) {
+    const markerPath = markerPathOf(options.home, input.sessionId, top);
+    const marker = readMarker(markerPath);
+    if (marker === null || marker.pending.length === 0) continue;
+    if (marker.command !== callOf(input)) continue;
+    writeMarker(markerPath, {
+      ...marker,
+      known: [...new Set([...marker.known, ...marker.pending])],
+      pending: [],
+      reason: '',
+    });
+  }
 }

@@ -169,6 +169,66 @@ describe('what it asks about', () => {
     expect(await ask(dir, 'npm test')).toBeNull();
   });
 
+  it('reads a later project after an ordinary git command', async () => {
+    const first = folder({ 'package.json': '{}' });
+    const second = folder({ 'src/auth.js': FETCHED });
+    const home = temp();
+    expect(await ask(first, 'git status', home)).toBeNull();
+    expect(await ask(first, `git status && cd "${second}" && npm test`, home)).not.toBeNull();
+  });
+
+  it('asks about every project and records an answer for the whole command', async () => {
+    const first = folder({ 'src/auth.js': FETCHED });
+    const second = folder({ 'src/auth.js': FETCHED });
+    const home = temp();
+    const command = `git status && cd "${second}" && npm test`;
+    const question = await ask(first, command, home);
+    expect(question?.reason).toContain('2 places');
+    expect(question?.reason).toContain('each folder');
+    expect(question?.reason).not.toContain('trust --folder .');
+    ran(first, command, home);
+    expect(await ask(first, command, home)).toBeNull();
+    expect(await ask(second, 'npm test', home)).toBeNull();
+  });
+
+  it('restores the outer folder after running a project in a subshell', async () => {
+    const first = folder({ 'src/auth.js': FETCHED });
+    const second = folder({ 'src/auth.js': FETCHED });
+    const command = `(cd "${second}" && npm test) && npm test`;
+    expect((await ask(first, command))?.reason).toContain('2 places');
+  });
+
+  it('reads a project only once when several commands run in it', async () => {
+    const dir = folder({ 'src/auth.js': FETCHED });
+    const command = Array.from(
+      { length: 20 },
+      (_, index) => `git status --porcelain=v${index}`,
+    ).join(' && ');
+    expect((await ask(dir, command))?.reason).toContain('1 place');
+  });
+
+  it('asks to split a command that reaches more folders than it can read', async () => {
+    const dir = folder({}, false);
+    const command = Array.from({ length: 17 }, (_, index) => {
+      const child = join(dir, `project-${index}`);
+      mkdirSync(child);
+      writeFileSync(join(child, 'package.json'), '{}');
+      return `git -C "${child}" status`;
+    }).join(' && ');
+    expect((await ask(dir, command))?.reason).toContain('one folder at a time');
+  });
+
+  it('keeps a pending question when the reading has no time left', async () => {
+    const dir = folder({ 'src/auth.js': FETCHED });
+    const home = temp();
+    expect(await ask(dir, 'npm test', home)).not.toBeNull();
+    const result = await checkFolder(
+      { sessionId: 's1', command: 'npm test', cwd: dir },
+      { home, userHome: temp(), budgetMs: 0 },
+    );
+    expect(result?.reason).toContain('1 place');
+  });
+
   it('does not read anything for a command that runs nothing of the project', async () => {
     expect(await ask(folder({ 'src/auth.js': FETCHED }), 'ls -la')).toBeNull();
   });

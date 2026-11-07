@@ -138,8 +138,8 @@ const isBareProgram = (full: string, name: string): boolean => {
 // Text run as code, when the text is not written right there. The lookahead is what keeps
 // `Function('return this')`, which every bundle of the last decade has, out of the reading.
 const RUNS_TEXT = {
-  js: /(?<![\w$.])eval\s*\(\s*(?!['"`])|(?<![\w$.])(?:new\s+)?Function\s*\(\s*(?!['"`])|\bvm\.(?:runIn\w+|compileFunction)\s*\(\s*(?!['"`])/g,
-  py: /(?<![\w.])(?:eval|exec)\s*\(\s*(?!['"])/g,
+  js: /(?<![\w$.])eval\s*\(\s*(?![\s'"`])|(?<![\w$.])(?:new\s+)?Function\s*\(\s*(?![\s'"`])|\bvm\.(?:runIn\w+|compileFunction)\s*\(\s*(?![\s'"`])/g,
+  py: /(?<![\w.])(?:eval|exec)\s*\(\s*(?![\s'"])/g,
 } as const;
 
 // Where such text would come from: the network, or a decoding.

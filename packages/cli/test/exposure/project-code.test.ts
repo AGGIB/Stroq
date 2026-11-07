@@ -56,8 +56,33 @@ describe('code that runs text', () => {
     ]);
   });
 
-  it('a literal argument is not text that came from somewhere', () => {
-    expect(signalsOf({ 'a.js': "const g = Function('return this')();\nfetch(u);\n" })).toEqual([]);
+  it.each([
+    ['a.js', 'Function', "'return this'"],
+    ['a.js', 'new Function', '"return this"'],
+    ['a.js', 'eval', '`1 + 1`'],
+    ['a.js', 'vm.runInNewContext', "'1 + 1'"],
+    ['a.js', 'vm.compileFunction', "'return 1'"],
+    ['a.py', 'eval', "'1 + 1'"],
+    ['a.py', 'exec', '"print(1)"'],
+  ])('a literal argument to %s %s is not fetched text', (file, call, literal) => {
+    for (const space of ['', ' ', '\n\t']) {
+      const source = `${call}(${space}${literal});\n${file.endsWith('.py') ? 'requests.get(u)' : 'fetch(u)'};\n`;
+      expect(signalsOf({ [file]: source }), source).toEqual([]);
+    }
+  });
+
+  it.each([
+    ['a.js', 'eval', 'fetch(u)'],
+    ['a.js', 'Function', 'fetch(u)'],
+    ['a.js', 'vm.runInNewContext', 'fetch(u)'],
+    ['a.py', 'exec', 'requests.get(u)'],
+  ])('whitespace before a dynamic argument to %s %s keeps its signal', (file, call, fetch) => {
+    for (const space of [' ', '\n\t']) {
+      const source = `code = ${fetch};\n${call}(${space}code);\n`;
+      expect(summary(signalsOf({ [file]: source })), source).toEqual([
+        'strong fetched-text-runs ' + file + ':2',
+      ]);
+    }
   });
 
   it('a comment is not code', () => {
