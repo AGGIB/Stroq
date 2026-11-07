@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createElement, type ComponentType } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
+import cliPackage from '../../packages/cli/package.json';
 
 /** Records every element a render creates, so a test can reach a button's handler. */
 const seen = vi.hoisted(() => ({
@@ -111,6 +112,11 @@ describe('the default state', () => {
 });
 
 describe('the shell', () => {
+  it('shows the CLI package version in the sidebar', () => {
+    const html = renderToStaticMarkup(createElement(PlatformShell, { children: 'page' }));
+    expect(html).toContain(`<span class="version">v${cliPackage.version}</span>`);
+  });
+
   it('says plainly when nothing is connected and offers no example or guide', () => {
     for (const path of ['/', '/live/', '/agents/', '/policies/', '/skills/']) {
       seen.path = path;
