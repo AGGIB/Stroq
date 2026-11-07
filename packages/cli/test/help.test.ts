@@ -123,7 +123,7 @@ describe('the developer tools that used to be commands', () => {
 
 describe('stroq --help and stroq help --all', () => {
   /** The first screen, in the order it lists them, after the bare `stroq`. */
-  const CORE = ['init', 'why', 'attack', 'uninstall'];
+  const CORE = ['init', 'inspect', 'why', 'attack', 'uninstall'];
   /** What Stroq writes into an agent's config (no person types these), and the card, which `stroq` runs. */
   const HIDDEN = ['hook', 'mcp', 'card', 'show'];
   /** The commands a screen lists: one per line that starts with `stroq <name>`, indented or not. */
@@ -150,7 +150,7 @@ describe('stroq --help and stroq help --all', () => {
     expect(run('--share').stdout).toMatch(/npx @stroq\/cli\n$/);
   });
 
-  it('lists the bare `stroq` and the four core commands on that screen, in under 20 lines', () => {
+  it('lists the bare `stroq` and the five core commands on that screen, in under 20 lines', () => {
     const text = run('--help').stdout;
     expect(listed(text)).toEqual(CORE);
     expect(text).toMatch(/^stroq {2,}who is really in charge of your agent\?/m);

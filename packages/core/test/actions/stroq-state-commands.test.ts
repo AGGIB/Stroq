@@ -169,6 +169,8 @@ describe("changing Stroq's own state through the commands that come after 0.23",
       'stroq uninstall',
       'stroq trust README.md',
       'stroq trust --remove README.md',
+      'stroq trust --folder .',
+      'stroq trust --folder=.',
     ])
       expect(stroqStateSignals(command), command).toEqual(['stroq-state-change']);
     for (const command of [
