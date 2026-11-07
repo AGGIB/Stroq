@@ -66,6 +66,7 @@ const SECTIONS: readonly Section[] = [
     title: 'Start here',
     commands: [
       core('init', 'init', 'stop it next time: guard your agent'),
+      core('inspect', 'inspect', 'read a folder you were sent before you run it'),
       core('why', 'why', 'why an action was stopped'),
       core('attack', 'attack', `watch Stroq stop ${ATTACK_COUNT} known attacks, in a sandbox`),
       core('uninstall', 'uninstall', 'remove Stroq'),
@@ -83,7 +84,6 @@ const SECTIONS: readonly Section[] = [
     job: 'before',
     title: 'Check before you open or install',
     commands: [
-      more('inspect', 'inspect [<dir>]', 'What will this repo run when an agent opens it?'),
       more('vet', 'vet --from <path>', 'Read a skill or MCP server before you add it'),
       more('exposure', 'exposure', 'Map the agents and MCP servers on this machine'),
     ],

@@ -1,4 +1,5 @@
-import { chmodSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { dirname, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
@@ -10,7 +11,10 @@ import {
   type TrustEntry,
   type TrustList,
 } from '@stroq/core';
-import { trustFile } from '../paths.js';
+import { topOf } from '../folder-check.js';
+import { readFolder } from '../folder-reading.js';
+import { readTrustedFolders, writeTrustedFolders } from '../folder-trust.js';
+import { trustFile, trustedFoldersFile } from '../paths.js';
 
 /**
  * `stroq trust <file>` — say that this content is documentation, not an instruction.
@@ -83,33 +87,99 @@ function formatList(entries: readonly TrustEntry[]): string {
     .join('\n')}\n`;
 }
 
+/** How many of a folder's places are named when it is trusted. */
+const PLACES_SHOWN = 20;
+
+/** Pins a folder to what the reading finds in it now. */
+function trustFolder(dir: string): { code: number; message: string } {
+  const path = resolve(dir);
+  if (!existsSync(path)) {
+    return { code: 1, message: `stroq trust: no such folder: ${path}\n` };
+  }
+  const top = topOf(path, homedir());
+  const { labels, ids, notRead } = readFolder(top);
+  const skipped =
+    notRead.length === 0
+      ? []
+      : ['Not read, so not covered:', ...notRead.map((what) => `  ${what}`)];
+  if (ids.length === 0) {
+    return {
+      code: 0,
+      message: [
+        `${top}: the reading points at nothing here — nothing to trust`,
+        ...skipped,
+        '',
+      ].join('\n'),
+    };
+  }
+  const file = trustedFoldersFile();
+  writeTrustedFolders(file, { ...readTrustedFolders(file), [top]: ids });
+  const more = labels.length - PLACES_SHOWN;
+  return {
+    code: 0,
+    message: [
+      `trusted ${top}, for what it holds now:`,
+      ...labels.slice(0, PLACES_SHOWN).map((place) => `  ${place}`),
+      ...(more > 0 ? [`  and ${more} more`] : []),
+      ...skipped,
+      'A change to one of these files, or anything new found here, is asked about again.',
+      '',
+    ].join('\n'),
+  };
+}
+
 export function runTrust(argv: readonly string[], now: () => Date = () => new Date()): number {
   const { values, positionals } = parseArgs({
     args: [...argv],
-    options: { list: { type: 'boolean' }, remove: { type: 'string' }, json: { type: 'boolean' } },
+    options: {
+      list: { type: 'boolean' },
+      remove: { type: 'string' },
+      folder: { type: 'string' },
+      json: { type: 'boolean' },
+    },
     allowPositionals: true,
   });
   const file = trustFile();
 
+  if (values.folder !== undefined) {
+    const { code, message } = trustFolder(values.folder);
+    process.stdout.write(message);
+    return code;
+  }
+
   if (values.remove !== undefined) {
     const path = resolve(values.remove);
+    // A file that was trusted by name is what was meant, even in a folder that is trusted too.
     const current = read(file);
     const entries = current.entries.filter((e) => e.source !== path);
-    if (entries.length === current.entries.length) {
-      process.stdout.write(`${path} was not trusted\n`);
-      return 1;
+    if (entries.length < current.entries.length) {
+      write(file, { version: 1, entries });
+      process.stdout.write(`removed ${path}\n`);
+      return 0;
     }
-    write(file, { version: 1, entries });
-    process.stdout.write(`removed ${path}\n`);
-    return 0;
+    const folders = trustedFoldersFile();
+    const trusted = readTrustedFolders(folders);
+    // A file nobody trusted, or a typo, inside a trusted folder is not a way to untrust the folder.
+    const top = existsSync(path) && statSync(path).isDirectory() ? topOf(path, homedir()) : path;
+    if (trusted[top] !== undefined) {
+      writeTrustedFolders(
+        folders,
+        Object.fromEntries(Object.entries(trusted).filter(([folder]) => folder !== top)),
+      );
+      process.stdout.write(`removed ${top}\n`);
+      return 0;
+    }
+    process.stdout.write(`${path} was not trusted\n`);
+    return 1;
   }
 
   if (values.list === true || positionals.length === 0) {
     const entries = read(file).entries;
+    const folders = Object.keys(readTrustedFolders(trustedFoldersFile()));
     process.stdout.write(
       values.json === true
-        ? `${JSON.stringify({ version: 1, entries }, null, 2)}\n`
-        : formatList(entries),
+        ? `${JSON.stringify({ version: 1, entries, folders }, null, 2)}\n`
+        : formatList(entries) + folders.map((folder) => `${folder}  (folder)\n`).join(''),
     );
     return 0;
   }

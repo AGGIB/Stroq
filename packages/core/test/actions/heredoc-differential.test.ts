@@ -1,5 +1,6 @@
-import { execFile } from 'node:child_process';
+import { spawn } from 'node:child_process';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
@@ -305,32 +306,78 @@ afterAll(() => {
 const MARKS = ['b0', 'b1', 'b2', 'm1', 'm2', 's1'] as const;
 
 /** The marks the shell ran for the command: each is a file that `touch` made in a directory of its own. */
-function marksRun(shell: string, command: string): Promise<readonly string[]> {
+async function marksRun(
+  shell: string,
+  command: string,
+  timeoutMs = SPAWN_TIMEOUT_MS,
+): Promise<readonly string[]> {
   const cwd = mkdtempSync(join(dir, 'case-'));
-  return new Promise((resolve) => {
-    execFile(
-      '/bin/sh',
-      ['-c', `ulimit -t ${CPU_LIMIT_SECONDS}; exec "$0" -c "$1"`, shell, command],
-      {
-        cwd,
-        env: {
-          PATH: '/usr/bin:/bin',
-          HOME: cwd,
-          TMPDIR: cwd,
-          // `<<$EOF` is read by no shell as an expansion; a variable that is set must make no difference.
-          EOF: 'EOF',
+  try {
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn(
+        '/bin/sh',
+        ['-c', `ulimit -t ${CPU_LIMIT_SECONDS}; exec "$0" -c "$1"`, shell, command],
+        {
+          cwd,
+          detached: true,
+          stdio: ['ignore', 'pipe', 'pipe'],
+          env: {
+            PATH: '/usr/bin:/bin',
+            HOME: cwd,
+            TMPDIR: cwd,
+            // `<<$EOF` is read by no shell as an expansion; a variable that is set must make no difference.
+            EOF: 'EOF',
+          },
         },
-        timeout: SPAWN_TIMEOUT_MS,
-        killSignal: 'SIGKILL',
-      },
-      () => {
-        const ran = MARKS.filter((mark) => existsSync(join(cwd, mark)));
-        rmSync(cwd, { recursive: true, force: true });
-        resolve(ran);
-      },
-    );
-  });
+      );
+      child.stdout.resume();
+      child.stderr.resume();
+      // A shell can leave a loop or a process substitution behind. Its CPU limit applies to each
+      // process separately; stop the whole group before the callback reads marks and removes files.
+      const stop = (): void => {
+        if (child.pid === undefined) return;
+        try {
+          process.kill(-child.pid, 'SIGKILL');
+        } catch (error) {
+          const code = (error as NodeJS.ErrnoException).code;
+          // macOS can return EPERM for a group containing only zombies after its leader exits.
+          const exited = child.exitCode !== null || child.signalCode !== null;
+          const gone =
+            code === 'ESRCH' || (process.platform === 'darwin' && code === 'EPERM' && exited);
+          if (!gone)
+            reject(
+              new Error(
+                `${shell} group ${child.pid}, exit ${child.exitCode}, signal ${child.signalCode}: ${JSON.stringify(command)}`,
+                { cause: error },
+              ),
+            );
+        }
+      };
+      const timer = setTimeout(stop, timeoutMs);
+      child.once('close', () => {
+        clearTimeout(timer);
+        stop();
+        resolve();
+      });
+      child.once('error', (error) => {
+        clearTimeout(timer);
+        reject(error);
+      });
+    });
+    return MARKS.filter((mark) => existsSync(join(cwd, mark)));
+  } finally {
+    await rm(cwd, { recursive: true, force: true, maxRetries: 3, retryDelay: 100 });
+  }
 }
+
+describe.skipIf(SHELLS.length === 0)('the real-shell test runner', () => {
+  it('stops descendants before cleaning up a timed-out command', async () => {
+    const late = join(dir, 'after-timeout');
+    await marksRun('/bin/sh', '(sleep 2; touch ../after-timeout) & wait', 500);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+    expect(existsSync(late), 'a descendant kept running after the timeout').toBe(false);
+  });
+});
 
 /** Runs `work` over `items`, `limit` at a time. */
 async function inBatches<T>(
