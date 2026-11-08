@@ -25,8 +25,13 @@ import { createEngineAt, loadPolicy } from '../engine-factory.js';
 import { auditFile, auditFileIn } from '../paths.js';
 import { formatReplayHtml } from '../replay/html.js';
 import { formatPast, readPastSessions } from '../replay/past.js';
-import { findTranscripts, listAllTranscripts, type Transcript } from '../replay/transcript.js';
-import { claudeCodeReader, readerForFile } from '../sent/readers.js';
+import {
+  findTranscripts,
+  listAllTranscripts,
+  readTranscript,
+  type Transcript,
+} from '../replay/transcript.js';
+import { readerForFile } from '../sent/readers.js';
 
 /** One action that traced back to something the agent had read. */
 export interface ReplayConsequence {
@@ -470,8 +475,10 @@ export async function runReplay(args: readonly string[]): Promise<number> {
       process.stdout.write('no agent transcript found — looked under ~/.claude/projects\n');
       return 1;
     }
-    const reader = values.transcript === undefined ? claudeCodeReader : await readerForFile(path);
-    const transcript = await reader.read(path);
+    const transcript =
+      values.transcript === undefined
+        ? await readTranscript(path)
+        : await (await readerForFile(path)).read(path);
     if (transcript.events.length === 0) {
       process.stdout.write(`no tool calls recorded in ${path}\n`);
       return 1;
