@@ -14,6 +14,8 @@ export const auditFileIn = (home: string): string => join(home, 'audit.jsonl');
 export const secretsFileIn = (home: string): string => join(home, 'secrets.json');
 export const installRecordFileIn = (home: string): string => join(home, 'install.json');
 export const trustFileIn = (home: string): string => join(home, 'trust.json');
+/** The folders a person has read and said are fine (`stroq trust --folder`). */
+export const trustedFoldersFileIn = (home: string): string => join(home, 'trusted-folders.json');
 /** Decoy files planted with `stroq canary --file`: their paths, never the value inside. */
 export const canaryFilesFileIn = (home: string): string => join(home, 'canary-files.json');
 /** What `stroq exposure` last saw of the instruction and skill files, by sha256. */
@@ -109,6 +111,7 @@ export const policyFile = (): string => policyFileIn(stroqHome());
 export const secretsFile = (): string => secretsFileIn(stroqHome());
 export const installRecordFile = (): string => installRecordFileIn(stroqHome());
 export const trustFile = (): string => trustFileIn(stroqHome());
+export const trustedFoldersFile = (): string => trustedFoldersFileIn(stroqHome());
 export const inventoryFile = (): string => inventoryFileIn(stroqHome());
 export const canaryFilesFile = (): string => canaryFilesFileIn(stroqHome());
 export const cloakDir = (): string => cloakDirIn(stroqHome());

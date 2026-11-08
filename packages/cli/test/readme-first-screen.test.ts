@@ -5,7 +5,7 @@ import { usage } from '../src/help.js';
 import { ATTACK_COUNT } from '../src/help-listing.js';
 
 // The first screen of a README is the page a stranger reads before anything else. It says one thing,
-// shows the card, gives one line to run and lists five commands. There are two such pages: README.md,
+// shows the card, gives one line to run and lists six commands. There are two such pages: README.md,
 // which GitHub shows, and packages/cli/README.md, which npm shows. These checks hold both to the
 // product: the words the card avoids stay off them, their commands are the ones `stroq --help` lists,
 // the pictures they show are there and small, and the two say the same things in the same words.
@@ -79,9 +79,15 @@ describe.each(PAGES)('the first screen of $name', ({ firstScreen, pictureBase })
       summary: m[2] ?? '',
     }));
     const named = help.filter((line) => line.name !== undefined);
-    expect(named.map((line) => line.name)).toEqual(['init', 'why', 'attack', 'uninstall']);
+    expect(named.map((line) => line.name)).toEqual([
+      'init',
+      'inspect',
+      'why',
+      'attack',
+      'uninstall',
+    ]);
     const block = /```text\n((?:npx @stroq\/cli.*\n)+)```/.exec(firstScreen)?.[1] ?? '';
-    expect(block.trimEnd().split('\n')).toHaveLength(5);
+    expect(block.trimEnd().split('\n')).toHaveLength(6);
     for (const { name, summary } of named)
       expect(block, name).toMatch(
         new RegExp(`^npx @stroq/cli {1,}${name} {2,}${escaped(summary)}$`, 'm'),

@@ -10,6 +10,12 @@ import {
 } from '../exposure/agent-change.js';
 import { GitError, agentChanges, type AgentChanges } from '../exposure/agent-git.js';
 import { groupHits, textGroup, textNotices } from '../exposure/agent-report.js';
+import {
+  readProjectCode,
+  type CodeSignal,
+  type CodeSignalKind,
+  type ProjectCodeReading,
+} from '../exposure/project-code.js';
 import type { AgentHit } from '../exposure/agent-surface.js';
 import { agentSurface } from '../exposure/agent-tree.js';
 import { hardeningExports } from '../exposure/git-hardening.js';
@@ -88,12 +94,50 @@ function once(
   return { surface: { ...surface, onOpen }, hits: kept };
 }
 
+/** What each signal of the code is, in the words a person reads. Fixed text: nothing of the file gets here. */
+const CODE_PHRASE: Readonly<Record<CodeSignalKind, string>> = {
+  'fetched-text-runs': 'runs text it fetched or decoded as code',
+  'text-runs': 'runs text as code',
+  'hidden-past-blanks':
+    "has code far to the right of a long run of blanks, out of an editor's view",
+  'code-in-data-file': 'is named as a font, image or media file and holds code',
+  obfuscated: 'looks minified or made hard to read',
+  'script-fetches-and-runs': 'fetches something and hands it to a shell',
+  'raw-dependency': 'takes a dependency from an address and not from a registry',
+  'tool-file-runs-code': 'a tool runs this file by itself, and it runs what it fetched or decoded',
+  'tool-runs-programs': 'lets Solidity tests start programs (ffi)',
+  'instruction-runs-code': 'tells your agent to fetch something and hand it to a shell',
+};
+/** The most places of one group that are listed. */
+const CODE_SHOWN = 30;
+
+function codeGroup(heading: string, signals: readonly CodeSignal[]): string[] {
+  if (signals.length === 0) return [];
+  const more = signals.length - CODE_SHOWN;
+  return [
+    `${heading} (${signals.length})`,
+    ...signals
+      .slice(0, CODE_SHOWN)
+      .map((s) => `  ${s.file}${s.line === null ? '' : `:${s.line}`}  ${CODE_PHRASE[s.kind]}`),
+    ...(more > 0 ? [`  and ${more} more: --json lists them`] : []),
+    '',
+  ];
+}
+
+/** Said when the reading of the code was not made: a caller that gives no reading has no answer. */
+const NOT_MADE: ProjectCodeReading = {
+  signals: [],
+  notRead: ['the code of this folder was not read'],
+  filesRead: 0,
+};
+
 export function formatInspect(
   dir: string,
   surface: RepoSurface,
   agent: readonly TaggedHit[] = [],
   failOn: FailOn = 'any',
   agentCapped = false,
+  code: ProjectCodeReading = NOT_MADE,
 ): string {
   const findings = repoFindings(surface);
   const lines = [`stroq inspect — what ${dir} runs when you open it`, ''];
@@ -137,6 +181,17 @@ export function formatInspect(
       '',
     );
   }
+  const strong = code.signals.filter((s) => s.strength === 'strong');
+  lines.push(
+    ...codeGroup('READ THIS BEFORE YOU RUN IT', strong),
+    ...codeGroup(
+      'ALSO WORTH A LOOK',
+      code.signals.filter((s) => s.strength === 'look'),
+    ),
+  );
+  if (code.notRead.length > 0) {
+    lines.push('NOT READ', ...code.notRead.map((what) => `  ${what}`), '');
+  }
   if (surface.capped) {
     lines.push('The walk hit its cap, so the nested-repository count is a lower bound.', '');
   }
@@ -149,7 +204,9 @@ export function formatInspect(
       ? 'Read the entries above before you point an agent at this directory: they run during an ordinary `git status`, which every agent does at startup, before any prompt you could answer.'
       : agentErrors
         ? 'Read the entries above before you open this folder in an agent or editor. They take effect by themselves once you trust the folder.'
-        : 'Open it. Stroq enforces the rest from inside the session.',
+        : strong.length > 0
+          ? 'Read the places above before you run anything from this folder, or let an agent do it.'
+          : `${code.signals.length > 0 ? 'Nothing stronger than the places above was found.' : 'Reading found nothing to point at.'} That does not make this folder safe: code that hides what it does, fetches it later, or is in a language other than JavaScript, TypeScript, Python or shell is not seen here.`,
   );
   return `${lines.join('\n')}\n`;
 }
@@ -275,6 +332,8 @@ function inspectCheckout(dir: string, format: InspectFormat, failOn: FailOn): nu
     what: h.what,
     why: WHY[h.kind] ?? 'repository-supplied execution',
   }));
+  // SARIF and the GitHub format report a pull request's change, and neither carries the code.
+  const code = format === 'text' || format === 'json' ? readProjectCode(dir) : NOT_MADE;
   write({
     format,
     failOn,
@@ -282,7 +341,7 @@ function inspectCheckout(dir: string, format: InspectFormat, failOn: FailOn): nu
     surface,
     preTrust,
     summary: { failOn, preTrust },
-    text: () => formatInspect(dir, surface, hits, failOn, agent.capped),
+    text: () => formatInspect(dir, surface, hits, failOn, agent.capped, code),
     json: () => ({
       version: 1,
       dir,
@@ -292,6 +351,9 @@ function inspectCheckout(dir: string, format: InspectFormat, failOn: FailOn): nu
       failing,
       agent: withFailing(hits, failOn),
       agentCapped: agent.capped,
+      code: code.signals.map(({ kind, strength, file, line }) => ({ kind, strength, file, line })),
+      codeNotRead: code.notRead,
+      codeFilesRead: code.filesRead,
     }),
   });
   return failing > 0 ? EXIT.fail : EXIT.pass;

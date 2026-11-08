@@ -77,6 +77,23 @@ const NO_COPIES: ReadonlySet<string> = new Set();
 const inputHash = (input: unknown): string =>
   createHash('sha256').update(stableStringify(input)).digest('hex').slice(0, 32);
 
+interface FolderCheckCall {
+  readonly sessionId: string;
+  readonly command: string;
+  readonly cwd: string;
+  readonly callId?: string;
+}
+
+/**
+ * A reading of the folder a command is about to run in, made outside the engine. An answer turns an
+ * allowed call into a question; it cannot lift a refusal. `ran` is told when the host reports that a
+ * command ran, which is the only thing that counts as a yes.
+ */
+export interface FolderCheck {
+  ask(call: FolderCheckCall): Promise<{ readonly ruleId: string; readonly reason: string } | null>;
+  ran(call: FolderCheckCall): Promise<void> | void;
+}
+
 export interface EngineOptions {
   /**
    * The compiled rules, or the function that compiles them. A function is called once, the first
@@ -100,6 +117,7 @@ export interface EngineOptions {
   readonly canaryFiles?: CanaryFiles;
   /** Optional task contract. Without a gate the policy decision and audit shape are unchanged. */
   readonly scope?: ScopeGate;
+  readonly folderCheck?: FolderCheck;
   /** Parent-only signer. The engine never reads or creates signing keys. */
   readonly taskAccessSigner?: TaskAccessRequestSigner;
   readonly now?: () => Date;
@@ -726,6 +744,44 @@ export class StroqEngine {
       .catch(() => undefined);
   }
 
+  /** A command the host reports ran, and did not report failing, answers a question about it. */
+  private async noteFolderRan(event: PostToolEvent): Promise<void> {
+    const check = this.opts.folderCheck;
+    const command = event.toolInput['command'];
+    if (check === undefined || event.resultFailed === true || typeof command !== 'string') return;
+    try {
+      await check.ran({
+        sessionId: event.sessionId,
+        command,
+        cwd: event.cwd,
+        ...(event.callId === undefined ? {} : { callId: event.callId }),
+      });
+    } catch {
+      // Not being able to remember a yes costs a second question.
+    }
+  }
+
+  /** An allowed shell command in a folder that holds something to read first becomes a question. */
+  private async afterFolderCheck(event: PreToolEvent, decision: Decision): Promise<Decision> {
+    const check = this.opts.folderCheck;
+    const command = event.toolInput['command'];
+    if (check === undefined || decision.effect !== 'allow' || typeof command !== 'string') {
+      return decision;
+    }
+    try {
+      const asked = await check.ask({
+        sessionId: event.sessionId,
+        command,
+        cwd: event.cwd,
+        ...(event.callId === undefined ? {} : { callId: event.callId }),
+      });
+      return asked === null ? decision : { effect: 'ask', ...asked };
+    } catch {
+      // A reading that failed found nothing, and the policy has already judged the call.
+      return decision;
+    }
+  }
+
   async pre(event: PreToolEvent): Promise<PreResult> {
     const classified = classifyTool(event.toolName, event.toolInput, event.cwd);
     // Producer evidence denotes MCP even if a future tool spelling is not classified yet.
@@ -831,7 +887,8 @@ export class StroqEngine {
       decision: policyDecision,
     });
     // Task extensions and custom scope implementations cannot lift governance refusal.
-    const decision = governance ?? gated?.decision ?? policyDecision;
+    const settled = governance ?? gated?.decision ?? policyDecision;
+    const decision = gated === null ? await this.afterFolderCheck(event, settled) : settled;
     const provenance = origin.counted.map(toEvidence);
     const gaps = await this.recorder.gaps(unverified, event);
     const summary = await this.safeSummary(
@@ -985,6 +1042,7 @@ export class StroqEngine {
     readingsState?: PostReadingsState,
   ): Promise<PostResult> {
     await this.allowCopyQuestion(event);
+    await this.noteFolderRan(event);
     const call = {
       ...(event.resultFailed === true ? { outcome: 'failed' as const } : {}),
       ...(event.callId === undefined ? {} : { callId: event.callId }),

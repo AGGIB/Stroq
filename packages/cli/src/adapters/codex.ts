@@ -91,7 +91,9 @@ export const codexBlockOutput = (reason: string): HookOutput => ({
  */
 const askAsDeny = (decision: Decision): string =>
   `Stroq would ask before this action (${decision.ruleId}): ${decision.reason}. ` +
-  'Codex hooks cannot prompt, so it is denied; run it yourself or relax the rule in ~/.stroq/policy.yaml.';
+  (decision.ruleId === 'ask-foreign-folder'
+    ? 'Codex hooks cannot prompt, so it is denied until you do.'
+    : 'Codex hooks cannot prompt, so it is denied; run it yourself or relax the rule in ~/.stroq/policy.yaml.');
 
 /** `NO_OUTPUT` for an allow: Codex treats empty stdout as continue, the smallest surface. */
 export function renderDecision(
