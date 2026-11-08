@@ -42,7 +42,7 @@ export const NO_KEY_CACHE: KeyCache = {
  * with every change to either, since a development build keeps the Stroq version of the build before it
  * and would be handed the results of the logic before it.
  */
-export const KEY_CHECK_LOGIC = 7;
+export const KEY_CHECK_LOGIC = 8;
 
 /** Everything a result depends on in the transcript and the program; the digest covers the keys. */
 export function keyCacheKey(parts: {
