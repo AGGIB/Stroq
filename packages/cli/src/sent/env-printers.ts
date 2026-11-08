@@ -17,10 +17,12 @@ const ENV_PRINTERS: ReadonlySet<string> = new Set([
  * `/proc/self/environ`): not `environment`, which is a part of many addresses and sentences.
  */
 const ENVIRON = /environb?(?![a-z])/i;
+const HTTP_URL = /\bhttps?:\/\/[^\s'"`<>()$;|]+/gi;
 
 /** Whether a stage prints the environment, or reads a process's (`/proc/self/environ`, `os.environ`). */
 export function printsEnvironment(text: string): boolean {
-  if (ENVIRON.test(text)) return true;
+  // An HTTP URL can have an /environ endpoint without reading the local environment.
+  if (ENVIRON.test(text) && ENVIRON.test(text.replace(HTTP_URL, ' '))) return true;
   const words = joinedWords(text);
   const program = (words[0] ?? '').replace(/^.*\//, '');
   return ENV_PRINTERS.has(program) && words.slice(1).every((w) => /^-[pxi0u]*$/.test(w));
