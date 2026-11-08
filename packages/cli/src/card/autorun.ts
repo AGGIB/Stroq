@@ -8,6 +8,7 @@
 // findings" and a count of them would be a count of every repository there is.
 import { realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, sep } from 'node:path';
+import { isBare } from '../commands/hook-command.js';
 import { isFailing, tagChanges } from '../exposure/agent-change.js';
 import type { AgentHit } from '../exposure/agent-kinds.js';
 import { agentSurface } from '../exposure/agent-tree.js';
@@ -68,6 +69,11 @@ const LATER_HOOKS: ReadonlySet<string> = new Set([
  */
 const STROQ_HOOK_LINE =
   /^(& )?"([^"\n]+)" "([^"\n]+)" hook (claude-code|cursor|codex|windsurf|copilot|openclaw|antigravity)(?: (?:pre|post|preinvocation))?$/;
+/** Windows init omits quotes for these handlers and may use an 8.3 path. */
+const WINDOWS_HOOK_LINE =
+  /^(\S+) (\S+) hook (?:cursor|codex|antigravity (?:pre|post|preinvocation))$/;
+const isBareWindowsPath = (path: string): boolean =>
+  /^[A-Za-z]:[\\/][^:]+$/.test(path) && isBare(path);
 /** The agents whose handler `init` gives a `powershell` field, with the line after `& `. */
 const POWERSHELL_AGENTS: ReadonlySet<string> = new Set(['copilot', 'windsurf']);
 /** The characters a path of a hook line may hold: none that a shell expands (`$`, a backquote, `~`, `%`, `!`). */
@@ -77,7 +83,8 @@ const PACKAGE_ENTRY = `${sep}node_modules${sep}@stroq${sep}cli${sep}dist${sep}in
 
 const realOrNull = (path: string): string | null => {
   try {
-    return realpathSync(path);
+    const real = realpathSync.native(path);
+    return process.platform === 'win32' ? real.toLowerCase() : real;
   } catch {
     return null;
   }
@@ -101,18 +108,27 @@ const isWithin = (path: string, folder: string): boolean =>
  * shaped like Stroq's that runs another file is exactly what a planted hook would look like.
  */
 export function isStroqOwnHook(value: string, dir: string, home: string = stroqHome()): boolean {
-  const line = STROQ_HOOK_LINE.exec(value);
-  if (line === null) return false;
-  const [, call, node = '', entry = '', agent = ''] = line;
-  if (call !== undefined && !POWERSHELL_AGENTS.has(agent)) return false;
-  // No character a shell would expand or quote differently, and both paths written out in full.
-  if (![node, entry].every((path) => SAFE_PATH.test(path) && isAbsolute(path))) return false;
+  const quoted = STROQ_HOOK_LINE.exec(value);
+  const bare = process.platform === 'win32' ? WINDOWS_HOOK_LINE.exec(value) : null;
+  let node: string;
+  let entry: string;
+  if (quoted?.[0] === value) {
+    const [, call, binary = '', script = '', agent = ''] = quoted;
+    if (call !== undefined && !POWERSHELL_AGENTS.has(agent)) return false;
+    if (![binary, script].every((path) => SAFE_PATH.test(path) && isAbsolute(path))) return false;
+    [node, entry] = [binary, script];
+  } else if (bare?.[0] === value) {
+    const [, binary = '', script = ''] = bare;
+    if (![binary, script].every(isBareWindowsPath)) return false;
+    [node, entry] = [binary, script];
+  } else return false;
   const folder = realOrNull(dir);
   const realNode = realOrNull(node);
   const realEntry = realOrNull(entry);
   if (folder === null || realNode === null || realEntry === null) return false;
   // The node binary that runs it is a real file called node, and neither file is the folder's own.
   if (!/^node(?:\.exe)?$/i.test(basename(realNode)) || !isRegularFile(realNode)) return false;
+  if (!isRegularFile(realEntry)) return false;
   if (isWithin(realNode, folder) || isWithin(realEntry, folder)) return false;
   const stroq = realOrNull(home);
   return (stroq !== null && isWithin(realEntry, stroq)) || realEntry.endsWith(PACKAGE_ENTRY);
