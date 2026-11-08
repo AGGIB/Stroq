@@ -17,7 +17,8 @@ const ENV_PRINTERS: ReadonlySet<string> = new Set([
  * `/proc/self/environ`): not `environment`, which is a part of many addresses and sentences.
  */
 const ENVIRON = /environb?(?![a-z])/i;
-const HTTP_URL = /\bhttps?:\/\/[^\s'"`<>()$;|]+/gi;
+// Stop at braces so masking a URL leaves f-string expressions available to scan.
+const HTTP_URL = /\bhttps?:\/\/[^\s'"`<>(){}$;|]+/gi;
 
 /** Whether a stage prints the environment, or reads a process's (`/proc/self/environ`, `os.environ`). */
 export function printsEnvironment(text: string): boolean {
