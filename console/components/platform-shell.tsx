@@ -22,6 +22,7 @@ import { usePathname } from 'next/navigation';
 import { useTheme } from 'next-themes';
 import { Dialog } from 'radix-ui';
 import { useEffect, useState, type ReactNode } from 'react';
+import cliPackage from '../../packages/cli/package.json';
 import { usePlatform } from './platform-provider';
 import { BrandMark } from './brand-mark';
 import { PLATFORM_PAGES } from '@/lib/platform-map';
@@ -82,7 +83,7 @@ function Navigation({ close }: { close?: () => void }) {
         <div className="sidebar-user">
           <Monitor size={14} aria-hidden="true" />
           <span>On this machine</span>
-          <span className="version">v0.30.0</span>
+          <span className="version">v{cliPackage.version}</span>
         </div>
       </div>
     </>
