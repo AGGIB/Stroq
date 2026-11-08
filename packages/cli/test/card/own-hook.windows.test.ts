@@ -39,7 +39,8 @@ describe.skipIf(process.platform !== 'win32')('own hooks written by init on Wind
         join(project, '.cursor', 'hooks.json'),
         JSON.stringify(mergeCursorHooks({}, command)),
       );
-      expect(autorunOf(project)).toBeNull();
+      // What the card still counts, when it counts anything: a Windows run is the only place this shows.
+      expect(autorunOf(project), `${command}\n${JSON.stringify(autorunOf(project))}`).toBeNull();
     }
   });
 
