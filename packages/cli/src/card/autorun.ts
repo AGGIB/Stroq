@@ -8,7 +8,11 @@
 // findings" and a count of them would be a count of every repository there is.
 import { realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, sep } from 'node:path';
+import { CURSOR_EVENTS, type CursorEvent } from '../adapters/cursor.js';
+import { cursorEntry } from '../commands/cursor-hooks.js';
+import { isBare } from '../commands/hook-command.js';
 import { isFailing, tagChanges } from '../exposure/agent-change.js';
+import { isHandlerLabel } from '../exposure/agent-json.js';
 import type { AgentHit } from '../exposure/agent-kinds.js';
 import { agentSurface } from '../exposure/agent-tree.js';
 import { stroqHome } from '../paths.js';
@@ -68,6 +72,11 @@ const LATER_HOOKS: ReadonlySet<string> = new Set([
  */
 const STROQ_HOOK_LINE =
   /^(& )?"([^"\n]+)" "([^"\n]+)" hook (claude-code|cursor|codex|windsurf|copilot|openclaw|antigravity)(?: (?:pre|post|preinvocation))?$/;
+/** Windows init omits quotes for these handlers and may use an 8.3 path. */
+const WINDOWS_HOOK_LINE =
+  /^(\S+) (\S+) hook (?:cursor|codex|antigravity (?:pre|post|preinvocation))$/;
+const isBareWindowsPath = (path: string): boolean =>
+  /^[A-Za-z]:[\\/][^:]+$/.test(path) && isBare(path);
 /** The agents whose handler `init` gives a `powershell` field, with the line after `& `. */
 const POWERSHELL_AGENTS: ReadonlySet<string> = new Set(['copilot', 'windsurf']);
 /** The characters a path of a hook line may hold: none that a shell expands (`$`, a backquote, `~`, `%`, `!`). */
@@ -77,7 +86,8 @@ const PACKAGE_ENTRY = `${sep}node_modules${sep}@stroq${sep}cli${sep}dist${sep}in
 
 const realOrNull = (path: string): string | null => {
   try {
-    return realpathSync(path);
+    const real = realpathSync.native(path);
+    return process.platform === 'win32' ? real.toLowerCase() : real;
   } catch {
     return null;
   }
@@ -101,27 +111,75 @@ const isWithin = (path: string, folder: string): boolean =>
  * shaped like Stroq's that runs another file is exactly what a planted hook would look like.
  */
 export function isStroqOwnHook(value: string, dir: string, home: string = stroqHome()): boolean {
-  const line = STROQ_HOOK_LINE.exec(value);
-  if (line === null) return false;
-  const [, call, node = '', entry = '', agent = ''] = line;
-  if (call !== undefined && !POWERSHELL_AGENTS.has(agent)) return false;
-  // No character a shell would expand or quote differently, and both paths written out in full.
-  if (![node, entry].every((path) => SAFE_PATH.test(path) && isAbsolute(path))) return false;
+  const quoted = STROQ_HOOK_LINE.exec(value);
+  const bare = process.platform === 'win32' ? WINDOWS_HOOK_LINE.exec(value) : null;
+  let node: string;
+  let entry: string;
+  if (quoted?.[0] === value) {
+    const [, call, binary = '', script = '', agent = ''] = quoted;
+    if (call !== undefined && !POWERSHELL_AGENTS.has(agent)) return false;
+    if (![binary, script].every((path) => SAFE_PATH.test(path) && isAbsolute(path))) return false;
+    [node, entry] = [binary, script];
+  } else if (bare?.[0] === value) {
+    const [, binary = '', script = ''] = bare;
+    if (![binary, script].every(isBareWindowsPath)) return false;
+    [node, entry] = [binary, script];
+  } else return false;
   const folder = realOrNull(dir);
   const realNode = realOrNull(node);
   const realEntry = realOrNull(entry);
   if (folder === null || realNode === null || realEntry === null) return false;
   // The node binary that runs it is a real file called node, and neither file is the folder's own.
   if (!/^node(?:\.exe)?$/i.test(basename(realNode)) || !isRegularFile(realNode)) return false;
+  if (!isRegularFile(realEntry)) return false;
   if (isWithin(realNode, folder) || isWithin(realEntry, folder)) return false;
   const stroq = realOrNull(home);
   return (stroq !== null && isWithin(realEntry, stroq)) || realEntry.endsWith(PACKAGE_ENTRY);
 }
 
+/** Where the reading of a folder puts a handler's other fields after its command (`otherFields`). */
+const FIELDS_MARK = ' with {';
+
+/**
+ * The fields `stroq init` writes beside the command of a Cursor hook for an event, as the reading shows
+ * them: what is left beside the command must be exactly this.
+ */
+function ownCursorFields(event: string): Readonly<Record<string, unknown>> | null {
+  if (!(CURSOR_EVENTS as readonly string[]).includes(event)) return null;
+  // The reading leaves out the command and the labels of a handler (`isHandlerLabel`): so is this.
+  return Object.fromEntries(
+    Object.entries(cursorEntry(event as CursorEvent, '')).filter(([key]) => !isHandlerLabel(key)),
+  );
+}
+
+const sameFields = (a: Readonly<Record<string, unknown>>, b: Readonly<Record<string, unknown>>) =>
+  Object.keys(a).length === Object.keys(b).length &&
+  Object.entries(a).every(([key, value]) => b[key] === value);
+
+/**
+ * The command of a hook as `init` wrote it, without the fields `init` writes beside it. A hook with
+ * any other field, or another value in one, is left as the reading shows it, so it is not Stroq's own.
+ */
+function commandOf(hit: AgentHit): string {
+  const at = hit.value.lastIndexOf(FIELDS_MARK);
+  if (at === -1) return hit.value;
+  const own = ownCursorFields(hit.name);
+  if (own === null) return hit.value;
+  try {
+    const fields: unknown = JSON.parse(hit.value.slice(at + FIELDS_MARK.length - 1));
+    const isObject = typeof fields === 'object' && fields !== null && !Array.isArray(fields);
+    return isObject && sameFields(fields as Record<string, unknown>, own)
+      ? hit.value.slice(0, at)
+      : hit.value;
+  } catch {
+    return hit.value;
+  }
+}
+
 const notOwnHook =
   (dir: string) =>
   (hit: AgentHit): boolean =>
-    !(hit.kind === 'agent-hook' && isStroqOwnHook(hit.value, dir));
+    !(hit.kind === 'agent-hook' && isStroqOwnHook(commandOf(hit), dir));
 
 /** Whether a finding runs when an agent opens the folder, rather than when it later commits or pushes. */
 export function runsOnOpen(hit: Pick<RepoExecHit, 'kind' | 'what' | 'hooksJudged'>): boolean {
