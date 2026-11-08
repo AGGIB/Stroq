@@ -123,7 +123,8 @@ const HANDLER_LABELS: ReadonlySet<string> = new Set([
   'once',
   'padding',
 ]);
-const isHandlerLabel = (key: string): boolean => COMMAND_KEYS.has(key) || HANDLER_LABELS.has(key);
+export const isHandlerLabel = (key: string): boolean =>
+  COMMAND_KEYS.has(key) || HANDLER_LABELS.has(key);
 
 /** A command as a string, or a program and its arguments as an array of strings. */
 export const commandText = (value: unknown): string | undefined =>

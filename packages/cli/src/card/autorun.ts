@@ -8,8 +8,11 @@
 // findings" and a count of them would be a count of every repository there is.
 import { realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, sep } from 'node:path';
+import { CURSOR_EVENTS, type CursorEvent } from '../adapters/cursor.js';
+import { cursorEntry } from '../commands/cursor-hooks.js';
 import { isBare } from '../commands/hook-command.js';
 import { isFailing, tagChanges } from '../exposure/agent-change.js';
+import { isHandlerLabel } from '../exposure/agent-json.js';
 import type { AgentHit } from '../exposure/agent-kinds.js';
 import { agentSurface } from '../exposure/agent-tree.js';
 import { stroqHome } from '../paths.js';
@@ -134,10 +137,49 @@ export function isStroqOwnHook(value: string, dir: string, home: string = stroqH
   return (stroq !== null && isWithin(realEntry, stroq)) || realEntry.endsWith(PACKAGE_ENTRY);
 }
 
+/** Where the reading of a folder puts a handler's other fields after its command (`otherFields`). */
+const FIELDS_MARK = ' with {';
+
+/**
+ * The fields `stroq init` writes beside the command of a Cursor hook for an event, as the reading shows
+ * them: what is left beside the command must be exactly this.
+ */
+function ownCursorFields(event: string): Readonly<Record<string, unknown>> | null {
+  if (!(CURSOR_EVENTS as readonly string[]).includes(event)) return null;
+  // The reading leaves out the command and the labels of a handler (`isHandlerLabel`): so is this.
+  return Object.fromEntries(
+    Object.entries(cursorEntry(event as CursorEvent, '')).filter(([key]) => !isHandlerLabel(key)),
+  );
+}
+
+const sameFields = (a: Readonly<Record<string, unknown>>, b: Readonly<Record<string, unknown>>) =>
+  Object.keys(a).length === Object.keys(b).length &&
+  Object.entries(a).every(([key, value]) => b[key] === value);
+
+/**
+ * The command of a hook as `init` wrote it, without the fields `init` writes beside it. A hook with
+ * any other field, or another value in one, is left as the reading shows it, so it is not Stroq's own.
+ */
+function commandOf(hit: AgentHit): string {
+  const at = hit.value.lastIndexOf(FIELDS_MARK);
+  if (at === -1) return hit.value;
+  const own = ownCursorFields(hit.name);
+  if (own === null) return hit.value;
+  try {
+    const fields: unknown = JSON.parse(hit.value.slice(at + FIELDS_MARK.length - 1));
+    const isObject = typeof fields === 'object' && fields !== null && !Array.isArray(fields);
+    return isObject && sameFields(fields as Record<string, unknown>, own)
+      ? hit.value.slice(0, at)
+      : hit.value;
+  } catch {
+    return hit.value;
+  }
+}
+
 const notOwnHook =
   (dir: string) =>
   (hit: AgentHit): boolean =>
-    !(hit.kind === 'agent-hook' && isStroqOwnHook(hit.value, dir));
+    !(hit.kind === 'agent-hook' && isStroqOwnHook(commandOf(hit), dir));
 
 /** Whether a finding runs when an agent opens the folder, rather than when it later commits or pushes. */
 export function runsOnOpen(hit: Pick<RepoExecHit, 'kind' | 'what' | 'hooksJudged'>): boolean {

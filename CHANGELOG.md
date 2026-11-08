@@ -19,6 +19,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`stroq inspect` is on the first screen of `stroq --help`.**
 - **`stroq inspect` no longer says "Open it. Stroq enforces the rest from inside the session."** When it finds nothing, it says that this does not make the folder safe, and it names what it did not read.
 
+### Fixed
+
+- **The card counted Stroq's own Cursor hooks as something the folder runs.** `stroq init` writes `failClosed` beside the command, and the card compared the command with that field. Only the fields `init` writes, with its values, are left aside now; a hook with any other field still counts.
+- **The card knows the hook lines `stroq init` writes on Windows** for Cursor, Codex and Antigravity, which have no quotes and may use 8.3 names. It resolves both paths first, so a project's own file still counts.
+- **`stroq sent` no longer reports keys as sent to a local address whose path holds the word `environ`**, such as `curl http://localhost:8080/environ` (#295).
+- **The console shows the CLI's version in its sidebar** instead of a number written into it (#293).
+
 ## [0.30.0] - 2026-11-05
 
 ### Added
