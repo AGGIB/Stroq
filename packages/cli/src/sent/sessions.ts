@@ -199,14 +199,6 @@ export function cursorSessionRefs(
   db: string,
   rows: readonly CursorRow[],
 ): (SessionRef & Required<Pick<SessionRef, 'cursor'>>)[] {
-  const raw = new Map<string, string[]>();
-  for (const row of rows) {
-    const id = row.key.split(':')[1] ?? '';
-    // Appended in place: copying the list for every row would cost the square of its length.
-    const rows = raw.get(id);
-    if (rows === undefined) raw.set(id, [row.value]);
-    else rows.push(row.value);
-  }
   return parseCursorStore(rows).map((s) => {
     const firstAt = s.transcript.events
       .map((e) => e.at)
@@ -218,7 +210,7 @@ export function cursorSessionRefs(
       cwd: s.transcript.cwd,
       first: firstAt ?? null,
       mtimeMs: s.mtimeMs,
-      cursor: { transcript: s.transcript, rows: raw.get(s.id) ?? [] },
+      cursor: { transcript: s.transcript, rows: s.rows },
     };
   });
 }

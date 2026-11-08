@@ -54,6 +54,8 @@ export interface CursorSession {
   /** Absolute paths this session's tool calls named, deduped in the order seen. */
   readonly roots: readonly string[];
   readonly transcript: Transcript;
+  /** Raw rows in replay order, including any row that did not produce an event. */
+  readonly rows: readonly string[];
 }
 
 /**
@@ -189,7 +191,12 @@ function resultTextOf(raw: unknown): string | null {
 export function parseCursorStore(rows: Iterable<CursorRow>): CursorSession[] {
   const bySession = new Map<
     string,
-    { events: TranscriptEvent[]; roots: string[]; latest: number; skipped: number }
+    {
+      bubbles: { readonly at: number; readonly raw: string; readonly events: TranscriptEvent[] }[];
+      roots: string[];
+      latest: number;
+      skipped: number;
+    }
   >();
 
   for (const row of rows) {
@@ -199,17 +206,24 @@ export function parseCursorStore(rows: Iterable<CursorRow>): CursorSession[] {
     if (id === '') continue;
     let session = bySession.get(id);
     if (session === undefined) {
-      session = { events: [], roots: [], latest: 0, skipped: 0 };
+      session = { bubbles: [], roots: [], latest: 0, skipped: 0 };
       bySession.set(id, session);
     }
 
     const bubble = parseJson(row.value);
+    const at =
+      isRecord(bubble) && typeof bubble['createdAt'] === 'string' ? bubble['createdAt'] : '';
+    const moment = Date.parse(at);
+    const events: TranscriptEvent[] = [];
+    session.bubbles.push({
+      at: Number.isFinite(moment) ? moment : Infinity,
+      raw: row.value,
+      events,
+    });
     if (!isRecord(bubble)) {
       session.skipped += 1;
       continue;
     }
-    const at = typeof bubble['createdAt'] === 'string' ? bubble['createdAt'] : '';
-    const moment = Date.parse(at);
     if (Number.isFinite(moment)) session.latest = Math.max(session.latest, moment);
 
     const former = bubble['toolFormerData'];
@@ -224,11 +238,11 @@ export function parseCursorStore(rows: Iterable<CursorRow>): CursorSession[] {
       typeof former['toolCallId'] === 'string' && former['toolCallId'] !== ''
         ? former['toolCallId']
         : (parts.slice(2).join(':') ?? '');
-    session.events.push({ kind: 'pre', id: callId, tool: call.tool, input: call.input, at });
+    events.push({ kind: 'pre', id: callId, tool: call.tool, input: call.input, at });
 
     const text = resultTextOf(former['result']);
     if (text === null) continue;
-    session.events.push({
+    events.push({
       kind: 'post',
       id: callId,
       tool: call.tool,
@@ -239,17 +253,23 @@ export function parseCursorStore(rows: Iterable<CursorRow>): CursorSession[] {
   }
 
   return [...bySession.entries()]
-    .map(([id, s]) => ({
-      id,
-      mtimeMs: s.latest,
-      roots: s.roots,
-      transcript: {
-        sessionId: id,
-        cwd: s.roots[0] ?? null,
-        events: s.events,
-        skipped: s.skipped,
-      } satisfies Transcript,
-    }))
+    .map(([id, s]) => {
+      // SQLite's row order is insertion order, which can change when a bubble is replaced.
+      // Keep pre/post events together, and keep the store order for ties and undated bubbles.
+      const ordered = s.bubbles.sort((a, b) => a.at - b.at || 0);
+      return {
+        id,
+        mtimeMs: s.latest,
+        roots: s.roots,
+        transcript: {
+          sessionId: id,
+          cwd: s.roots[0] ?? null,
+          events: ordered.flatMap((bubble) => bubble.events),
+          skipped: s.skipped,
+        } satisfies Transcript,
+        rows: ordered.map((bubble) => bubble.raw),
+      };
+    })
     .sort((a, b) => b.mtimeMs - a.mtimeMs);
 }
 

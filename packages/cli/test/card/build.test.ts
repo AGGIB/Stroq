@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, readdirSync, truncateSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -10,6 +11,7 @@ import { renderCard } from '../../src/card/render.js';
 import { inProcessChannel } from '../../src/card/worker.js';
 import { cardDirIn } from '../../src/paths.js';
 import { cursorStateDb } from '../../src/sent/cursor.js';
+import { CLI_ENTRY } from '../helpers/cli-entry.js';
 import {
   ago,
   AWS_KEY,
@@ -17,7 +19,9 @@ import {
   claudeSession,
   DAY,
   furnish,
+  hostile,
   machine,
+  PIPE,
   populate,
   PROJECT_KEY,
   type Machine,
@@ -217,6 +221,54 @@ describe('the card when there is nothing to read', () => {
 const sqlite = await import('node:sqlite').catch(() => null);
 
 describe.skipIf(sqlite === null)('the card with Cursor sessions', () => {
+  it('links a read stored after its command and can replay the moment by its SQLite address', async () => {
+    const db = cursorStateDb(process.platform, process.env, m.home);
+    mkdirSync(dirname(db), { recursive: true });
+    const run = env();
+    const handle = new sqlite!.DatabaseSync(db);
+    try {
+      handle.exec('create table cursorDiskKV (key text primary key, value text)');
+      const put = handle.prepare('insert into cursorDiskKV values (?, ?)');
+      put.run(
+        'bubbleId:fixture:command',
+        JSON.stringify({
+          createdAt: run.now.toISOString(),
+          toolFormerData: {
+            name: 'run_terminal_command_v2',
+            params: JSON.stringify({ command: PIPE }),
+          },
+        }),
+      );
+      put.run(
+        'bubbleId:fixture:read',
+        JSON.stringify({
+          createdAt: new Date(run.now.getTime() - 1_000).toISOString(),
+          toolFormerData: {
+            name: 'read_file_v2',
+            params: JSON.stringify({ targetFile: '/work/node_modules/some-lib/README.md' }),
+            result: JSON.stringify({ contents: hostile(PIPE) }),
+          },
+        }),
+      );
+    } finally {
+      handle.close();
+    }
+    const data = await buildCard(30, run);
+    expect(data.counts.toldByText).toBe(1);
+    const moment = data.moments.find((one) => one.kind === 'told-by-text');
+    expect(moment?.next[0]).toContain('stroq replay --transcript');
+    const replayed = execFileSync(
+      process.execPath,
+      [CLI_ENTRY, 'replay', '--transcript', `${db}#fixture`],
+      {
+        cwd: m.work,
+        encoding: 'utf8',
+      },
+    );
+    expect(replayed).toContain('README.md');
+    expect(replayed).toContain('replayed from');
+  });
+
   it('says when a store cannot be read', async () => {
     const db = cursorStateDb(process.platform, process.env, m.home);
     mkdirSync(dirname(db), { recursive: true });
