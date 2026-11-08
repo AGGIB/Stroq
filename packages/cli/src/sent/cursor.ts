@@ -378,25 +378,55 @@ export function cursorChangesPending(db: string): boolean {
  * created beside it, and no lock the running editor is entitled to is taken.
  */
 export async function storeRows(db: string, session: string | null): Promise<CursorRow[]> {
+  return (await readStoreRows(db, session)) ?? [];
+}
+
+/** A bounded reader can distinguish an incomplete snapshot from an empty store. */
+export async function readStoreRows(
+  db: string,
+  session: string | null,
+  budget?: { readonly stopAt: number; readonly maxRows: number; readonly maxBytes: number },
+): Promise<CursorRow[] | null> {
   const mod = await sqlite();
-  if (mod === null) return [];
+  if (mod === null || (budget !== undefined && Date.now() >= budget.stopAt)) return null;
   let handle;
   try {
     handle = new mod.DatabaseSync(storeUrl(db), { readOnly: true });
   } catch {
-    return [];
+    return null;
   }
   try {
     const like = session === null ? 'bubbleId:%' : `bubbleId:${session}:%`;
-    const rows = handle.prepare('select key, value from cursorDiskKV where key like ?').all(like);
-    return rows.flatMap((row) => {
-      const { key, value } = row as { key?: unknown; value?: unknown };
-      return typeof key === 'string' && typeof value === 'string' ? [{ key, value }] : [];
-    });
+    const records =
+      budget === undefined
+        ? handle.prepare('select key, value from cursorDiskKV where key like ?').all(like)
+        : handle
+            .prepare(
+              `
+          select key, case when length(cast(value as blob)) <= ? then value end as value
+          from cursorDiskKV where key like ?
+        `,
+            )
+            .iterate(budget.maxBytes, like);
+    const rows: CursorRow[] = [];
+    let bytes = 0;
+    for (const { key, value } of records) {
+      if (typeof key !== 'string' || typeof value !== 'string') {
+        if (budget !== undefined) return null;
+        continue;
+      }
+      if (budget !== undefined) {
+        bytes += Buffer.byteLength(key) + Buffer.byteLength(value);
+        if (Date.now() >= budget.stopAt || rows.length >= budget.maxRows || bytes > budget.maxBytes)
+          return null;
+      }
+      rows.push({ key, value });
+    }
+    return rows;
   } catch {
     // A store whose schema has moved on is not an error to report at people: the
     // command says it found no Cursor session, which is true.
-    return [];
+    return null;
   } finally {
     handle.close();
   }

@@ -20,19 +20,33 @@ export const SHARE_TAIL = 'npx @stroq/cli';
 
 const days = (n: number): string => plural(n, 'day', 'days');
 
+function listed(items: readonly string[]): string {
+  if (items.length < 3) return items.join(' and ');
+  return `${items.slice(0, -1).join(', ')}, and ${items.at(-1)}`;
+}
+
 const agentNames = (data: CardData): string => {
-  const { claudeCode, codex } = data.coverage.agents;
-  if (claudeCode > 0 && codex > 0) return 'Claude Code and Codex';
-  return codex > 0 ? 'Codex' : 'Claude Code';
+  const { claudeCode, codex, cursor = 0 } = data.coverage.agents;
+  return listed([
+    ...(claudeCode > 0 ? ['Claude Code'] : []),
+    ...(codex > 0 ? ['Codex'] : []),
+    ...(cursor > 0 ? ['Cursor'] : []),
+  ]);
 };
 
 /** The sentences for a machine with no agent session in the window. */
 function nothingToReadView(data: CardData, home: string): CardView {
-  const [claude, codex] = data.coverage.looked.map((path) => shortPath(path, home, 50));
+  const [claude, codex, cursor] = data.coverage.looked.map((path) => shortPath(path, home, 50));
+  const places = [
+    `Claude Code in ${claude ?? '~/.claude/projects'}`,
+    `Codex in ${codex ?? '~/.codex/sessions'}`,
+  ];
+  if (cursor !== undefined) places.push(`Cursor in ${cursor}`);
+  const note = data.coverage.cursorNote;
   return {
     kind: 'nothing-to-read',
     title: `Hoo found no agent sessions in the last ${days(data.days)}.`,
-    looked: `Looked for Claude Code in ${claude ?? '~/.claude/projects'} and Codex in ${codex ?? '~/.codex/sessions'}.`,
+    looked: `Looked for ${listed(places)}.${note === undefined ? '' : ` ${note}`}`,
     next: { label: 'See what Stroq stops:', command: ATTACK_COMMAND },
   };
 }
@@ -87,6 +101,7 @@ function countRows(rows: readonly CountRow[]): string[] {
 function notes(data: CardData): string[] {
   const k = data.coverage;
   const out: string[] = [];
+  if (k.cursorNote !== undefined) out.push(k.cursorNote);
   if (k.notChecked > 0)
     out.push(
       `Checked ${num(k.checked)} of ${num(k.found)} sessions, newest first; run again to check the rest.`,
@@ -175,7 +190,7 @@ export function renderCard(data: CardData, home: string): string[] {
   const extra = view.notes.flatMap((note) => wrap(note, WIDTH));
   return [
     view.title,
-    view.subtitle,
+    ...wrap(view.subtitle, WIDTH),
     '',
     ...countRows(view.rows),
     ...(extra.length > 0 ? ['', ...extra] : []),

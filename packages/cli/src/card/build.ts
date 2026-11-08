@@ -131,7 +131,7 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
   const started = Date.now();
   const budget = run.budgetMs ?? defaultBudgetMs();
   const grace = run.graceMs ?? defaultGraceMs();
-  const listing = await listWindow(run.home, run.env, days, run.now);
+  const listing = await listWindow(run.home, run.env, days, run.now, started + budget);
   const since = windowStart(days, run.now);
   const sessions = listing.sessions;
   const policy = loadPolicyWithSource().source.sha256;
@@ -182,7 +182,12 @@ export async function buildCard(days: number, run: BuildEnv): Promise<CardData> 
   // card stop at about the same session.
   sessions.forEach((session, index) => {
     if (summaries[index] === undefined && !isTooLarge(session) && !tooSlow.has(index)) {
-      jobs.push({ kind: 'session', agent: session.agent, path: session.path });
+      jobs.push({
+        kind: 'session',
+        agent: session.agent,
+        path: session.path,
+        ...(session.ref.cursor === undefined ? {} : { transcript: session.ref.cursor.transcript }),
+      });
       kinds.push({ session: index });
     }
     const keyJob = keys.jobFor(index);
@@ -316,6 +321,7 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
       });
   });
   const findings = got.keys.findings;
+  const cursorCount = sessions.filter((s) => s.agent === 'cursor').length;
   // The moments are made from what each session did; the counts are of keys.
   const moments = buildMoments({
     told,
@@ -343,6 +349,7 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
       agents: {
         claudeCode: sessions.filter((s) => s.agent === 'claude-code').length,
         codex: sessions.filter((s) => s.agent === 'codex').length,
+        ...(cursorCount === 0 ? {} : { cursor: cursorCount }),
       },
       checked: counted.length,
       fromCache: got.fromCache,
@@ -369,6 +376,7 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
         capped: ctx.folderTotal > MAX_FOLDERS,
       },
       looked: ctx.listing.looked,
+      ...(ctx.listing.cursorNote === undefined ? {} : { cursorNote: ctx.listing.cursorNote }),
       cacheSaved: got.cacheSaved,
     },
     timing: {

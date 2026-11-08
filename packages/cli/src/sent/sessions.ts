@@ -17,6 +17,7 @@ import {
   cursorUnavailable,
   parseCursorStore,
   storeRows,
+  type CursorRow,
 } from './cursor.js';
 
 export type Agent = 'claude-code' | 'codex' | 'cursor';
@@ -190,7 +191,14 @@ export async function cursorSessions(
   db: string,
   only: string | null = null,
 ): Promise<SessionRef[]> {
-  const rows = await storeRows(db, only);
+  return cursorSessionRefs(db, await storeRows(db, only));
+}
+
+/** The transcript and the original rows come from the same read of the store. */
+export function cursorSessionRefs(
+  db: string,
+  rows: readonly CursorRow[],
+): (SessionRef & Required<Pick<SessionRef, 'cursor'>>)[] {
   const raw = new Map<string, string[]>();
   for (const row of rows) {
     const id = row.key.split(':')[1] ?? '';

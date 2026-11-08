@@ -9,6 +9,7 @@ import {
   cursorUnavailable,
   findCursorSessions,
   readCursorSession,
+  readStoreRows,
 } from '../../src/sent/cursor.js';
 import { readerForFile } from '../../src/sent/readers.js';
 import { extractEnv } from '@stroq/core';
@@ -85,6 +86,14 @@ afterAll(() => {
 });
 
 withStore('reading a real Cursor store', () => {
+  it('refuses to return a partial store when the card’s row, byte or time limit is reached', async () => {
+    const limits = { stopAt: Infinity, maxRows: 2, maxBytes: 10_000 };
+    expect(await readStoreRows(db, null, limits)).toHaveLength(2);
+    for (const limit of [{ maxRows: 1 }, { maxBytes: 1 }, { stopAt: 0 }]) {
+      expect(await readStoreRows(db, null, { ...limits, ...limit })).toBeNull();
+    }
+  });
+
   it('lists every session, newest first', async () => {
     const found = await findCursorSessions('/nowhere', db);
     expect(found.map((f) => f.path)).toEqual([
