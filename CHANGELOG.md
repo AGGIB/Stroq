@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.0] - 2026-11-08
+
 ### Added
 
 - **`stroq inspect` reads the code of a folder someone sent you.** It points at text run as code when it was fetched or decoded, code hidden far to the right of a line, code named as a font or an image, scripts and Makefile recipes that fetch into a shell, config files a tool runs by itself, and instruction files that tell an agent to fetch and run something. These are places to read, not verdicts, and they do not change the exit code. `--json` carries them as `code`, `codeNotRead` and `codeFilesRead`.
