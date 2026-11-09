@@ -18,7 +18,9 @@ const ENV_PRINTERS: ReadonlySet<string> = new Set([
  */
 const ENVIRON = /environb?(?![a-z])/i;
 const HTTP_URL = /\bhttps?:\/\/[^\s'"`<>()$;|]+/gi;
-const PYTHON_F_STRING = /\b(?:fr?|rf)(\\?['"])(?:(?!\1)(?:\\[^\r\n]|[^\\\r\n]))*\1/gi;
+// A triple-quoted one first: it may span lines, and its first quote would otherwise end it at once.
+const PYTHON_F_STRING =
+  /\b(?:fr?|rf)(?:'''(?:(?!''')[\s\S])*'''|"""(?:(?!""")[\s\S])*"""|(\\?['"])(?:(?!\1)(?:\\[^\r\n]|[^\\\r\n]))*\1)/gi;
 const INTERPOLATED_URL = /\bhttps?:\/\/(?:\{\{|\}\}|\{[^{}]*\}|[^\s'"`<>(){}$;|])+/gi;
 
 /** Keep evidence from a replacement field without exposing the literal URL around it. */
