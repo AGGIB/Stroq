@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.31.1] - 2026-11-09
+
 ### Fixed
 
 - **`stroq sent` missed the environment sent inside a Python f-string URL**, such as `print(f"https://…/{os.environ}")` piped to a request. Since 0.31.0 a URL was set aside whole, with its fields, so such a stage was not counted as a send. A field that reads the environment counts again, in single, double and triple quotes; a literal word `environ` in a URL's path is still set aside (#299).
