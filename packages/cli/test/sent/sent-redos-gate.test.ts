@@ -121,6 +121,9 @@ const SHELL_SHAPES: readonly (readonly [string, (size: number) => string])[] = [
   ['loops into files', repeat('for i in 1; do echo k; done > a; ')],
   ['environment printers', repeat('env | ')],
   ['printenv words', repeat('printenv -0 ')],
+  ['python f-strings with a field', repeat(`f"http://a/{environ}" `)],
+  ['open triple-quoted f-strings', repeat(`f''' environ `)],
+  ['open fields in an f-string', (size: number) => `environ f"http://a/${repeat('{a')(size)}"`],
   // A word with two `=` after `| env` could be cut at either one, and a line of them with no program after was
   // tried every way (CodeQL js/redos on the reader of a command that hands text to a shell).
   ['env assignments after a pipe', (size: number) => `|env\t${repeat('a==\t')(size)}`],
