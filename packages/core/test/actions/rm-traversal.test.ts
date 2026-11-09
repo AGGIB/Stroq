@@ -292,8 +292,12 @@ describe('reading time', () => {
       return cpuNow() - started;
     };
     const small = time(16_000);
-    const large = time(64_000);
-    expect(large).toBeLessThan(500);
-    expect(large).toBeLessThan(Math.max(small * 12, 40));
+    const limit = Math.min(500, Math.max(small * 12, 40));
+    let large = time(64_000);
+    // As in the classifier gate, recheck a slow sample so a single CPU-time spike does not fail CI.
+    for (let tries = 1; tries < 3 && large >= limit; tries += 1) {
+      large = Math.min(large, time(64_000));
+    }
+    expect(large, `small path: ${small.toFixed(1)} ms`).toBeLessThan(limit);
   });
 });
