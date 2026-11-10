@@ -30,7 +30,7 @@ export interface CardMoment {
   readonly kind: MomentKind;
   readonly line: string;
   readonly session?: {
-    readonly agent: 'claude-code' | 'codex';
+    readonly agent: 'claude-code' | 'codex' | 'cursor';
     readonly id: string;
     readonly path: string;
     readonly cwd: string | null;
@@ -208,7 +208,7 @@ function moment(value: unknown): value is CardMoment {
     filled(value.line, MAX_LINE) &&
     (session === undefined ||
       (closed(session, ['agent', 'id', 'path', 'cwd']) &&
-        member(session.agent, ['claude-code', 'codex']) &&
+        member(session.agent, ['claude-code', 'codex', 'cursor']) &&
         str(session.id, 400) &&
         str(session.path, 1_000) &&
         (session.cwd === null || str(session.cwd, 1_000)))) &&

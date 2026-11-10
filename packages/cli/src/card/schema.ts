@@ -14,7 +14,7 @@ export const MAX_TEXT = 2_000;
 const text = z.string().max(MAX_TEXT);
 const count = z.number().int().nonnegative().max(1_000_000_000);
 
-export const AGENTS = ['claude-code', 'codex'] as const;
+export const AGENTS = ['claude-code', 'codex', 'cursor'] as const;
 export type CardAgent = (typeof AGENTS)[number];
 const agent = z.enum(AGENTS);
 

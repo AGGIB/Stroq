@@ -14,6 +14,7 @@ export interface SessionPlace {
 const AGENT_NAME: Readonly<Record<CardAgent, string>> = {
   'claude-code': 'Claude Code',
   codex: 'Codex',
+  cursor: 'Cursor',
 };
 
 /** A command line the person may paste, or none when a path in it cannot be quoted safely. */

@@ -22,7 +22,7 @@ const counts = z
 const coverage = z
   .object({
     found: count,
-    agents: z.object({ claudeCode: count, codex: count }).strict(),
+    agents: z.object({ claudeCode: count, codex: count, cursor: count.optional() }).strict(),
     checked: count,
     fromCache: count,
     notChecked: count,
@@ -39,6 +39,7 @@ const coverage = z
     keysIncomplete: count,
     folders: z.object({ found: count, checked: count, capped: z.boolean() }).strict(),
     looked: z.array(text).max(8),
+    cursorNote: text.optional(),
     cacheSaved: z.boolean(),
   })
   .strict();

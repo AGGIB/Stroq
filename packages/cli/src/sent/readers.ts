@@ -32,6 +32,7 @@ import {
 } from './cursor.js';
 import { smallest } from './extremes.js';
 import { firstLine } from './head.js';
+import { readHead } from './regular-file.js';
 
 export interface TranscriptReader {
   /** The agent's name as the report prints it. */
@@ -165,11 +166,11 @@ export const READER_ROOTS = (): string => READERS.map((r) => r.root).join(' or '
  */
 export async function readerForFile(path: string): Promise<TranscriptReader> {
   // A Cursor session is addressed as `<store>#<session>`, and only the store half
-  // is a file. Sniffing the literal string would fail to open and fall back to the
-  // Claude reader, which then reports the store as an empty session. The first line is
-  // read whole: a Codex `session_meta` carries the instructions Codex was given, and a
-  // first line cut short would be read as no format at all.
-  const head = await firstLine(splitCursorSessionPath(path).db);
+  // is a file. SQLite is binary, so check its header without looking for a newline.
+  const prefix = readHead(splitCursorSessionPath(path).db, 16);
+  if (prefix.kind === 'text' && cursorReader.claims(prefix.text)) return cursorReader;
+  // The first JSONL line is read whole: a Codex `session_meta` can carry long instructions.
+  const head = await firstLine(path);
   if (head === null) return claudeCodeReader;
   return READERS.find((reader) => reader.claims(head)) ?? claudeCodeReader;
 }

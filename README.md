@@ -15,7 +15,7 @@
 
 </div>
 
-Stroq reads your own Claude Code and Codex sessions and shows how many commands came from text your agent read, and which keys left your machine.
+Stroq reads your own Claude Code, Codex and Cursor sessions and shows how many commands came from text your agent read, and which keys left your machine.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/card-dark.png">
