@@ -378,6 +378,7 @@ describe('the evidence of a folder that runs code on open', () => {
     'npm exec some-tool',
     'pnpm dlx some-tool',
     'npm frobnicate',
+    'bun test',
   ])('cannot be marked for %s', (command) => {
     const dir = join(m.work, `npx-${command.replace(/\W/g, '-')}`);
     hookIn(dir, command);

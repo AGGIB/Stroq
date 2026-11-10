@@ -200,6 +200,8 @@ function wordEvidence(
 
 const RUN = new Set(['run', 'run-script']);
 const TEST = new Set(['test', 't', 'tst']);
+/** The runners whose `test` and `start` run the script of that name; `bun test` is bun's own test runner. */
+const SCRIPT_SHORTHANDS = new Set(['npm', 'pnpm', 'yarn']);
 
 /**
  * The scripts of a `package.json` that `runner` runs with the words after it (`args`), with their `pre`
@@ -221,8 +223,9 @@ function scriptsRun(
     Object.hasOwn(scripts, script) ? [`pre${script}`, script, `post${script}`] : null;
   if (sub !== undefined && RUN.has(sub) && name !== undefined && rest.length === 0)
     return around(name);
-  if (sub !== undefined && TEST.has(sub) && name === undefined) return around('test');
-  if (sub === 'start' && name === undefined) return around('start');
+  if (!SCRIPT_SHORTHANDS.has(runner) || name !== undefined) return null;
+  if (sub !== undefined && TEST.has(sub)) return around('test');
+  if (sub === 'start') return around('start');
   return null;
 }
 
