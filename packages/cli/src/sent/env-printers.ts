@@ -18,11 +18,31 @@ const ENV_PRINTERS: ReadonlySet<string> = new Set([
  */
 const ENVIRON = /environb?(?![a-z])/i;
 const HTTP_URL = /\bhttps?:\/\/[^\s'"`<>()$;|]+/gi;
+// A triple-quoted one first: it may span lines, and its first quote would otherwise end it at once.
+const PYTHON_F_STRING =
+  /\b(?:fr?|rf)(?:'''(?:(?!''')[\s\S])*'''|"""(?:(?!""")[\s\S])*"""|(\\?['"])(?:(?!\1)(?:\\[^\r\n]|[^\\\r\n]))*\1)/gi;
+const INTERPOLATED_URL = /\bhttps?:\/\/(?:\{\{|\}\}|\{[^{}]*\}|[^\s'"`<>(){}$;|])+/gi;
+
+/** Keep evidence from a replacement field without exposing the literal URL around it. */
+function maskInterpolatedUrl(url: string): string {
+  // A doubled opening brace is literal in a Python f-string.
+  for (const [, field] of url.matchAll(/\{\{|\{([^{}]*)/g)) {
+    if (field !== undefined && ENVIRON.test(field)) return ' environ ';
+  }
+  return ' ';
+}
+
+function readsEnvironment(text: string): boolean {
+  if (!ENVIRON.test(text)) return false;
+  const withFields = text.replace(PYTHON_F_STRING, (literal) =>
+    literal.replace(INTERPOLATED_URL, maskInterpolatedUrl),
+  );
+  return ENVIRON.test(withFields.replace(HTTP_URL, ' '));
+}
 
 /** Whether a stage prints the environment, or reads a process's (`/proc/self/environ`, `os.environ`). */
 export function printsEnvironment(text: string): boolean {
-  // An HTTP URL can have an /environ endpoint without reading the local environment.
-  if (ENVIRON.test(text) && ENVIRON.test(text.replace(HTTP_URL, ' '))) return true;
+  if (readsEnvironment(text)) return true;
   const words = joinedWords(text);
   const program = (words[0] ?? '').replace(/^.*\//, '');
   return ENV_PRINTERS.has(program) && words.slice(1).every((w) => /^-[pxi0u]*$/.test(w));
