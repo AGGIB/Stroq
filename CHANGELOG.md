@@ -10,7 +10,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - **When a sandbox around the agent closes Stroq's own folder, the hook says so.** The call is refused as before, and the reason now names `~/.stroq` and says to give it read and write access in the sandbox, instead of "the policy file is there but cannot be read (ENOENT)" for a file the sandbox hid.
-- **[Stroq and a sandbox](docs/SANDBOXES.md) says how to run Stroq inside one**, such as Agent Safehouse, and what happens when `~/.stroq` is left out: an install made with `npx` is then off, a global install refuses every shell command. Asked on the Show HN thread.
+- **[Stroq and a sandbox](docs/SANDBOXES.md) says how to run Stroq inside one**, such as Agent Safehouse, and what happens when `~/.stroq` is left out: every shell command, edit, fetch and MCP call is refused, so give the folder read and write access. Asked on the Show HN thread.
+
+### Fixed
+
+- **A Claude Code hook that cannot start no longer lets the call through.** Claude Code takes a hook that exits with any code but 2 for a non-blocking error and runs the call, so a Stroq whose entry was gone, or closed to a sandbox around the agent, guarded nothing and said nothing. The line `stroq init` writes now ends in `|| { echo '…' >&2; exit 2; }`, as the plugin's wrapper already did: such a hook blocks a `PreToolUse` call and says to run `stroq doctor`. Run `stroq init` again to get the new line; `init`, `uninstall`, `doctor`, the card and the console know both.
 
 ## [0.31.1] - 2026-11-09
 

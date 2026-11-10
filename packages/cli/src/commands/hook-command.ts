@@ -24,13 +24,31 @@ import { join } from 'node:path';
 export const needsTsxLoader = (entry: string): boolean => entry.endsWith('.ts');
 
 /**
- * The command an agent runs for every hook event. The trailing agent name is
- * also how `init` recognises its own entries when re-installing, so it must stay
- * at the end of the string (see `isStroqHandler` / `isStroqCursorHook`).
+ * What follows Claude Code's line. Claude Code takes a hook that exits with any code but 2 for a
+ * non-blocking error and runs the call, so a Stroq that cannot start (its entry gone, or closed to a
+ * sandbox around the agent) or that ends with an error would leave the call unjudged. With this, such
+ * a hook exits 2, which blocks a `PreToolUse` call and only shows the words for the events after a call.
+ * Claude Code runs its hooks in a POSIX shell (Git Bash on Windows), which reads it. The plugin's
+ * `stroq-hook.sh` does the same for the runs it starts.
+ */
+export const CLAUDE_CODE_FAIL_CLOSED =
+  " || { echo 'Stroq could not run, so this call is blocked. In a terminal: stroq doctor' >&2; exit 2; }";
+
+/** A Claude Code line without `CLAUDE_CODE_FAIL_CLOSED`, word for word; any other command as it is. */
+export const withoutFailClosed = (command: string): string =>
+  command.endsWith(` hook claude-code${CLAUDE_CODE_FAIL_CLOSED}`)
+    ? command.slice(0, -CLAUDE_CODE_FAIL_CLOSED.length)
+    : command;
+
+/**
+ * The command an agent runs for every hook event. The agent name is also how `init` recognises its own
+ * entries when re-installing, so it stays at the end of the line, before Claude Code's
+ * `CLAUDE_CODE_FAIL_CLOSED` (see `isStroqHandler` / `isStroqCursorHook`).
  */
 export function hookCommand(node: string, entry: string, agent: string = 'claude-code'): string {
   const loader = needsTsxLoader(entry) ? ' --import tsx' : '';
-  return `"${node}"${loader} "${entry}" hook ${agent}`;
+  const line = `"${node}"${loader} "${entry}" hook ${agent}`;
+  return agent === 'claude-code' ? `${line}${CLAUDE_CODE_FAIL_CLOSED}` : line;
 }
 
 /**
