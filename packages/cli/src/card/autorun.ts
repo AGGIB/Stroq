@@ -6,22 +6,11 @@
 // guard off (hooks, auto-approved MCP servers, autorun tasks). The ordinary things many honest
 // repositories have (a husky hook, a `prepare` script) are not counted: `inspect` lists them as "not
 // findings" and a count of them would be a count of every repository there is.
-import { createHash, randomBytes } from 'node:crypto';
-import {
-  closeSync,
-  constants,
-  fstatSync,
-  openSync,
-  readSync,
-  readdirSync,
-  readlinkSync,
-  realpathSync,
-  statSync,
-} from 'node:fs';
-import { homedir } from 'node:os';
-import { readRegularFile } from '@stroq/core';
-import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
+import { createHash } from 'node:crypto';
+import { realpathSync, statSync } from 'node:fs';
+import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { CURSOR_EVENTS, type CursorEvent } from '../adapters/cursor.js';
+import { commandEvidence, configEvidence, folderBudget } from './autorun-evidence.js';
 import { cursorEntry } from '../commands/cursor-hooks.js';
 import { isBare, withoutFailClosed } from '../commands/hook-command.js';
 import { isFailing, tagChanges } from '../exposure/agent-change.js';
@@ -52,109 +41,6 @@ export interface AutorunRepo {
    * changes, though its names stay the same.
    */
   readonly evidence: string;
-}
-
-/**
- * The longest file whose bytes go into the evidence: a node binary is about 100 MiB. One past it is
- * not hashed, and the moment cannot be marked (`unkeyable`): a size and a date can be put back.
- */
-const MAX_EVIDENCE_BYTES = 256 * 1024 * 1024;
-/** The longest file whose text is read for the files it names. */
-const MAX_TEXT_BYTES = 4 * 1024 * 1024;
-/** The most files one text names that go into the evidence, and the most words of it looked at. */
-const MAX_NAMED = 32;
-const MAX_WORDS = 2_000;
-/** What separates the words of a command or a config line that could name a file. Quotes are taken off first. */
-const WORD_BREAKS = /[\s\0;&|()<>`=,{}[\]]+/;
-
-/**
- * The words of a command or a config text that could name a file: a variable's braces and every quote
- * taken off first, so that `"$CLAUDE_PROJECT_DIR"/setup.sh` and `${HOME}/x` are one word each.
- */
-const wordsOf = (text: string): string[] =>
-  text
-    .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, '$$$1')
-    .replace(/["']/g, '')
-    .split(WORD_BREAKS);
-
-/**
- * Evidence that is never the same twice, for what the reading cannot cover: a file too large to hash,
- * a variable it cannot know the value of, more files than it reads. A moment with it in its key cannot
- * be marked as a false alarm, which is the safe way for a mark to fail.
- */
-const unkeyable = (): string => `unkeyable:${randomBytes(16).toString('hex')}`;
-
-/**
- * The files a runner reads for what it runs, when the command names the runner and not the file:
- * `npm run setup` runs what `package.json` says.
- */
-const RUNNER_FILES: Readonly<Record<string, readonly string[]>> = {
-  npm: ['package.json'],
-  npx: ['package.json'],
-  pnpm: ['package.json'],
-  yarn: ['package.json'],
-  bun: ['package.json'],
-  bunx: ['package.json'],
-  make: ['Makefile', 'makefile', 'GNUmakefile'],
-  gmake: ['Makefile', 'makefile', 'GNUmakefile'],
-  just: ['justfile', 'Justfile', '.justfile'],
-  task: ['Taskfile.yml', 'Taskfile.yaml'],
-  uv: ['pyproject.toml'],
-  poetry: ['pyproject.toml'],
-  pdm: ['pyproject.toml'],
-  hatch: ['pyproject.toml'],
-  deno: ['deno.json', 'deno.jsonc'],
-  cargo: ['Cargo.toml'],
-  composer: ['composer.json'],
-  rake: ['Rakefile'],
-};
-
-/** Opens for a look that neither follows a link nor waits on a pipe: what is read is what the handle shows. */
-const LOOK_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
-
-/** The digest of what the handle `fd` holds, read through it: the bytes of a file, past the bound its size and date. */
-function digestThrough(fd: number, path: string): string {
-  const info = fstatSync(fd);
-  if (info.isDirectory()) return `dir:${readdirSync(path).sort().join('\u0000')}`;
-  if (!info.isFile()) return 'other';
-  if (info.size > MAX_EVIDENCE_BYTES) return unkeyable();
-  const hash = createHash('sha256');
-  const buffer = Buffer.alloc(64 * 1024);
-  for (let at = 0; at <= MAX_EVIDENCE_BYTES;) {
-    const read = readSync(fd, buffer, 0, buffer.length, at);
-    if (read === 0) break;
-    hash.update(buffer.subarray(0, read));
-    at += read;
-  }
-  return `file:${hash.digest('hex')}`;
-}
-
-/**
- * What the file at `path` holds, as a digest: its bytes, or a folder's names; for a link, where it leads
- * and what is there. The path is opened once, without following a link, and the handle is what is looked
- * at and read, so a file swapped in between is not mistaken for the one that was looked at.
- */
-function fileDigest(path: string): string {
-  let fd: number;
-  try {
-    fd = openSync(path, LOOK_FLAGS);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code !== 'ELOOP') return 'unreadable';
-    // A link: what runs is what it leads to, wherever that is.
-    try {
-      const real = realpathSync(path);
-      return `link:${readlinkSync(path)}\u0000${real}\u0000${fileDigest(real)}`;
-    } catch {
-      return `link:dangling`;
-    }
-  }
-  try {
-    return digestThrough(fd, path);
-  } catch {
-    return 'unreadable';
-  } finally {
-    closeSync(fd);
-  }
 }
 
 const MAX_ITEMS = 5;
@@ -345,8 +231,7 @@ export function autorunOf(dir: string): AutorunRepo | null {
   } catch {
     root = dir;
   }
-  const named = (text: string, file: string): string =>
-    namedFiles(root, text, [root, dirname(join(root, file))]).join('\u0001');
+  const budget = folderBudget();
   const add = (item: AutorunItem, what: () => string): void => {
     const key = `${item.file}\u0000${item.name}`;
     if (seen.has(key)) return;
@@ -357,14 +242,15 @@ export function autorunOf(dir: string): AutorunRepo | null {
   // A finding of git's names no command, so the file it is in stands for it, with what that file names
   // (a script, an included config); an agent setting names its command, and what the command names.
   for (const hit of surface.preTrust.filter(runsOnOpen))
-    add({ kind: hit.kind, file: hit.file, name: hit.what }, () => {
-      const path = join(root, hit.file);
-      return `${fileDigest(path)}\u0000${named(textOf(path), hit.file)}`;
-    });
+    add({ kind: hit.kind, file: hit.file, name: hit.what }, () =>
+      configEvidence(root, hit.file, budget),
+    );
   for (const hit of agent)
     add({ kind: hit.kind, file: hit.file, name: hit.name }, () => {
-      const command = `${hit.value}\u0000${hit.runs ?? ''}`;
-      return `${command}\u0000${named(command, hit.file)}`;
+      const bases = [root, dirname(join(root, hit.file))];
+      return [hit.value, hit.runs ?? '']
+        .flatMap((command) => [command, ...commandEvidence(command, root, bases, budget)])
+        .join('\u0001');
     });
   if (items.length === 0) return null;
   return {
@@ -373,64 +259,6 @@ export function autorunOf(dir: string): AutorunRepo | null {
     more: Math.max(0, items.length - MAX_ITEMS),
     evidence: createHash('sha256').update(JSON.stringify(runs)).digest('hex'),
   };
-}
-
-/** A word with the home and the project spelled out, or null for one with a variable no reading can know. */
-function spelledOut(word: string, root: string): string | null {
-  const home = homedir();
-  const out = word
-    .replace(/^~(?=\/|$)/, home)
-    .replace(/\$HOME(?=\/|$)/g, home)
-    .replace(/\$CLAUDE_PROJECT_DIR(?=\/|$)/g, root);
-  return out.includes('$') || out.startsWith('~') ? null : out;
-}
-
-/**
- * The files the words of `text` name, wherever they are, each tried from `bases` in turn, and the files
- * a runner it names reads (`RUNNER_FILES`): as their paths and a digest of each. A word that names none
- * (`origin`, `--force`, a URL) costs a lookup and adds nothing. A variable that is not the home or the
- * project, more files or words than are read: the evidence then cannot cover what runs, and says so.
- */
-function namedFiles(root: string, text: string, bases: readonly string[]): string[] {
-  const found = new Set<string>();
-  const all = wordsOf(text);
-  if (all.length > MAX_WORDS) found.add(unkeyable());
-  for (const raw of all.slice(0, MAX_WORDS)) {
-    if (found.size > MAX_NAMED) {
-      found.add(unkeyable());
-      break;
-    }
-    if (raw === '' || raw.startsWith('-') || raw.includes('://')) continue;
-    const word = spelledOut(raw, root);
-    if (word === null) {
-      found.add(unkeyable());
-      continue;
-    }
-    for (const config of RUNNER_FILES[basename(word)] ?? [])
-      found.add(`${config}\u0000${fileDigest(join(root, config))}`);
-    for (const base of bases) {
-      let real: string;
-      try {
-        real = realpathSync(isAbsolute(word) ? word : join(base, word));
-        if (!statSync(real).isFile()) continue;
-      } catch {
-        continue;
-      }
-      found.add(`${real}\u0000${fileDigest(real)}`);
-      break;
-    }
-  }
-  return [...found].sort();
-}
-
-/** The text of a file of the folder, when it is a regular file small enough to read; else empty. */
-function textOf(path: string): string {
-  try {
-    const read = readRegularFile(path, MAX_TEXT_BYTES);
-    return read.kind === 'text' ? read.text : '';
-  } catch {
-    return '';
-  }
 }
 
 export interface AutorunResult {
