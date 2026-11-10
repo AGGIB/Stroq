@@ -26,7 +26,11 @@ export interface CardCounts {
 export interface CardCoverage {
   /** Sessions in the window, per agent. */
   readonly found: number;
-  readonly agents: { readonly claudeCode: number; readonly codex: number };
+  readonly agents: {
+    readonly claudeCode: number;
+    readonly codex: number;
+    readonly cursor?: number;
+  };
   /** Sessions whose commands were counted: from this run or from the cache. */
   readonly checked: number;
   /** Of those, read from the cache. */
@@ -66,6 +70,8 @@ export interface CardCoverage {
   };
   /** Where the agents' sessions are looked for. */
   readonly looked: readonly string[];
+  /** A Cursor store that was unreadable, cut short, or has uncommitted changes. */
+  readonly cursorNote?: string;
   /** Whether the cache could be saved. */
   readonly cacheSaved: boolean;
 }

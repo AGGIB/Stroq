@@ -8,6 +8,7 @@
 import { isShellTool, type AuditEntry } from '@stroq/core';
 import { findRead, replayTranscript } from '../commands/replay.js';
 import { readCodexRollout } from '../sent/codex.js';
+import { readCursorSession } from '../sent/cursor.js';
 import { readTranscript, type Transcript } from '../replay/transcript.js';
 import { declaredPackages } from './declared-packages.js';
 import { leanTranscript } from './lean.js';
@@ -145,6 +146,7 @@ export async function summarizeSession(
   path: string,
   deps: SummaryDeps = {},
 ): Promise<SessionSummary> {
-  const transcript = agent === 'codex' ? await readCodexRollout(path) : await readTranscript(path);
-  return summarizeTranscript(transcript, agent, deps);
+  const read =
+    agent === 'cursor' ? readCursorSession : agent === 'codex' ? readCodexRollout : readTranscript;
+  return summarizeTranscript(await read(path), agent, deps);
 }
