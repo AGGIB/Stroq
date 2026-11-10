@@ -31,6 +31,7 @@ import {
   readTranscript,
   type Transcript,
 } from '../replay/transcript.js';
+import { readerForFile } from '../sent/readers.js';
 
 /** One action that traced back to something the agent had read. */
 export interface ReplayConsequence {
@@ -474,7 +475,10 @@ export async function runReplay(args: readonly string[]): Promise<number> {
       process.stdout.write('no agent transcript found — looked under ~/.claude/projects\n');
       return 1;
     }
-    const transcript = await readTranscript(path);
+    const transcript =
+      values.transcript === undefined
+        ? await readTranscript(path)
+        : await (await readerForFile(path)).read(path);
     if (transcript.events.length === 0) {
       process.stdout.write(`no tool calls recorded in ${path}\n`);
       return 1;

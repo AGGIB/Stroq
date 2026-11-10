@@ -75,6 +75,18 @@ describe('the card state the engine returns', () => {
     expect(validateCardState(state())).toBe(true);
   });
 
+  it('accepts a moment from a Cursor session', () => {
+    const session = {
+      agent: 'cursor',
+      id: 'session-1',
+      path: '/tmp/state.vscdb#session-1',
+      cwd: null,
+    };
+    const cursor = state();
+    (cursor.result as Record<string, unknown>).moments = [{ ...moment(1), session }];
+    expect(validateCardState(cursor)).toBe(true);
+  });
+
   it('accepts the states before there is a card', () => {
     expect(
       validateCardState(state({ status: 'idle', startedAt: null, finishedAt: null, result: null })),
