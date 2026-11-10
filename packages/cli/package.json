@@ -1,6 +1,6 @@
 {
   "name": "@stroq/cli",
-  "version": "0.31.0",
+  "version": "0.31.1",
   "description": "AI agent security platform: local hooks that judge Claude Code, Cursor and Codex tool calls before they run, a console on 127.0.0.1, and checks of past sessions",
   "license": "Apache-2.0",
   "type": "module",
