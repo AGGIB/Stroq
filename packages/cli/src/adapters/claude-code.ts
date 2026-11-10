@@ -15,6 +15,7 @@ import {
 } from '@stroq/core';
 import { z } from 'zod';
 import { logError } from '../log.js';
+import { internalErrorReason } from './internal-error.js';
 
 export const ClaudeHookInputSchema = z.looseObject({
   session_id: z
@@ -505,6 +506,5 @@ export function failClosedOutput(raw: unknown, err: unknown): HookOutput {
   const toolName = typeof record['tool_name'] === 'string' ? record['tool_name'] : '';
   if (record['hook_event_name'] !== 'PreToolUse' || !HIGH_IMPACT_TOOL.test(toolName))
     return NO_OUTPUT;
-  const message = err instanceof Error ? err.message : String(err);
-  return denyOutput(`Stroq internal error (fail-closed): ${message}`);
+  return denyOutput(internalErrorReason(err));
 }
