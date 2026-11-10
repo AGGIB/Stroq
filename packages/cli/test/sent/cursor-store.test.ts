@@ -78,6 +78,8 @@ beforeAll(() => {
   );
   // A row the reader must ignore rather than mistake for a session.
   insert.run('composerData:something', '{"composerId":"something"}');
+  insert.run('bubbleId:missing:empty', null);
+  insert.run('bubbleId:missing:binary', new Uint8Array(10_001));
   handle.close();
 });
 
@@ -86,7 +88,7 @@ afterAll(() => {
 });
 
 withStore('reading a real Cursor store', () => {
-  it('refuses to return a partial store when the card’s row, byte or time limit is reached', async () => {
+  it('skips non-text rows and refuses a partial store when the card’s limits are reached', async () => {
     const limits = { stopAt: Infinity, maxRows: 2, maxBytes: 10_000 };
     expect(await readStoreRows(db, null, limits)).toHaveLength(2);
     for (const limit of [{ maxRows: 1 }, { maxBytes: 1 }, { stopAt: 0 }]) {

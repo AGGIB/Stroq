@@ -255,7 +255,8 @@ export function parseCursorStore(rows: Iterable<CursorRow>): CursorSession[] {
   return [...bySession.entries()]
     .map(([id, s]) => {
       // SQLite's row order is insertion order, which can change when a bubble is replaced.
-      // Keep pre/post events together, and keep the store order for ties and undated bubbles.
+      // Keep pre/post events together. Put undated bubbles after dated ones, in store order,
+      // and preserve store order for bubbles with the same date.
       const ordered = s.bubbles.sort((a, b) => a.at - b.at || 0);
       return {
         id,
@@ -423,26 +424,30 @@ export async function readStoreRows(
         : handle
             .prepare(
               `
-          select key, case when length(cast(value as blob)) <= ? then value end as value
+          select key, typeof(value) = 'text' as isText,
+            case when typeof(value) <> 'text' then null
+                 when length(cast(value as blob)) <= ? then value end as value
           from cursorDiskKV where key like ?
         `,
             )
             .iterate(budget.maxBytes, like);
     const rows: CursorRow[] = [];
     let bytes = 0;
-    for (const { key, value } of records) {
-      if (typeof key !== 'string' || typeof value !== 'string') {
-        if (budget !== undefined) return null;
+    for (const { key, value, isText } of records) {
+      if (budget !== undefined && Date.now() >= budget.stopAt) return null;
+      if (typeof key !== 'string') continue;
+      if (typeof value !== 'string') {
+        // The bounded query leaves out the payload of an oversized text row.
+        if (isText === 1) return null;
         continue;
       }
       if (budget !== undefined) {
         bytes += Buffer.byteLength(key) + Buffer.byteLength(value);
-        if (Date.now() >= budget.stopAt || rows.length >= budget.maxRows || bytes > budget.maxBytes)
-          return null;
+        if (rows.length >= budget.maxRows || bytes > budget.maxBytes) return null;
       }
       rows.push({ key, value });
     }
-    return rows;
+    return budget !== undefined && Date.now() >= budget.stopAt ? null : rows;
   } catch {
     // A store whose schema has moved on is not an error to report at people: the
     // command says it found no Cursor session, which is true.

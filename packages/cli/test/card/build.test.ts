@@ -229,6 +229,7 @@ describe.skipIf(sqlite === null)('the card with Cursor sessions', () => {
     try {
       handle.exec('create table cursorDiskKV (key text primary key, value text)');
       const put = handle.prepare('insert into cursorDiskKV values (?, ?)');
+      put.run('bubbleId:other:empty', null);
       put.run(
         'bubbleId:fixture:command',
         JSON.stringify({
@@ -254,6 +255,8 @@ describe.skipIf(sqlite === null)('the card with Cursor sessions', () => {
       handle.close();
     }
     const data = await buildCard(30, run);
+    expect(data.coverage).toMatchObject({ found: 1, agents: { cursor: 1 } });
+    expect(data.coverage.cursorNote).toBeUndefined();
     expect(data.counts.toldByText).toBe(1);
     const moment = data.moments.find((one) => one.kind === 'told-by-text');
     expect(moment?.next[0]).toContain('stroq replay --transcript');
