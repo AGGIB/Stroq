@@ -6,8 +6,16 @@
 // guard off (hooks, auto-approved MCP servers, autorun tasks). The ordinary things many honest
 // repositories have (a husky hook, a `prepare` script) are not counted: `inspect` lists them as "not
 // findings" and a count of them would be a count of every repository there is.
-import { realpathSync, statSync } from 'node:fs';
-import { basename, isAbsolute, sep } from 'node:path';
+import { createHash } from 'node:crypto';
+import {
+  lstatSync,
+  readFileSync,
+  readdirSync,
+  readlinkSync,
+  realpathSync,
+  statSync,
+} from 'node:fs';
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { CURSOR_EVENTS, type CursorEvent } from '../adapters/cursor.js';
 import { cursorEntry } from '../commands/cursor-hooks.js';
 import { isBare, withoutFailClosed } from '../commands/hook-command.js';
@@ -30,6 +38,37 @@ export interface AutorunRepo {
   /** The first few things, and how many more there are. */
   readonly items: readonly AutorunItem[];
   readonly more: number;
+  /**
+   * A digest of everything that runs, the items past the first few included: what each agent setting
+   * runs, the bytes of each file git reads, and the bytes of the files of the folder that either names
+   * (a script a hook runs, a file a config includes), one step deep. Never shown. A false-alarm mark is
+   * kept under it (`false-alarms.ts`), so that a mark on a folder is gone once what the folder runs
+   * changes, though its names stay the same.
+   */
+  readonly evidence: string;
+}
+
+/** The longest file whose bytes go into the evidence; past it, its size and date do. */
+const MAX_EVIDENCE_BYTES = 4 * 1024 * 1024;
+/** The most files one text names that go into the evidence, and the most words of it looked at. */
+const MAX_NAMED = 32;
+const MAX_WORDS = 2_000;
+/** What separates the words of a command or a config line that could name a file. */
+const WORD_BREAKS = /[\s\0;&|()<>`'"=,{}[\]]+/;
+
+/** What a file of the folder holds, as a digest: its bytes, the target of a link, or a folder's names. */
+function fileDigest(dir: string, file: string): string {
+  const path = join(dir, file);
+  try {
+    const info = lstatSync(path);
+    if (info.isSymbolicLink()) return `link:${readlinkSync(path)}`;
+    if (info.isDirectory()) return `dir:${readdirSync(path).sort().join('\u0000')}`;
+    if (!info.isFile()) return 'other';
+    if (info.size > MAX_EVIDENCE_BYTES) return `large:${info.size}:${info.mtimeMs}`;
+    return `file:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+  } catch {
+    return 'unreadable';
+  }
 }
 
 const MAX_ITEMS = 5;
@@ -213,17 +252,81 @@ export function autorunOf(dir: string): AutorunRepo | null {
     .filter(notOwnHook(dir));
   const seen = new Set<string>();
   const items: AutorunItem[] = [];
-  const add = (item: AutorunItem): void => {
+  const runs: string[][] = [];
+  let root: string;
+  try {
+    root = realpathSync(dir);
+  } catch {
+    root = dir;
+  }
+  const named = (text: string, file: string): string =>
+    namedFiles(root, text, [root, dirname(join(root, file))]).join('\u0001');
+  const add = (item: AutorunItem, what: () => string): void => {
     const key = `${item.file}\u0000${item.name}`;
     if (seen.has(key)) return;
     seen.add(key);
     items.push(item);
+    runs.push([item.kind, item.file, item.name, what()]);
   };
+  // A finding of git's names no command, so the file it is in stands for it, with what that file names
+  // (a script, an included config); an agent setting names its command, and what the command names.
   for (const hit of surface.preTrust.filter(runsOnOpen))
-    add({ kind: hit.kind, file: hit.file, name: hit.what });
-  for (const hit of agent) add({ kind: hit.kind, file: hit.file, name: hit.name });
+    add(
+      { kind: hit.kind, file: hit.file, name: hit.what },
+      () => `${fileDigest(dir, hit.file)}\u0000${named(textOf(dir, hit.file), hit.file)}`,
+    );
+  for (const hit of agent)
+    add({ kind: hit.kind, file: hit.file, name: hit.name }, () => {
+      const command = `${hit.value}\u0000${hit.runs ?? ''}`;
+      return `${command}\u0000${named(command, hit.file)}`;
+    });
   if (items.length === 0) return null;
-  return { dir, items: items.slice(0, MAX_ITEMS), more: Math.max(0, items.length - MAX_ITEMS) };
+  return {
+    dir,
+    items: items.slice(0, MAX_ITEMS),
+    more: Math.max(0, items.length - MAX_ITEMS),
+    evidence: createHash('sha256').update(JSON.stringify(runs)).digest('hex'),
+  };
+}
+
+/**
+ * The files inside the folder that the words of `text` name, each tried from `bases` in turn: as its path
+ * in the folder and a digest of it. Only regular files inside the folder count, so that nothing outside it
+ * is read; a word that names none (`origin`, `--force`, a URL) costs a lookup and adds nothing.
+ */
+function namedFiles(root: string, text: string, bases: readonly string[]): string[] {
+  const found = new Set<string>();
+  const words = text.split(WORD_BREAKS).slice(0, MAX_WORDS);
+  for (const word of words) {
+    if (found.size >= MAX_NAMED) break;
+    if (word === '' || word.startsWith('-') || word.startsWith('~')) continue;
+    if (word.includes('$') || word.includes('://')) continue;
+    for (const base of bases) {
+      let real: string;
+      try {
+        real = realpathSync(isAbsolute(word) ? word : join(base, word));
+        if (!statSync(real).isFile()) continue;
+      } catch {
+        continue;
+      }
+      const rel = relative(root, real);
+      if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) continue;
+      found.add(`${rel}\u0000${fileDigest(root, rel)}`);
+      break;
+    }
+  }
+  return [...found].sort();
+}
+
+/** The text of a file of the folder, when it is a regular file small enough to read; else empty. */
+function textOf(dir: string, file: string): string {
+  const path = join(dir, file);
+  try {
+    const info = lstatSync(path);
+    return info.isFile() && info.size <= MAX_EVIDENCE_BYTES ? readFileSync(path, 'utf8') : '';
+  } catch {
+    return '';
+  }
 }
 
 export interface AutorunResult {

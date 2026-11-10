@@ -9,6 +9,7 @@ import { isShellTool } from '@stroq/core';
 import { when } from '../sent/phrases.js';
 import type { AutorunItem, AutorunRepo } from './autorun.js';
 import { KEPT } from './data.js';
+import { momentKey } from './false-alarms.js';
 import { keyMoments, type PlacedFinding } from './key-moments.js';
 import { pasteable, sessionRows, withTranscript, type SessionPlace } from './moment-parts.js';
 import { FILE_TOOL, readSourceOf } from './read-name.js';
@@ -171,8 +172,46 @@ function repoMoment(repo: AutorunRepo, home: string): Omit<Moment, 'n'> {
 
 const newestFirst = (a: string, b: string): number => Date.parse(b) - Date.parse(a) || 0;
 
-/** The moments, most worth a look first, numbered from 1. */
+/** What `keptMoments` gives: the moments numbered from 1, and how many marks it left out. */
+export interface KeptMoments {
+  readonly moments: Moment[];
+  /** Moments the person had marked as false alarms, left out before the list was cut and numbered. */
+  readonly leftOut: number;
+}
+
+/** The moments, most worth a look first, each with its key, numbered from 1. */
 export function buildMoments(inputs: MomentInputs): Moment[] {
+  return keptMoments(inputs, new Set()).moments;
+}
+
+/**
+ * `buildMoments`, less those whose key is in `leaveOut`. They are left out before the list is cut to
+ * `KEPT`, so that a mark never costs another moment its place.
+ */
+export function keptMoments(inputs: MomentInputs, leaveOut: ReadonlySet<string>): KeptMoments {
+  const ranked = rankMoments(inputs).map(({ moment, evidence }) => ({
+    ...moment,
+    key: momentKey(moment, evidence),
+  }));
+  const kept = ranked.filter((moment) => !leaveOut.has(moment.key));
+  return {
+    moments: kept.slice(0, KEPT).map((moment, i) => ({ ...moment, n: i + 1 })),
+    leftOut: ranked.length - kept.length,
+  };
+}
+
+/**
+ * A moment, and what its key is made from besides its words: what the card shows is cut to fit (a
+ * command at 200 characters, a path to its ends), and a folder shows the names of what it runs and not
+ * what they run. What is left out of the words is in the evidence, so that a change there is a new
+ * moment. A key moment's words name every key and destination it is about, and it has none.
+ */
+interface Ranked {
+  readonly moment: Omit<Moment, 'n'>;
+  readonly evidence: string;
+}
+
+function rankMoments(inputs: MomentInputs): Ranked[] {
   const { home } = inputs;
   const told = [...inputs.told]
     .sort(
@@ -181,12 +220,20 @@ export function buildMoments(inputs: MomentInputs): Moment[] {
         SHAPE_RANK[a.moment.shape] - SHAPE_RANK[b.moment.shape] ||
         newestFirst(a.moment.at, b.moment.at),
     )
-    .map((input) => toldMoment(input, home));
+    .map((input) => ({ moment: toldMoment(input, home), evidence: JSON.stringify(input.moment) }));
   const keys = keyMoments(inputs.findings, home);
   const repos = [...inputs.repos]
     .sort((a, b) => b.items.length + b.more - (a.items.length + a.more) || (a.dir < b.dir ? -1 : 1))
-    .map((repo) => repoMoment(repo, home));
-  return [...told, ...keys.sent, ...keys.maybe, ...keys.seen, ...repos]
-    .slice(0, KEPT)
-    .map((moment, i) => ({ ...moment, n: i + 1 }));
+    .map((repo) => ({
+      moment: repoMoment(repo, home),
+      evidence: `${repo.dir}\u0000${repo.evidence}`,
+    }));
+  const words = (moment: Omit<Moment, 'n'>): Ranked => ({ moment, evidence: '' });
+  return [
+    ...told,
+    ...keys.sent.map(words),
+    ...keys.maybe.map(words),
+    ...keys.seen.map(words),
+    ...repos,
+  ];
 }

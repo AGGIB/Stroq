@@ -36,6 +36,7 @@ export function card(over: Partial<CardData> = {}): CardData {
       keysIncomplete: 0,
       folders: { found: 40, checked: 40, capped: false },
       looked: ['/Users/dev/.claude/projects', '/Users/dev/.codex/sessions'],
+      falseAlarms: { leftOut: 0, unreadable: false },
       cacheSaved: true,
     },
     timing: { totalMs: 21_000, replayed: 1_756, workers: 6, replayMs: 20_000, keysMs: 12_000 },

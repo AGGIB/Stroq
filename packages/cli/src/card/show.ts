@@ -3,6 +3,7 @@
 // Read from the card's own file under the Stroq home, which `card/store.ts` reads strictly. Everything
 // in it is passed through `clean` once more here: the file is data that could have been put there by
 // someone else, and what is printed must never drive the terminal.
+import { ID_LENGTH } from './false-alarms.js';
 import type { LastCard, Moment } from './schema.js';
 import { clean, wrap } from './text.js';
 
@@ -44,5 +45,14 @@ export function renderShow(card: LastCard, moment: Moment): string[] {
     ...(moment.next.length === 0
       ? []
       : ['', 'Dig deeper', ...moment.next.map((command) => `  ${clean(command, 600)}`)]),
+    // A card an older version kept has no key, and `--false-alarm` would only say so. The id is what a
+    // mark goes by, so that it marks this moment even when the card is made again in between.
+    ...(moment.key === undefined
+      ? []
+      : [
+          '',
+          'A false alarm? Mark it in your own terminal, and the card stops listing it:',
+          `  stroq show --false-alarm ${moment.key.slice(0, ID_LENGTH)}`,
+        ]),
   ];
 }
