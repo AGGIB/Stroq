@@ -8,6 +8,7 @@ import { inspectConfiguration, validConfiguration } from './agent-status-config.
 import { runtimeDigest } from './agent-setup-cli.mjs';
 import { readPolicyState } from './policy-files.mjs';
 import { runtimeLayout } from './runtime-layout.mjs';
+import { hookLine } from './hook-line.mjs';
 
 const SHA = /^[a-f0-9]{64}$/;
 const pin = (v) => (v === null ? null : { dev: v.dev, ino: v.ino, uid: v.uid, mode: v.mode });
@@ -40,7 +41,7 @@ export async function captureHookConfiguration(input, options, roots, workspaceI
     const config = adapter.parseSetupObject(source.bytes);
     const expected = adapter.expectedConfiguration(
       input.agent,
-      `"${process.execPath}" "${options.paths.cli}" hook ${input.agent}`,
+      hookLine(process.execPath, options.paths.cli, input.agent),
     );
     if (!validConfiguration(config, input.agent)) throw new Error();
     if (inspectConfiguration(config, expected, input.agent).state !== 'present')

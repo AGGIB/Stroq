@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { createAgentStatus } from './agent-status.mjs';
+import { hookLine } from './hook-line.mjs';
 
 const adapter = await import('../.local-engine/agent-status-engine.js');
 const AGENTS = ['claude-code', 'cursor', 'codex'];
@@ -42,7 +43,7 @@ async function fixture(t) {
     await rm(directory, { recursive: true, force: true });
   });
   const expected = (agent) =>
-    adapter.expectedConfiguration(agent, `"${process.execPath}" "${cli}" hook ${agent}`);
+    adapter.expectedConfiguration(agent, hookLine(process.execPath, cli, agent));
   const file = (agent, scope) =>
     join(scope === 'project' ? project : userHome, relativeTarget(agent));
   async function write(agent, scope, bytes) {

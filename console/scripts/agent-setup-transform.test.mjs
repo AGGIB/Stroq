@@ -8,6 +8,7 @@ import { build } from 'tsup';
 import { completePlan, readSetupInputs } from './agent-setup-plan.mjs';
 import { rootIdentity } from './agent-setup-files.mjs';
 import { inspectConfiguration, validConfiguration } from './agent-status-config.mjs';
+import { hookLine } from './hook-line.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const output = await mkdtemp(join(tmpdir(), 'stroq-setup-transform-'));
@@ -37,7 +38,7 @@ for (const name of ['atlas', 'scope', 'asi'])
     join(output, `${name}.json`),
   );
 const adapter = await import(pathToFileURL(join(output, 'adapter.mjs')).href);
-const command = (agent) => `"${process.execPath}" "/fixed/stroq.js" hook ${agent}`;
+const command = (agent) => hookLine(process.execPath, '/fixed/stroq.js', agent);
 const agents = ['claude-code', 'cursor', 'codex'];
 const direct = (agent) => agent === 'cursor';
 function fixture(agent) {

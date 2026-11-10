@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { createAgentStatus } from './agent-status.mjs';
+import { hookLine } from './hook-line.mjs';
 
 const adapterPath = new URL('../.local-engine/agent-status-engine.js', import.meta.url);
 const adapter = await import(adapterPath.href);
@@ -23,7 +24,7 @@ async function fixture(t) {
   await writeFile(cli, '/* inert current engine fixture */');
   await writeFile(packagePath, JSON.stringify({ version: '0.28.0' }));
   const options = { project, userHome, home, paths: { cli, package: packagePath }, now: () => NOW };
-  const command = (agent) => `"${process.execPath}" "${cli}" hook ${agent}`;
+  const command = (agent) => hookLine(process.execPath, cli, agent);
   async function write(agent, scope, config) {
     const file = join(scope === 'user' ? userHome : project, target(agent));
     await mkdir(dirname(file), { recursive: true });

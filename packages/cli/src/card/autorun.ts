@@ -10,7 +10,7 @@ import { realpathSync, statSync } from 'node:fs';
 import { basename, isAbsolute, sep } from 'node:path';
 import { CURSOR_EVENTS, type CursorEvent } from '../adapters/cursor.js';
 import { cursorEntry } from '../commands/cursor-hooks.js';
-import { isBare } from '../commands/hook-command.js';
+import { isBare, withoutFailClosed } from '../commands/hook-command.js';
 import { isFailing, tagChanges } from '../exposure/agent-change.js';
 import { isHandlerLabel } from '../exposure/agent-json.js';
 import type { AgentHit } from '../exposure/agent-kinds.js';
@@ -110,8 +110,11 @@ const isWithin = (path: string, folder: string): boolean =>
  * at (a repository cannot vouch for a copy of Stroq it carries itself). Anything else counts: a line
  * shaped like Stroq's that runs another file is exactly what a planted hook would look like.
  */
-export function isStroqOwnHook(value: string, dir: string, home: string = stroqHome()): boolean {
+export function isStroqOwnHook(given: string, dir: string, home: string = stroqHome()): boolean {
+  // Claude Code's line ends in `CLAUDE_CODE_FAIL_CLOSED`, word for word, or (as older versions wrote it) not.
+  const value = withoutFailClosed(given);
   const quoted = STROQ_HOOK_LINE.exec(value);
+  if (value !== given && quoted?.[4] !== 'claude-code') return false;
   const bare = process.platform === 'win32' ? WINDOWS_HOOK_LINE.exec(value) : null;
   let node: string;
   let entry: string;

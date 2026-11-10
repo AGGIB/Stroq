@@ -19,10 +19,11 @@ import { test } from 'node:test';
 import { createAgentSetup } from './agent-setup.mjs';
 import { ENGINE_PATHS } from './control-engine.mjs';
 import { startServer } from './serve.mjs';
+import { hookLine } from './hook-line.mjs';
 
 const adapter = await import('../.local-engine/agent-status-engine.js');
 const hash = (value) => createHash('sha256').update(value).digest('hex');
-const command = (agent) => `"${process.execPath}" "${ENGINE_PATHS.cli}" hook ${agent}`;
+const command = (agent) => hookLine(process.execPath, ENGINE_PATHS.cli, agent);
 const target = (agent) =>
   agent === 'claude-code' ? '.claude/settings.json' : `.${agent}/hooks.json`;
 const consent = (body) => ({

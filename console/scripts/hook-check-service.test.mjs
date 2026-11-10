@@ -16,6 +16,7 @@ import { after, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'tsup';
 import { createHookCheckService } from './hook-check-service.mjs';
+import { hookLine } from './hook-line.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const output = await realpath(await mkdtemp(join(tmpdir(), 'stroq-hook-service-engine-')));
@@ -86,10 +87,7 @@ async function fixture(t, { agent = 'cursor', scope = 'project', ...overrides } 
     core: join(repository, 'packages/core/dist/index.js'),
     package: join(repository, 'packages/cli/package.json'),
   };
-  const config = adapter.expectedConfiguration(
-    agent,
-    `"${process.execPath}" "${paths.cli}" hook ${agent}`,
-  );
+  const config = adapter.expectedConfiguration(agent, hookLine(process.execPath, paths.cli, agent));
   const raw = Buffer.from(
     '\uFEFF' + JSON.stringify({ ...config, privateSetting: 'SOURCE_PRIVATE_SENTINEL' }) + '\r\n',
   );
