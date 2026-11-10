@@ -204,18 +204,61 @@ function wordEvidence(
  * it is taken for what the reading cannot follow. `depth` keeps a script that names a runner from
  * leading on: past the first step the evidence cannot cover what runs.
  */
-/** The scripts of a `package.json` a command runs: those it names, their `pre` and `post`, an install's. */
+/** The scripts an install runs, in the order npm runs them. */
+const INSTALL_SCRIPTS = [
+  'preinstall',
+  'install',
+  'postinstall',
+  'preprepare',
+  'prepare',
+  'postprepare',
+];
+const INSTALL = new Set([
+  'install',
+  'i',
+  'in',
+  'ins',
+  'inst',
+  'insta',
+  'instal',
+  'isnt',
+  'isnta',
+  'isntal',
+  'isntall',
+  'add',
+  'ci',
+  'rebuild',
+  'rb',
+]);
+const INSTALL_TEST = new Set(['it', 'install-test', 'cit', 'install-ci-test']);
+const RUN = new Set(['run', 'run-script', 'rum', 'urn']);
+const TEST = new Set(['test', 't', 'tst']);
+
+/**
+ * The scripts of a `package.json` that `runner` runs with the words after it (`args`), with their `pre`
+ * and `post`; null for a subcommand the reading does not know, or one that runs a package rather than
+ * a script (`npx`, `exec`, `dlx`), which no reading of the folder can follow.
+ */
 function scriptsRun(
   scripts: Readonly<Record<string, unknown>>,
-  words: ReadonlySet<string>,
-): string[] {
-  const names = new Set<string>();
-  for (const word of words) if (Object.hasOwn(scripts, word)) names.add(word);
-  if (['install', 'i', 'ci', 'add'].some((word) => words.has(word)))
-    for (const name of ['install', 'prepare']) names.add(name);
-  return [...names]
-    .flatMap((name) => [`pre${name}`, name, `post${name}`])
-    .filter((name) => Object.hasOwn(scripts, name));
+  runner: string,
+  args: readonly string[],
+): string[] | null {
+  if (runner === 'npx' || runner === 'bunx') return null;
+  const words = args.filter((word) => !word.startsWith('-'));
+  const [sub, name] = words;
+  const around = (script: string): string[] => [`pre${script}`, script, `post${script}`];
+  // A bare `yarn`, `pnpm` or `bun` installs; a bare `npm` only prints its help.
+  if (sub === undefined) return runner === 'npm' ? [] : INSTALL_SCRIPTS;
+  if (RUN.has(sub)) return name === undefined ? [] : around(name);
+  if (TEST.has(sub)) return around('test');
+  if (sub === 'start' || sub === 'stop') return around(sub);
+  if (sub === 'restart') return [...around('restart'), ...around('stop'), ...around('start')];
+  if (INSTALL.has(sub)) return INSTALL_SCRIPTS;
+  if (INSTALL_TEST.has(sub)) return [...INSTALL_SCRIPTS, ...around('test')];
+  // `yarn build`, `pnpm build`, `bun build` run the script of that name; npm does not.
+  if (runner !== 'npm' && Object.hasOwn(scripts, sub)) return around(sub);
+  return null;
 }
 
 function runnerEvidence(
@@ -223,34 +266,40 @@ function runnerEvidence(
   root: string,
   budget: Budget,
   depth: number,
-  words: ReadonlySet<string>,
+  args: readonly string[],
 ): string[] {
   if (depth > 0) return [unkeyable()];
   return (RUNNER_FILES[runner] ?? []).flatMap((config) => {
     const path = join(root, config);
     const digest = `${config}\u0000${fileDigest(path, budget)}`;
     const text = textOf(path);
-    if (text === '') return [digest];
     if (config !== 'package.json')
-      return [digest, ...textEvidence(text, root, [root], budget, true)];
-    let scripts: unknown;
-    try {
-      scripts = (JSON.parse(text) as { scripts?: unknown }).scripts;
-    } catch {
-      return [unkeyable()];
+      return text === '' ? [digest] : [digest, ...textEvidence(text, root, [root], budget, true)];
+    // The subcommand is read first: one that runs a package (`npx`, `exec`) cannot be followed with or
+    // without a `package.json`.
+    let scripts: unknown = {};
+    if (text !== '') {
+      try {
+        scripts = (JSON.parse(text) as { scripts?: unknown }).scripts ?? {};
+      } catch {
+        return [unkeyable()];
+      }
     }
-    if (scripts === undefined) return [digest];
     if (scripts === null || typeof scripts !== 'object' || Array.isArray(scripts))
       return [unkeyable()];
     const table = scripts as Readonly<Record<string, unknown>>;
+    const names = scriptsRun(table, runner, args);
+    if (names === null) return [unkeyable()];
     return [
       digest,
-      ...scriptsRun(table, words).flatMap((name) => {
-        const script = table[name];
-        return typeof script === 'string'
-          ? commandEvidence(script, root, [root], budget, depth + 1)
-          : [unkeyable()];
-      }),
+      ...names
+        .filter((name) => Object.hasOwn(table, name))
+        .flatMap((name) => {
+          const script = table[name];
+          return typeof script === 'string'
+            ? commandEvidence(script, root, [root], budget, depth + 1)
+            : [unkeyable()];
+        }),
     ];
   });
 }
@@ -284,8 +333,16 @@ export function commandEvidence(
   const found = new Set<string>();
   // A list of simple commands is read stage by stage; anything else the reading does not follow.
   if (words.some((w) => isElsewhere(w.value))) return [unkeyable()];
-  const said = new Set(words.map((w) => w.value));
-  for (const w of words) {
+  /** The words a runner at `at` is given: up to the operator that ends its command. */
+  const argsAfter = (at: number): string[] => {
+    const args: string[] = [];
+    for (const w of words.slice(at + 1)) {
+      if (!w.quoted && LIST_OPERATORS.has(w.value)) break;
+      args.push(w.value);
+    }
+    return args;
+  };
+  for (const [at, w] of words.entries()) {
     if (found.size > MAX_NAMED) return [unkeyable()];
     if (!w.quoted && LIST_OPERATORS.has(w.value)) continue;
     if (w.redirect) {
@@ -297,7 +354,8 @@ export function commandEvidence(
     if (word === null) return [unkeyable()];
     if (word === '' || word.startsWith('-') || word.includes('://')) continue;
     if (RUNNER_FILES[basename(word)] !== undefined)
-      for (const part of runnerEvidence(basename(word), root, budget, depth, said)) found.add(part);
+      for (const part of runnerEvidence(basename(word), root, budget, depth, argsAfter(at)))
+        found.add(part);
     const named = wordEvidence(word, root, bases, budget, true);
     if (named !== null) found.add(named);
   }

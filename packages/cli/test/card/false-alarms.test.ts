@@ -345,6 +345,37 @@ describe('the evidence of a folder that runs code on open', () => {
     expect(autorunOf(dir)?.evidence).toBe(withPre);
   });
 
+  // npm's short names and the bare runners run scripts too; a package a runner fetches cannot be read.
+  it.each([
+    ['npm t', 'test'],
+    ['npm tst', 'test'],
+    ['npm rum setup', 'setup'],
+    ['npm it', 'postinstall'],
+    ['yarn', 'postinstall'],
+    ['pnpm build', 'build'],
+  ])('follows the script %s runs', (command, script) => {
+    const dir = join(m.work, `npm-${command.replace(/\W/g, '-')}`);
+    hookIn(dir, command);
+    const pkg = (body: string) =>
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: { [script]: body } }));
+    pkg('echo ok');
+    const before = autorunOf(dir)?.evidence;
+    expect(autorunOf(dir)?.evidence).toBe(before);
+    pkg('sh ./other.sh');
+    writeFileSync(join(dir, 'other.sh'), 'echo other\n');
+    expect(autorunOf(dir)?.evidence).not.toBe(before);
+  });
+
+  it.each(['npx some-tool', 'npm exec some-tool', 'pnpm dlx some-tool', 'npm frobnicate'])(
+    'cannot be marked for %s, which runs what the folder does not hold or what the reading does not know',
+    (command) => {
+      const dir = join(m.work, `npx-${command.replace(/\W/g, '-')}`);
+      hookIn(dir, command);
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: {} }));
+      expect(autorunOf(dir)?.evidence).not.toBe(autorunOf(dir)?.evidence);
+    },
+  );
+
   it('cannot be marked for a make whose Makefile holds a variable', () => {
     const dir = join(m.work, 'maker');
     hookIn(dir, 'make setup');
