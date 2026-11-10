@@ -16,6 +16,7 @@ import {
   readSetupInputs,
   targetFor,
 } from './agent-setup-plan.mjs';
+import { hookLine } from './hook-line.mjs';
 
 const TTL = 300_000,
   MAX_PLANS = 8,
@@ -195,7 +196,7 @@ export async function createAgentSetup(configuration = {}) {
         roots,
         adapter.parseSetupObject,
       );
-      const command = `"${process.execPath}" "${paths.cli}" hook ${input.agent}`;
+      const command = hookLine(process.execPath, paths.cli, input.agent);
       const prepared = adapter.prepareAgentSetup(decode(files.before.bytes), input.agent, command);
       const created = now(),
         id = randomUUID(),
