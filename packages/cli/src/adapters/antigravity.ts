@@ -38,6 +38,7 @@ export {
   antigravityWorkspace,
   isAntigravityHighImpact,
 } from './antigravity-input.js';
+import { internalErrorReason } from './internal-error.js';
 
 /**
  * Antigravity's `PreToolUse` and `PostToolUse` payloads are identical apart from an
@@ -430,8 +431,7 @@ export function antigravityFailClosedOutput(
   if (phase === 'post') return ANTIGRAVITY_POST_OUTPUT;
   if (phase === 'preinvocation') return NO_OUTPUT;
   if (!isAntigravityHighImpact(rawToolName(raw))) return NO_OUTPUT;
-  const message = err instanceof Error ? err.message : String(err);
-  const reason = `Stroq internal error (fail-closed): ${message}`;
+  const reason = internalErrorReason(err);
   return { ...antigravityDenyOutput(reason), stderr: reason };
 }
 

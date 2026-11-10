@@ -23,6 +23,7 @@ export {
   copilotToolName,
   isCopilotHighImpact,
 } from './copilot-input.js';
+import { internalErrorReason } from './internal-error.js';
 
 /**
  * Copilot's `preToolUse` and `postToolUse` payloads are identical apart from
@@ -218,6 +219,5 @@ export function copilotFailClosedOutput(
   const record = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const tool = record['toolName'];
   if (typeof tool === 'string' && !isCopilotHighImpact(tool)) return NO_OUTPUT;
-  const message = err instanceof Error ? err.message : String(err);
-  return copilotBlockOutput(`Stroq internal error (fail-closed): ${message}`);
+  return copilotBlockOutput(internalErrorReason(err));
 }

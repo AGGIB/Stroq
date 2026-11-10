@@ -18,6 +18,7 @@ import { NO_OUTPUT, toolResultToText, withEvidence, type HookOutput } from './cl
 import { mcpToolName } from './cursor-mcp-name.js';
 import { decidePre, denyDirectly, MAX_PATCH_PATHS } from './pre-decision.js';
 import { toolInputRecord } from './tool-input.js';
+import { internalErrorReason } from './internal-error.js';
 
 /** The Cursor events Stroq installs on; any other event is not ours to answer. */
 export const CURSOR_EVENTS = [
@@ -467,6 +468,5 @@ export function cursorFailClosedOutput(raw: unknown, err: unknown): HookOutput {
   // which is fail-closed exactly like stdin that was not JSON at all.
   if (typeof name === 'string' && !(CURSOR_BLOCKING_EVENTS as readonly string[]).includes(name))
     return NO_OUTPUT;
-  const message = err instanceof Error ? err.message : String(err);
-  return cursorDenyOutput(`Stroq internal error (fail-closed): ${message}`);
+  return cursorDenyOutput(internalErrorReason(err));
 }
