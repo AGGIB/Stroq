@@ -476,7 +476,9 @@ function boundedSessionRows(
   });
   const records = handle.prepare(`
     select key, case when length(cast(value as blob)) <= ? then value end as value
-    from cursorDiskKV where stroq_in_window(key) = 1 and typeof(value) = 'text'
+    from cursorDiskKV
+    where case when typeof(key) = 'text' and key glob 'bubbleId:*' then stroq_in_window(key) end = 1
+      and typeof(value) = 'text'
   `);
   const rows: CursorRow[] = [];
   let bytes = 0;

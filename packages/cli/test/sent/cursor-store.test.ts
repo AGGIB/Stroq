@@ -120,9 +120,10 @@ withStore('reading a real Cursor store', () => {
     const context = JSON.stringify({ createdAt: old });
     const recent = JSON.stringify({ createdAt: '2026-04-28T12:00:00+02:00' });
     try {
-      handle.exec('create table cursorDiskKV (key text primary key, value text)');
+      handle.exec('create table cursorDiskKV (key primary key, value text)');
       const put = handle.prepare('insert into cursorDiskKV values (?, ?)');
       put.run('bubbleId:old:1', JSON.stringify({ createdAt: old, text: 'x'.repeat(10_001) }));
+      put.run(9_223_372_036_854_775_807n, '{}');
       put.run(first, context);
       put.run('bubbleId:malformed:1', '{');
       put.run(last, recent);
