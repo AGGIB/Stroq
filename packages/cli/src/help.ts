@@ -17,8 +17,8 @@ export interface CommandHelp {
   /** What the command does, a line or three. */
   readonly about: readonly string[];
   readonly flags: readonly Flag[];
-  /** Arguments after `--` belong to another program; flags there are not checked. */
-  readonly passThrough?: boolean;
+  /** Leave everything after `--` to the command's parser. */
+  readonly endOfOptions?: boolean;
 }
 
 export const COMMANDS: readonly CommandHelp[] = [
@@ -131,7 +131,7 @@ export const COMMANDS: readonly CommandHelp[] = [
         'with --strict and explicit --pass-env, not with --cloak: withhold each tool version until its exact contract is approved in the local platform',
       ],
     ],
-    passThrough: true,
+    endOfOptions: true,
   },
   {
     name: 'doctor',
@@ -333,6 +333,7 @@ export const COMMANDS: readonly CommandHelp[] = [
     about: [
       'read what a repository runs before you open it with an agent or editor. Exit 1 when',
       'something fails the check, 2 for a usage error, 3 when the check cannot run',
+      'Put -- before a directory name that starts with a dash.',
     ],
     flags: [
       ['--changed-from <rev>', 'compare with <rev> and mark each entry new, changed or present'],
@@ -345,6 +346,7 @@ export const COMMANDS: readonly CommandHelp[] = [
       ['--sarif', 'the same as --format sarif (SARIF 2.1.0, for code scanning)'],
       ['--env', 'print the git settings that neutralise it'],
     ],
+    endOfOptions: true,
   },
   {
     name: 'trust',
@@ -442,9 +444,9 @@ export function commandHelp(name: string): string | null {
   return c === undefined ? null : renderHelp(c);
 }
 
-/** Arguments before the `--` a pass-through command hands to another program. */
+/** Arguments the help and option checks may read. */
 function ownArgs(c: CommandHelp | undefined, args: readonly string[]): readonly string[] {
-  if (c?.passThrough !== true) return args;
+  if (c?.endOfOptions !== true) return args;
   const end = args.indexOf('--');
   return end === -1 ? args : args.slice(0, end);
 }

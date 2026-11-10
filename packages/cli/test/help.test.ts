@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -87,6 +87,22 @@ describe('stroq <command> --help', () => {
   it('answers -h too', () => {
     expect(run('log', '-h').stdout).toMatch(/^stroq log\b/);
   });
+
+  it.each(['--help', '-h', '--option-shaped'])(
+    'lets inspect read a directory named %s after --',
+    (name) => {
+      const dir = join(home, name);
+      mkdirSync(dir);
+      const out = spawnSync(process.execPath, [CLI_ENTRY, 'inspect', '--json', '--', name], {
+        cwd: home,
+        encoding: 'utf8',
+      });
+      expect(out.status).toBe(0);
+      expect(out.stderr).toBe('');
+      const report = JSON.parse(out.stdout) as { dir: string };
+      expect(realpathSync(report.dir)).toBe(realpathSync(dir));
+    },
+  );
 
   it('stroq help is stroq --help, and stroq help <command> is <command> --help', () => {
     const list = run('help');
