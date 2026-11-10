@@ -390,7 +390,8 @@ const facts = (inert: boolean): LineFacts => ({
 describe.skipIf(WINDOWS)('a link that leaves the temp directory', () => {
   // The folder the tests make is the temp folder for them: a root that is given, and a literal path the hook knows
   // when it is under the system's own.
-  const outside = dirname(fileURLToPath(import.meta.url));
+  // The checkout itself may live under a system temp root.
+  const outside = '/usr';
   const scope = mkdtempSync(join(tmpdir(), 'stroq-temp-links-'));
   beforeAll(() => {
     mkdirSync(join(scope, 'plain', 'inner'), { recursive: true });
