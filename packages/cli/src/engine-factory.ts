@@ -1,4 +1,4 @@
-import { lstatSync, readFileSync, statSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { dirname } from 'node:path';
 import {
@@ -77,9 +77,30 @@ function readPolicyText(file: string): string | null {
   } catch (error) {
     const code = errnoOf(error);
     if (code === 'ENOENT' && nothingAt(file)) return null;
+    // A folder this process may not look into (a sandbox around the agent that leaves the Stroq home out)
+    // can say ENOENT of a file it hides: whether a policy is there is not known, which is no default either.
+    const closed = closedFolder(dirname(file));
+    if (closed !== null)
+      throw Object.assign(
+        new Error(
+          `Stroq cannot look into ${dirname(file)} (${closed}), so whether a policy file is there is not known; Stroq refuses to fall back to the default policy`,
+        ),
+        { code: closed, path: file },
+      );
     throw new Error(
       `the policy file ${file} is there but cannot be read (${code}); Stroq refuses to fall back to the default policy`,
     );
+  }
+}
+
+/** The code with which this process is refused a look into `dir`, or null when it is not refused. */
+function closedFolder(dir: string): string | null {
+  try {
+    readdirSync(dir);
+    return null;
+  } catch (error) {
+    const code = errnoOf(error);
+    return code === 'EPERM' || code === 'EACCES' ? code : null;
   }
 }
 

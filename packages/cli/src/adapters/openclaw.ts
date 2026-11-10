@@ -23,6 +23,7 @@ export {
   openclawToolInput,
   openclawToolName,
 } from './openclaw-input.js';
+import { internalErrorReason } from './internal-error.js';
 
 /**
  * OpenClaw's `before_tool_call` and `after_tool_call` events are the same shape apart
@@ -276,5 +277,5 @@ export function openclawFailClosedOutput(
   const record = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const tool = record['toolName'];
   if (typeof tool === 'string' && !isOpenClawHighImpact(tool)) return openclawAllowOutput();
-  return openclawBlockOutput(`Stroq internal error (fail-closed): ${message}`);
+  return openclawBlockOutput(internalErrorReason(err));
 }
