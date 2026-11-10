@@ -23,14 +23,17 @@ export interface ReplayCacheKeys {
 }
 
 /** The stamp of a file under these keys: what a kept summary must match. */
-export const entryKey = (s: Pick<WindowSession, 'bytes' | 'mtimeMs'>, k: ReplayCacheKeys): string =>
+export const entryKey = (
+  s: Pick<WindowSession, 'bytes' | 'mtimeMs' | 'cursorStamp'>,
+  k: ReplayCacheKeys,
+): string =>
   cacheKey({
     bytes: s.bytes,
     mtimeMs: s.mtimeMs,
     version: k.version,
     policy: k.policy,
     keys: k.keys,
-  });
+  }) + (s.cursorStamp === undefined ? '' : `:${s.cursorStamp}`);
 
 /** The name a transcript is kept under: its path with any key taken out. */
 export const pathKey = (s: Pick<WindowSession, 'path'>, k: ReplayCacheKeys): string =>

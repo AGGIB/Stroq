@@ -1,15 +1,14 @@
-// The sessions of the last N days that Claude Code and Codex keep on this machine, newest first.
-//
-// Cursor is left out on purpose: its sessions are rows in one database, and the card is about the
-// two agents that leave a transcript a file at a time. Only the files' dates are read to choose the
-// window; the head of a session (its folder, its first time) is read only for those inside it.
+// The sessions of the last N days that agents keep on this machine, newest first.
+// For transcript files, read the head only when the file date is inside the window.
 import { lstatSync, statSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { codexRoot, everyRollout } from '../sent/codex.js';
+import { cursorStateDb } from '../sent/cursor.js';
 import { claudeRoots, claudeSession, codexSession, type SessionRef } from '../sent/sessions.js';
 import { MAX_TRANSCRIPT_BYTES } from '../replay/past.js';
 import type { CardAgent } from './schema.js';
+import { listCursorWindow } from './cursor-window.js';
 
 const DAY_MS = 86_400_000;
 
@@ -21,8 +20,9 @@ export interface WindowSession {
   readonly path: string;
   readonly cwd: string | null;
   readonly mtimeMs: number;
-  /** Bytes of the transcript files (the main one and its subagents'). */
+  /** Bytes of the transcript files or the Cursor session's rows. */
   readonly bytes: number;
+  readonly cursorStamp?: string;
   /** The session as `stroq sent` reads it. */
   readonly ref: SessionRef;
 }
@@ -34,6 +34,7 @@ export interface WindowListing {
   readonly older: number;
   /** Where the agents keep them, for the sentence that says nothing was found. */
   readonly looked: readonly string[];
+  readonly cursorNote?: string;
 }
 
 /** The size of a regular file, or null for a link, a pipe or a file that is gone. */
@@ -113,6 +114,7 @@ export async function listWindow(
   env: Readonly<Record<string, string | undefined>>,
   days: number,
   now: Date,
+  stopAt = Infinity,
 ): Promise<WindowListing> {
   const cutoff = windowStart(days, now);
   const claude = await claudeMains(home, env);
@@ -142,10 +144,15 @@ export async function listWindow(
       ref,
     });
   }
+  const cursorDb = cursorStateDb(process.platform, env, home);
+  const cursor = await listCursorWindow(cursorDb, cutoff, stopAt);
+  const older = claude.length + codex.length - sessions.length + cursor.older;
+  sessions.push(...cursor.sessions);
   sessions.sort((a, b) => b.mtimeMs - a.mtimeMs || (a.path < b.path ? -1 : 1));
   return {
     sessions,
-    older: claude.length + codex.length - sessions.length,
-    looked: [lookedForClaude(home, env), codexRoot(home)],
+    older,
+    looked: [lookedForClaude(home, env), codexRoot(home), cursorDb],
+    ...(cursor.note === undefined ? {} : { cursorNote: cursor.note }),
   };
 }
