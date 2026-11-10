@@ -19,8 +19,8 @@ beforeEach(() => {
   process.env['STROQ_HOME'] = mkdtempSync(join(tmpdir(), 'stroq-engine-factory-'));
 });
 afterEach(() => {
-  // Give a temporary file its mode back so the temporary directory can be cleaned.
-  for (const path of unreadable.splice(0)) chmodSync(path, 0o600);
+  // Give a temporary file (or folder) its mode back so the temporary directory can be cleaned.
+  for (const path of unreadable.splice(0)) chmodSync(path, 0o700);
 });
 
 describe('loadPolicy', () => {
@@ -172,6 +172,30 @@ describe('loadPolicyWithSource: the policy and where it came from', () => {
     const out = await runHook('claude-code', benignBash(tmpdir()));
     expect(decisionOf(out.stdout)).toBe('deny');
   });
+
+  // A sandbox around the agent that leaves the Stroq home out runs the hook inside it: the home cannot be
+  // looked into, and macOS's sandbox then says ENOENT of the policy file it hides. A mode of 000 on the
+  // home is the same refusal, from the operating system, without a sandbox.
+  it.skipIf(process.getuid?.() === 0 || process.platform === 'win32')(
+    'refuses a Stroq home it may not look into, and says which folder to grant',
+    async () => {
+      mkdirSync(stroqHome(), { recursive: true });
+      writeFileSync(policyFile(), 'version: 1\nrules: []\n');
+      const home = stroqHome();
+      chmodSync(home, 0o000);
+      unreadable.push(home);
+      expect(() => loadPolicyWithSource()).toThrow(
+        `Stroq cannot look into ${home} (EACCES), so whether a policy file is there is not known`,
+      );
+      const out = await runHook('claude-code', benignBash(tmpdir()));
+      expect(decisionOf(out.stdout)).toBe('deny');
+      const reason = (JSON.parse(out.stdout) as { hookSpecificOutput: Record<string, string> })
+        .hookSpecificOutput['permissionDecisionReason'];
+      expect(reason).toContain(
+        `Stroq cannot use its own folder, ${home}. If the agent runs in a sandbox, give that folder read and write access in it.`,
+      );
+    },
+  );
 
   it('refuses a file that is not a policy, and the hook fails closed on it', async () => {
     mkdirSync(stroqHome(), { recursive: true });
