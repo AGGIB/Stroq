@@ -28,6 +28,7 @@ export {
   codexToolInput,
   codexToolName,
 } from './codex-input.js';
+import { internalErrorReason } from './internal-error.js';
 // Both moved out of this file when the Copilot adapter became their second caller;
 // re-exported so the Codex adapter's public surface is unchanged.
 export { MAX_PATCH_PATHS } from './pre-decision.js';
@@ -216,6 +217,5 @@ export function codexFailClosedOutput(raw: unknown, err: unknown): HookOutput {
   const tool = record['tool_name'];
   if (typeof event === 'string' && event !== 'PreToolUse') return NO_OUTPUT;
   if (typeof tool === 'string' && !CODEX_HIGH_IMPACT_TOOL.test(tool)) return NO_OUTPUT;
-  const message = err instanceof Error ? err.message : String(err);
-  return codexBlockOutput(`Stroq internal error (fail-closed): ${message}`);
+  return codexBlockOutput(internalErrorReason(err));
 }
