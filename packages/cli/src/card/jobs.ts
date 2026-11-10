@@ -8,13 +8,20 @@
 // function that does the work, in a worker or in this process: a run with one thread and a run with
 // many call the same code and so give the same answer.
 import type { SessionRef } from '../sent/sessions.js';
+import type { Transcript } from '../replay/transcript.js';
 import { findAutorun, type AutorunResult } from './autorun.js';
 import { checkKeys, type KeyAnswer } from './key-job.js';
 import type { CardAgent, SessionSummary } from './schema.js';
-import { summarizeSession } from './session-summary.js';
+import { summarizeSession, summarizeTranscript } from './session-summary.js';
 
 export type CardJob =
-  | { readonly kind: 'session'; readonly agent: CardAgent; readonly path: string }
+  | {
+      readonly kind: 'session';
+      readonly agent: CardAgent;
+      readonly path: string;
+      /** Cursor already read these rows. Replay the same snapshot that the key check uses. */
+      readonly transcript?: Transcript;
+    }
   | {
       readonly kind: 'keys';
       readonly ref: SessionRef;
@@ -33,7 +40,13 @@ export async function handleJob(job: CardJob): Promise<CardResult> {
   switch (job.kind) {
     case 'session':
       try {
-        return { kind: 'session', summary: await summarizeSession(job.agent, job.path) };
+        return {
+          kind: 'session',
+          summary:
+            job.transcript === undefined
+              ? await summarizeSession(job.agent, job.path)
+              : await summarizeTranscript(job.transcript, job.agent),
+        };
       } catch {
         return { kind: 'session', summary: null };
       }

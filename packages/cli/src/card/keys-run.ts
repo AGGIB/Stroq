@@ -228,7 +228,8 @@ class Run implements KeysRun {
   }
 
   private keyOf(s: WindowSession): string {
-    return keyCacheKey({ bytes: s.bytes, mtimeMs: s.mtimeMs, version: this.p.env.version });
+    const key = keyCacheKey({ bytes: s.bytes, mtimeMs: s.mtimeMs, version: this.p.env.version });
+    return s.cursorStamp === undefined ? key : `${key}:${s.cursorStamp}`;
   }
 
   jobFor(index: number): CardJob | null {
