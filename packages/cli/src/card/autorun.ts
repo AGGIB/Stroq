@@ -6,7 +6,7 @@
 // guard off (hooks, auto-approved MCP servers, autorun tasks). The ordinary things many honest
 // repositories have (a husky hook, a `prepare` script) are not counted: `inspect` lists them as "not
 // findings" and a count of them would be a count of every repository there is.
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import {
   closeSync,
   constants,
@@ -18,6 +18,7 @@ import {
   realpathSync,
   statSync,
 } from 'node:fs';
+import { homedir } from 'node:os';
 import { readRegularFile } from '@stroq/core';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { CURSOR_EVENTS, type CursorEvent } from '../adapters/cursor.js';
@@ -44,21 +45,69 @@ export interface AutorunRepo {
   readonly more: number;
   /**
    * A digest of everything that runs, the items past the first few included: what each agent setting
-   * runs, the bytes of each file git reads, and the bytes of the files of the folder that either names
-   * (a script a hook runs, a file a config includes), one step deep. Never shown. A false-alarm mark is
+   * runs, the bytes of each file git reads, and the bytes of the files either names (a script a hook
+   * runs, a file a config includes, the `package.json` that `npm run` reads), one step deep. What the
+   * reading cannot cover makes it differ on every run (`unkeyable`). Never shown. A false-alarm mark is
    * kept under it (`false-alarms.ts`), so that a mark on a folder is gone once what the folder runs
    * changes, though its names stay the same.
    */
   readonly evidence: string;
 }
 
-/** The longest file whose bytes go into the evidence; past it, its size and date do. */
-const MAX_EVIDENCE_BYTES = 4 * 1024 * 1024;
+/**
+ * The longest file whose bytes go into the evidence: a node binary is about 100 MiB. One past it is
+ * not hashed, and the moment cannot be marked (`unkeyable`): a size and a date can be put back.
+ */
+const MAX_EVIDENCE_BYTES = 256 * 1024 * 1024;
+/** The longest file whose text is read for the files it names. */
+const MAX_TEXT_BYTES = 4 * 1024 * 1024;
 /** The most files one text names that go into the evidence, and the most words of it looked at. */
 const MAX_NAMED = 32;
 const MAX_WORDS = 2_000;
-/** What separates the words of a command or a config line that could name a file. */
-const WORD_BREAKS = /[\s\0;&|()<>`'"=,{}[\]]+/;
+/** What separates the words of a command or a config line that could name a file. Quotes are taken off first. */
+const WORD_BREAKS = /[\s\0;&|()<>`=,{}[\]]+/;
+
+/**
+ * The words of a command or a config text that could name a file: a variable's braces and every quote
+ * taken off first, so that `"$CLAUDE_PROJECT_DIR"/setup.sh` and `${HOME}/x` are one word each.
+ */
+const wordsOf = (text: string): string[] =>
+  text
+    .replace(/\$\{([A-Za-z_][A-Za-z0-9_]*)\}/g, '$$$1')
+    .replace(/["']/g, '')
+    .split(WORD_BREAKS);
+
+/**
+ * Evidence that is never the same twice, for what the reading cannot cover: a file too large to hash,
+ * a variable it cannot know the value of, more files than it reads. A moment with it in its key cannot
+ * be marked as a false alarm, which is the safe way for a mark to fail.
+ */
+const unkeyable = (): string => `unkeyable:${randomBytes(16).toString('hex')}`;
+
+/**
+ * The files a runner reads for what it runs, when the command names the runner and not the file:
+ * `npm run setup` runs what `package.json` says.
+ */
+const RUNNER_FILES: Readonly<Record<string, readonly string[]>> = {
+  npm: ['package.json'],
+  npx: ['package.json'],
+  pnpm: ['package.json'],
+  yarn: ['package.json'],
+  bun: ['package.json'],
+  bunx: ['package.json'],
+  make: ['Makefile', 'makefile', 'GNUmakefile'],
+  gmake: ['Makefile', 'makefile', 'GNUmakefile'],
+  just: ['justfile', 'Justfile', '.justfile'],
+  task: ['Taskfile.yml', 'Taskfile.yaml'],
+  uv: ['pyproject.toml'],
+  poetry: ['pyproject.toml'],
+  pdm: ['pyproject.toml'],
+  hatch: ['pyproject.toml'],
+  deno: ['deno.json', 'deno.jsonc'],
+  cargo: ['Cargo.toml'],
+  composer: ['composer.json'],
+  rake: ['Rakefile'],
+};
 
 /** Opens for a look that neither follows a link nor waits on a pipe: what is read is what the handle shows. */
 const LOOK_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
@@ -68,7 +117,7 @@ function digestThrough(fd: number, path: string): string {
   const info = fstatSync(fd);
   if (info.isDirectory()) return `dir:${readdirSync(path).sort().join('\u0000')}`;
   if (!info.isFile()) return 'other';
-  if (info.size > MAX_EVIDENCE_BYTES) return `large:${info.size}:${info.mtimeMs}`;
+  if (info.size > MAX_EVIDENCE_BYTES) return unkeyable();
   const hash = createHash('sha256');
   const buffer = Buffer.alloc(64 * 1024);
   for (let at = 0; at <= MAX_EVIDENCE_BYTES;) {
@@ -81,21 +130,22 @@ function digestThrough(fd: number, path: string): string {
 }
 
 /**
- * What a file of the folder holds, as a digest: its bytes, the target of a link, or a folder's names.
- * The path is opened once, without following a link, and the handle is what is looked at and read, so
- * a file swapped in between is not mistaken for the one that was looked at.
+ * What the file at `path` holds, as a digest: its bytes, or a folder's names; for a link, where it leads
+ * and what is there. The path is opened once, without following a link, and the handle is what is looked
+ * at and read, so a file swapped in between is not mistaken for the one that was looked at.
  */
-function fileDigest(dir: string, file: string): string {
-  const path = join(dir, file);
+function fileDigest(path: string): string {
   let fd: number;
   try {
     fd = openSync(path, LOOK_FLAGS);
   } catch (err) {
     if ((err as NodeJS.ErrnoException).code !== 'ELOOP') return 'unreadable';
+    // A link: what runs is what it leads to, wherever that is.
     try {
-      return `link:${readlinkSync(path)}`;
+      const real = realpathSync(path);
+      return `link:${readlinkSync(path)}\u0000${real}\u0000${fileDigest(real)}`;
     } catch {
-      return 'unreadable';
+      return `link:dangling`;
     }
   }
   try {
@@ -307,10 +357,10 @@ export function autorunOf(dir: string): AutorunRepo | null {
   // A finding of git's names no command, so the file it is in stands for it, with what that file names
   // (a script, an included config); an agent setting names its command, and what the command names.
   for (const hit of surface.preTrust.filter(runsOnOpen))
-    add(
-      { kind: hit.kind, file: hit.file, name: hit.what },
-      () => `${fileDigest(dir, hit.file)}\u0000${named(textOf(dir, hit.file), hit.file)}`,
-    );
+    add({ kind: hit.kind, file: hit.file, name: hit.what }, () => {
+      const path = join(root, hit.file);
+      return `${fileDigest(path)}\u0000${named(textOf(path), hit.file)}`;
+    });
   for (const hit of agent)
     add({ kind: hit.kind, file: hit.file, name: hit.name }, () => {
       const command = `${hit.value}\u0000${hit.runs ?? ''}`;
@@ -325,18 +375,39 @@ export function autorunOf(dir: string): AutorunRepo | null {
   };
 }
 
+/** A word with the home and the project spelled out, or null for one with a variable no reading can know. */
+function spelledOut(word: string, root: string): string | null {
+  const home = homedir();
+  const out = word
+    .replace(/^~(?=\/|$)/, home)
+    .replace(/\$HOME(?=\/|$)/g, home)
+    .replace(/\$CLAUDE_PROJECT_DIR(?=\/|$)/g, root);
+  return out.includes('$') || out.startsWith('~') ? null : out;
+}
+
 /**
- * The files inside the folder that the words of `text` name, each tried from `bases` in turn: as its path
- * in the folder and a digest of it. Only regular files inside the folder count, so that nothing outside it
- * is read; a word that names none (`origin`, `--force`, a URL) costs a lookup and adds nothing.
+ * The files the words of `text` name, wherever they are, each tried from `bases` in turn, and the files
+ * a runner it names reads (`RUNNER_FILES`): as their paths and a digest of each. A word that names none
+ * (`origin`, `--force`, a URL) costs a lookup and adds nothing. A variable that is not the home or the
+ * project, more files or words than are read: the evidence then cannot cover what runs, and says so.
  */
 function namedFiles(root: string, text: string, bases: readonly string[]): string[] {
   const found = new Set<string>();
-  const words = text.split(WORD_BREAKS).slice(0, MAX_WORDS);
-  for (const word of words) {
-    if (found.size >= MAX_NAMED) break;
-    if (word === '' || word.startsWith('-') || word.startsWith('~')) continue;
-    if (word.includes('$') || word.includes('://')) continue;
+  const all = wordsOf(text);
+  if (all.length > MAX_WORDS) found.add(unkeyable());
+  for (const raw of all.slice(0, MAX_WORDS)) {
+    if (found.size > MAX_NAMED) {
+      found.add(unkeyable());
+      break;
+    }
+    if (raw === '' || raw.startsWith('-') || raw.includes('://')) continue;
+    const word = spelledOut(raw, root);
+    if (word === null) {
+      found.add(unkeyable());
+      continue;
+    }
+    for (const config of RUNNER_FILES[basename(word)] ?? [])
+      found.add(`${config}\u0000${fileDigest(join(root, config))}`);
     for (const base of bases) {
       let real: string;
       try {
@@ -345,9 +416,7 @@ function namedFiles(root: string, text: string, bases: readonly string[]): strin
       } catch {
         continue;
       }
-      const rel = relative(root, real);
-      if (rel === '' || rel.startsWith('..') || isAbsolute(rel)) continue;
-      found.add(`${rel}\u0000${fileDigest(root, rel)}`);
+      found.add(`${real}\u0000${fileDigest(real)}`);
       break;
     }
   }
@@ -355,9 +424,9 @@ function namedFiles(root: string, text: string, bases: readonly string[]): strin
 }
 
 /** The text of a file of the folder, when it is a regular file small enough to read; else empty. */
-function textOf(dir: string, file: string): string {
+function textOf(path: string): string {
   try {
-    const read = readRegularFile(join(dir, file), MAX_EVIDENCE_BYTES, { noFollow: true });
+    const read = readRegularFile(path, MAX_TEXT_BYTES);
     return read.kind === 'text' ? read.text : '';
   } catch {
     return '';
