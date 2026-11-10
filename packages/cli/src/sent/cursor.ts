@@ -29,6 +29,7 @@
 import { lstatSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { join } from 'node:path';
+import type { DatabaseSync, SQLOutputValue } from 'node:sqlite';
 import { pathToFileURL } from 'node:url';
 import { collectStringsDeep } from '@stroq/core';
 import { mcpToolName } from '../adapters/cursor-mcp-name.js';
@@ -183,6 +184,14 @@ function resultTextOf(raw: unknown): string | null {
   return raw;
 }
 
+const BUBBLE_PREFIX = 'bubbleId:';
+
+function bubbleSessionId(key: unknown): string | undefined {
+  if (typeof key !== 'string' || !key.startsWith(BUBBLE_PREFIX)) return undefined;
+  const end = key.indexOf(':', BUBBLE_PREFIX.length);
+  return end > BUBBLE_PREFIX.length ? key.slice(BUBBLE_PREFIX.length, end) : undefined;
+}
+
 /**
  * Every session in a set of `cursorDiskKV` rows, newest first.
  *
@@ -200,10 +209,8 @@ export function parseCursorStore(rows: Iterable<CursorRow>): CursorSession[] {
   >();
 
   for (const row of rows) {
-    const parts = row.key.split(':');
-    if (parts.length < 3 || parts[0] !== 'bubbleId') continue;
-    const id = parts[1] ?? '';
-    if (id === '') continue;
+    const id = bubbleSessionId(row.key);
+    if (id === undefined) continue;
     let session = bySession.get(id);
     if (session === undefined) {
       session = { bubbles: [], roots: [], latest: 0, skipped: 0 };
@@ -237,7 +244,7 @@ export function parseCursorStore(rows: Iterable<CursorRow>): CursorSession[] {
     const callId =
       typeof former['toolCallId'] === 'string' && former['toolCallId'] !== ''
         ? former['toolCallId']
-        : (parts.slice(2).join(':') ?? '');
+        : row.key.slice(BUBBLE_PREFIX.length + id.length + 1);
     events.push({ kind: 'pre', id: callId, tool: call.tool, input: call.input, at });
 
     const text = resultTextOf(former['result']);
@@ -392,24 +399,13 @@ export function cursorChangesPending(db: string): boolean {
   }
 }
 
-/**
- * Rows from the store, read-only and never held longer than the parse.
- *
- * Read-only and immutable (`storeUrl`): this is the user's live Cursor store, and nothing is
- * created beside it, and no lock the running editor is entitled to is taken.
- */
-export async function storeRows(db: string, session: string | null): Promise<CursorRow[]> {
-  return (await readStoreRows(db, session)) ?? [];
-}
-
-/** A bounded reader can distinguish an incomplete snapshot from an empty store. */
-export async function readStoreRows(
+/** Open the user's live store without creating files beside it or taking a lock. */
+async function withCursorStore<T>(
   db: string,
-  session: string | null,
-  budget?: { readonly stopAt: number; readonly maxRows: number; readonly maxBytes: number },
-): Promise<CursorRow[] | null> {
+  read: (handle: DatabaseSync) => T,
+): Promise<T | null> {
   const mod = await sqlite();
-  if (mod === null || (budget !== undefined && Date.now() >= budget.stopAt)) return null;
+  if (mod === null) return null;
   let handle;
   try {
     handle = new mod.DatabaseSync(storeUrl(db), { readOnly: true });
@@ -417,37 +413,7 @@ export async function readStoreRows(
     return null;
   }
   try {
-    const like = session === null ? 'bubbleId:%' : `bubbleId:${session}:%`;
-    const records =
-      budget === undefined
-        ? handle.prepare('select key, value from cursorDiskKV where key like ?').all(like)
-        : handle
-            .prepare(
-              `
-          select key, typeof(value) = 'text' as isText,
-            case when typeof(value) <> 'text' then null
-                 when length(cast(value as blob)) <= ? then value end as value
-          from cursorDiskKV where key like ?
-        `,
-            )
-            .iterate(budget.maxBytes, like);
-    const rows: CursorRow[] = [];
-    let bytes = 0;
-    for (const { key, value, isText } of records) {
-      if (budget !== undefined && Date.now() >= budget.stopAt) return null;
-      if (typeof key !== 'string') continue;
-      if (typeof value !== 'string') {
-        // The bounded query leaves out the payload of an oversized text row.
-        if (isText === 1) return null;
-        continue;
-      }
-      if (budget !== undefined) {
-        bytes += Buffer.byteLength(key) + Buffer.byteLength(value);
-        if (rows.length >= budget.maxRows || bytes > budget.maxBytes) return null;
-      }
-      rows.push({ key, value });
-    }
-    return budget !== undefined && Date.now() >= budget.stopAt ? null : rows;
+    return read(handle);
   } catch {
     // A store whose schema has moved on is not an error to report at people: the
     // command says it found no Cursor session, which is true.
@@ -455,6 +421,95 @@ export async function readStoreRows(
   } finally {
     handle.close();
   }
+}
+
+export async function storeRows(db: string, session: string | null): Promise<CursorRow[]> {
+  const like = session === null ? 'bubbleId:%' : `bubbleId:${session}:%`;
+  const rows = await withCursorStore(db, (handle) => {
+    const records = handle
+      .prepare('select key, value from cursorDiskKV where key like ?')
+      .all(like);
+    const rows: CursorRow[] = [];
+    for (const { key, value } of records) {
+      if (typeof key === 'string' && typeof value === 'string') rows.push({ key, value });
+    }
+    return rows;
+  });
+  return rows ?? [];
+}
+
+interface CursorWindowBudget {
+  readonly stopAt: number;
+  readonly maxRows: number;
+  readonly maxBytes: number;
+}
+
+/** SQLite projects dates without handing the old transcript payloads to Node. */
+function sessionDates(handle: DatabaseSync, stopAt: number): Map<string, number> | null {
+  const records = handle.prepare(`
+    select key, case when json_valid(value) then
+      case when json_type(value, '$.createdAt') = 'text' then json_extract(value, '$.createdAt') end
+    end as createdAt
+    from cursorDiskKV where key glob 'bubbleId:*' and typeof(value) = 'text'
+  `);
+  const dates = new Map<string, number>();
+  for (const { key, createdAt } of records.iterate()) {
+    if (Date.now() >= stopAt) return null;
+    const id = bubbleSessionId(key);
+    if (id === undefined) continue;
+    const moment = typeof createdAt === 'string' ? Date.parse(createdAt) : NaN;
+    dates.set(id, Math.max(dates.get(id) ?? 0, Number.isFinite(moment) ? moment : 0));
+  }
+  return Date.now() >= stopAt ? null : dates;
+}
+
+function boundedSessionRows(
+  handle: DatabaseSync,
+  recent: ReadonlySet<string>,
+  { stopAt, maxRows, maxBytes }: CursorWindowBudget,
+): CursorRow[] | null {
+  handle.function('stroq_in_window', (key: SQLOutputValue) => {
+    // Check even when SQLite skips many old rows before yielding a selected one.
+    if (Date.now() >= stopAt) throw new Error('Cursor read deadline reached');
+    const id = bubbleSessionId(key);
+    return id !== undefined && recent.has(id) ? 1 : 0;
+  });
+  const records = handle.prepare(`
+    select key, case when length(cast(value as blob)) <= ? then value end as value
+    from cursorDiskKV where stroq_in_window(key) = 1 and typeof(value) = 'text'
+  `);
+  const rows: CursorRow[] = [];
+  let bytes = 0;
+  for (const { key, value } of records.iterate(maxBytes)) {
+    if (Date.now() >= stopAt || typeof key !== 'string' || typeof value !== 'string') return null;
+    bytes += Buffer.byteLength(key) + Buffer.byteLength(value);
+    if (rows.length >= maxRows || bytes > maxBytes) return null;
+    rows.push({ key, value });
+  }
+  return Date.now() >= stopAt ? null : rows;
+}
+
+/** Read only complete sessions in the window, including any earlier rows they need for replay. */
+export async function readCursorWindowRows(
+  db: string,
+  cutoff: number,
+  budget: CursorWindowBudget,
+): Promise<{ readonly rows: CursorRow[]; readonly older: number } | null> {
+  if (Date.now() >= budget.stopAt) return null;
+  return withCursorStore(db, (handle) => {
+    if (Date.now() >= budget.stopAt) return null;
+    // Keep discovery and transcript reads in the same read-only transaction.
+    handle.exec('begin');
+    const dates = sessionDates(handle, budget.stopAt);
+    if (dates === null) return null;
+    const recent = new Set<string>();
+    for (const [id, date] of dates) {
+      if (Date.now() >= budget.stopAt) return null;
+      if (date >= cutoff) recent.add(id);
+    }
+    const rows = recent.size === 0 ? [] : boundedSessionRows(handle, recent, budget);
+    return rows === null ? null : { rows, older: dates.size - recent.size };
+  });
 }
 
 /** Whether `path` is `dir` itself or lies under it, on a boundary rather than a prefix. */

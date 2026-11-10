@@ -2,14 +2,14 @@ import { spawnSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import {
   cursorSessionPath,
   cursorStateDb,
   cursorUnavailable,
   findCursorSessions,
   readCursorSession,
-  readStoreRows,
+  readCursorWindowRows,
 } from '../../src/sent/cursor.js';
 import { readerForFile } from '../../src/sent/readers.js';
 import { extractEnv } from '@stroq/core';
@@ -90,10 +90,55 @@ afterAll(() => {
 withStore('reading a real Cursor store', () => {
   it('skips non-text rows and refuses a partial store when the card’s limits are reached', async () => {
     const limits = { stopAt: Infinity, maxRows: 2, maxBytes: 10_000 };
-    expect(await readStoreRows(db, null, limits)).toHaveLength(2);
+    expect(await readCursorWindowRows(db, 0, limits)).toMatchObject({
+      rows: [{ key: `bubbleId:${SESSION_A}:a1` }, { key: `bubbleId:${SESSION_B}:b1` }],
+      older: 0,
+    });
     for (const limit of [{ maxRows: 1 }, { maxBytes: 1 }, { stopAt: 0 }]) {
-      expect(await readStoreRows(db, null, { ...limits, ...limit })).toBeNull();
+      expect(await readCursorWindowRows(db, 0, { ...limits, ...limit })).toBeNull();
     }
+  });
+
+  it('does not return a partial window when the deadline expires during discovery', async () => {
+    let now = 0;
+    const clock = vi.spyOn(Date, 'now').mockImplementation(() => ++now);
+    try {
+      expect(
+        await readCursorWindowRows(db, 0, { stopAt: 4, maxRows: 2, maxBytes: 10_000 }),
+      ).toBeNull();
+    } finally {
+      clock.mockRestore();
+    }
+  });
+
+  it('keeps earlier context for a recent session without charging old sessions to its byte limit', async () => {
+    const path = join(dir, 'window.vscdb');
+    const handle = new sqlite!.DatabaseSync(path);
+    const first = 'bubbleId:active:context';
+    const last = 'bubbleId:active:command';
+    const old = '2026-04-27T10:00:00.000Z';
+    const context = JSON.stringify({ createdAt: old });
+    const recent = JSON.stringify({ createdAt: '2026-04-28T12:00:00+02:00' });
+    try {
+      handle.exec('create table cursorDiskKV (key text primary key, value text)');
+      const put = handle.prepare('insert into cursorDiskKV values (?, ?)');
+      put.run('bubbleId:old:1', JSON.stringify({ createdAt: old, text: 'x'.repeat(10_001) }));
+      put.run(first, context);
+      put.run('bubbleId:malformed:1', '{');
+      put.run(last, recent);
+    } finally {
+      handle.close();
+    }
+    const cutoff = Date.parse('2026-04-28T10:00:00.000Z');
+    expect(
+      await readCursorWindowRows(path, cutoff, { stopAt: Infinity, maxRows: 2, maxBytes: 500 }),
+    ).toEqual({
+      rows: [
+        { key: first, value: context },
+        { key: last, value: recent },
+      ],
+      older: 2,
+    });
   });
 
   it('lists every session, newest first', async () => {

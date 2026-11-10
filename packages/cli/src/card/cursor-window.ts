@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstatSync } from 'node:fs';
 import { MAX_TRANSCRIPT_BYTES } from '../replay/past.js';
-import { cursorChangesPending, cursorUnavailable, readStoreRows } from '../sent/cursor.js';
+import { cursorChangesPending, cursorUnavailable, readCursorWindowRows } from '../sent/cursor.js';
 import { cursorSessionRefs } from '../sent/sessions.js';
 import type { WindowSession } from './window.js';
 
@@ -26,14 +26,15 @@ export async function listCursorWindow(
   const why = await cursorUnavailable();
   if (why !== null) return { ...empty, note: why };
   const deadline = Math.min(stopAt, Date.now() + MAX_LIST_MS);
-  const rows = await readStoreRows(db, null, {
+  const snapshot = await readCursorWindowRows(db, cutoff, {
     stopAt: deadline,
     maxRows: MAX_ROWS,
     maxBytes: MAX_TRANSCRIPT_BYTES,
   });
-  if (rows === null) return { ...empty, note: 'Cursor’s session store could not be read in full.' };
+  if (snapshot === null)
+    return { ...empty, note: 'Cursor’s session store could not be read in full.' };
 
-  const refs = cursorSessionRefs(db, rows);
+  const refs = cursorSessionRefs(db, snapshot.rows);
   const sessions: WindowSession[] = [];
   for (const ref of refs) {
     if (Date.now() >= deadline)
@@ -62,7 +63,7 @@ export async function listCursorWindow(
     return { ...empty, note: 'Cursor’s session store could not be read in time.' };
   return {
     sessions,
-    older: refs.length - sessions.length,
+    older: snapshot.older + refs.length - sessions.length,
     ...(cursorChangesPending(db)
       ? { note: 'Cursor has recent changes still waiting to be saved to its session store.' }
       : {}),

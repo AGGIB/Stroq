@@ -221,6 +221,36 @@ describe('the card when there is nothing to read', () => {
 const sqlite = await import('node:sqlite').catch(() => null);
 
 describe.skipIf(sqlite === null)('the card with Cursor sessions', () => {
+  it.each([
+    { label: 'old', daysAgo: 45, found: 1 },
+    { label: 'recent', daysAgo: 1, found: 0 },
+  ])('applies the row budget to sessions in the window ($label history)', async (test) => {
+    const db = cursorStateDb(process.platform, process.env, m.home);
+    mkdirSync(dirname(db), { recursive: true });
+    const run = env();
+    const handle = new sqlite!.DatabaseSync(db);
+    try {
+      handle.exec('create table cursorDiskKV (key text primary key, value text); begin');
+      const put = handle.prepare('insert into cursorDiskKV values (?, ?)');
+      const historical = JSON.stringify({
+        createdAt: new Date(run.now.getTime() - test.daysAgo * DAY).toISOString(),
+      });
+      for (let i = 0; i < 30_001; i += 1) put.run(`bubbleId:history:${i}`, historical);
+      put.run('bubbleId:recent:1', JSON.stringify({ createdAt: run.now.toISOString() }));
+      handle.exec('commit');
+    } finally {
+      handle.close();
+    }
+    const data = await buildCard(30, run);
+    expect(data.coverage.found).toBe(test.found);
+    if (test.found === 1) {
+      expect(data.coverage).toMatchObject({ older: 1, agents: { cursor: 1 } });
+      expect(data.coverage.cursorNote).toBeUndefined();
+    } else {
+      expect(data.coverage.cursorNote).toContain('could not be read in full');
+    }
+  });
+
   it('links a read stored after its command and can replay the moment by its SQLite address', async () => {
     const db = cursorStateDb(process.platform, process.env, m.home);
     mkdirSync(dirname(db), { recursive: true });
