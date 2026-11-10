@@ -198,46 +198,16 @@ function wordEvidence(
   return null;
 }
 
-/**
- * The files a runner named in a command reads, and what they run. `package.json`'s scripts are commands
- * and are read as commands are; another runner's file is read word by word, and a variable or a glob in
- * it is taken for what the reading cannot follow. `depth` keeps a script that names a runner from
- * leading on: past the first step the evidence cannot cover what runs.
- */
-/** The scripts an install runs, in the order npm runs them. */
-const INSTALL_SCRIPTS = [
-  'preinstall',
-  'install',
-  'postinstall',
-  'preprepare',
-  'prepare',
-  'postprepare',
-];
-const INSTALL = new Set([
-  'install',
-  'i',
-  'in',
-  'ins',
-  'inst',
-  'insta',
-  'instal',
-  'isnt',
-  'isnta',
-  'isntal',
-  'isntall',
-  'add',
-  'ci',
-  'rebuild',
-  'rb',
-]);
-const INSTALL_TEST = new Set(['it', 'install-test', 'cit', 'install-ci-test']);
-const RUN = new Set(['run', 'run-script', 'rum', 'urn']);
+const RUN = new Set(['run', 'run-script']);
 const TEST = new Set(['test', 't', 'tst']);
 
 /**
  * The scripts of a `package.json` that `runner` runs with the words after it (`args`), with their `pre`
- * and `post`; null for a subcommand the reading does not know, or one that runs a package rather than
- * a script (`npx`, `exec`, `dlx`), which no reading of the folder can follow.
+ * and `post`; null for anything else. Only three forms are read, each with no flag and for a script the
+ * file has: `run <script>`, `test` and `start`. An install runs what the packages it installs say, a bare
+ * runner installs, `yarn <word>` may be a builtin of that name, `start` with no script starts a
+ * `server.js`, and a flag can take a word for its value: none of these can the reading follow, so the
+ * moment cannot be marked for them.
  */
 function scriptsRun(
   scripts: Readonly<Record<string, unknown>>,
@@ -245,22 +215,23 @@ function scriptsRun(
   args: readonly string[],
 ): string[] | null {
   if (runner === 'npx' || runner === 'bunx') return null;
-  const words = args.filter((word) => !word.startsWith('-'));
-  const [sub, name] = words;
-  const around = (script: string): string[] => [`pre${script}`, script, `post${script}`];
-  // A bare `yarn`, `pnpm` or `bun` installs; a bare `npm` only prints its help.
-  if (sub === undefined) return runner === 'npm' ? [] : INSTALL_SCRIPTS;
-  if (RUN.has(sub)) return name === undefined ? [] : around(name);
-  if (TEST.has(sub)) return around('test');
-  if (sub === 'start' || sub === 'stop') return around(sub);
-  if (sub === 'restart') return [...around('restart'), ...around('stop'), ...around('start')];
-  if (INSTALL.has(sub)) return INSTALL_SCRIPTS;
-  if (INSTALL_TEST.has(sub)) return [...INSTALL_SCRIPTS, ...around('test')];
-  // `yarn build`, `pnpm build`, `bun build` run the script of that name; npm does not.
-  if (runner !== 'npm' && Object.hasOwn(scripts, sub)) return around(sub);
+  if (args.some((word) => word.startsWith('-'))) return null;
+  const [sub, name, ...rest] = args;
+  const around = (script: string): string[] | null =>
+    Object.hasOwn(scripts, script) ? [`pre${script}`, script, `post${script}`] : null;
+  if (sub !== undefined && RUN.has(sub) && name !== undefined && rest.length === 0)
+    return around(name);
+  if (sub !== undefined && TEST.has(sub) && name === undefined) return around('test');
+  if (sub === 'start' && name === undefined) return around('start');
   return null;
 }
 
+/**
+ * The files a runner named in a command reads, and what they run. `package.json`'s scripts are commands
+ * and are read as commands are; another runner's file is read word by word, and a variable or a glob in
+ * it is taken for what the reading cannot follow. `depth` keeps a script that names a runner from
+ * leading on: past the first step the evidence cannot cover what runs.
+ */
 function runnerEvidence(
   runner: string,
   root: string,

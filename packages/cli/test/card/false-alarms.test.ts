@@ -345,14 +345,13 @@ describe('the evidence of a folder that runs code on open', () => {
     expect(autorunOf(dir)?.evidence).toBe(withPre);
   });
 
-  // npm's short names and the bare runners run scripts too; a package a runner fetches cannot be read.
+  // Three forms of a runner are read, for a script the file has: `run <script>`, `test`, `start`.
   it.each([
     ['npm t', 'test'],
     ['npm tst', 'test'],
-    ['npm rum setup', 'setup'],
-    ['npm it', 'postinstall'],
-    ['yarn', 'postinstall'],
-    ['pnpm build', 'build'],
+    ['npm run setup', 'setup'],
+    ['pnpm run build', 'build'],
+    ['npm start', 'start'],
   ])('follows the script %s runs', (command, script) => {
     const dir = join(m.work, `npm-${command.replace(/\W/g, '-')}`);
     hookIn(dir, command);
@@ -366,15 +365,28 @@ describe('the evidence of a folder that runs code on open', () => {
     expect(autorunOf(dir)?.evidence).not.toBe(before);
   });
 
-  it.each(['npx some-tool', 'npm exec some-tool', 'pnpm dlx some-tool', 'npm frobnicate'])(
-    'cannot be marked for %s, which runs what the folder does not hold or what the reading does not know',
-    (command) => {
-      const dir = join(m.work, `npx-${command.replace(/\W/g, '-')}`);
-      hookIn(dir, command);
-      writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts: {} }));
-      expect(autorunOf(dir)?.evidence).not.toBe(autorunOf(dir)?.evidence);
-    },
-  );
+  // An install, a bare runner, a builtin a script may share a name with, a flag, a start with no
+  // script (it starts server.js), a package fetched to run: the moment cannot be marked.
+  it.each([
+    'npm install',
+    'npm it',
+    'yarn',
+    'yarn build',
+    'npm run --if-present setup',
+    'npm start',
+    'npx some-tool',
+    'npm exec some-tool',
+    'pnpm dlx some-tool',
+    'npm frobnicate',
+  ])('cannot be marked for %s', (command) => {
+    const dir = join(m.work, `npx-${command.replace(/\W/g, '-')}`);
+    hookIn(dir, command);
+    writeFileSync(
+      join(dir, 'package.json'),
+      JSON.stringify({ scripts: { build: 'tsc', setup: 'x' } }),
+    );
+    expect(autorunOf(dir)?.evidence).not.toBe(autorunOf(dir)?.evidence);
+  });
 
   it('cannot be marked for a make whose Makefile holds a variable', () => {
     const dir = join(m.work, 'maker');
