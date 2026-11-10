@@ -8,13 +8,17 @@
 // findings" and a count of them would be a count of every repository there is.
 import { createHash } from 'node:crypto';
 import {
-  lstatSync,
-  readFileSync,
+  closeSync,
+  constants,
+  fstatSync,
+  openSync,
+  readSync,
   readdirSync,
   readlinkSync,
   realpathSync,
   statSync,
 } from 'node:fs';
+import { readRegularFile } from '@stroq/core';
 import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path';
 import { CURSOR_EVENTS, type CursorEvent } from '../adapters/cursor.js';
 import { cursorEntry } from '../commands/cursor-hooks.js';
@@ -56,18 +60,50 @@ const MAX_WORDS = 2_000;
 /** What separates the words of a command or a config line that could name a file. */
 const WORD_BREAKS = /[\s\0;&|()<>`'"=,{}[\]]+/;
 
-/** What a file of the folder holds, as a digest: its bytes, the target of a link, or a folder's names. */
+/** Opens for a look that neither follows a link nor waits on a pipe: what is read is what the handle shows. */
+const LOOK_FLAGS = constants.O_RDONLY | (constants.O_NOFOLLOW ?? 0) | (constants.O_NONBLOCK ?? 0);
+
+/** The digest of what the handle `fd` holds, read through it: the bytes of a file, past the bound its size and date. */
+function digestThrough(fd: number, path: string): string {
+  const info = fstatSync(fd);
+  if (info.isDirectory()) return `dir:${readdirSync(path).sort().join('\u0000')}`;
+  if (!info.isFile()) return 'other';
+  if (info.size > MAX_EVIDENCE_BYTES) return `large:${info.size}:${info.mtimeMs}`;
+  const hash = createHash('sha256');
+  const buffer = Buffer.alloc(64 * 1024);
+  for (let at = 0; at <= MAX_EVIDENCE_BYTES;) {
+    const read = readSync(fd, buffer, 0, buffer.length, at);
+    if (read === 0) break;
+    hash.update(buffer.subarray(0, read));
+    at += read;
+  }
+  return `file:${hash.digest('hex')}`;
+}
+
+/**
+ * What a file of the folder holds, as a digest: its bytes, the target of a link, or a folder's names.
+ * The path is opened once, without following a link, and the handle is what is looked at and read, so
+ * a file swapped in between is not mistaken for the one that was looked at.
+ */
 function fileDigest(dir: string, file: string): string {
   const path = join(dir, file);
+  let fd: number;
   try {
-    const info = lstatSync(path);
-    if (info.isSymbolicLink()) return `link:${readlinkSync(path)}`;
-    if (info.isDirectory()) return `dir:${readdirSync(path).sort().join('\u0000')}`;
-    if (!info.isFile()) return 'other';
-    if (info.size > MAX_EVIDENCE_BYTES) return `large:${info.size}:${info.mtimeMs}`;
-    return `file:${createHash('sha256').update(readFileSync(path)).digest('hex')}`;
+    fd = openSync(path, LOOK_FLAGS);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code !== 'ELOOP') return 'unreadable';
+    try {
+      return `link:${readlinkSync(path)}`;
+    } catch {
+      return 'unreadable';
+    }
+  }
+  try {
+    return digestThrough(fd, path);
   } catch {
     return 'unreadable';
+  } finally {
+    closeSync(fd);
   }
 }
 
@@ -320,10 +356,9 @@ function namedFiles(root: string, text: string, bases: readonly string[]): strin
 
 /** The text of a file of the folder, when it is a regular file small enough to read; else empty. */
 function textOf(dir: string, file: string): string {
-  const path = join(dir, file);
   try {
-    const info = lstatSync(path);
-    return info.isFile() && info.size <= MAX_EVIDENCE_BYTES ? readFileSync(path, 'utf8') : '';
+    const read = readRegularFile(join(dir, file), MAX_EVIDENCE_BYTES, { noFollow: true });
+    return read.kind === 'text' ? read.text : '';
   } catch {
     return '';
   }
