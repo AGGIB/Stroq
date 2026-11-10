@@ -35,6 +35,7 @@ export {
   windsurfToolName,
   type WindsurfEvent,
 } from './windsurf-input.js';
+import { internalErrorReason } from './internal-error.js';
 
 /**
  * Windsurf's payload names its own event in `agent_action_name`, so ONE installed
@@ -254,6 +255,5 @@ export function windsurfFailClosedOutput(raw: unknown, err: unknown): HookOutput
   const record = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
   const action = record['agent_action_name'];
   if (typeof action === 'string' && !isWindsurfHighImpact(action)) return NO_OUTPUT;
-  const message = err instanceof Error ? err.message : String(err);
-  return windsurfBlockOutput(`Stroq internal error (fail-closed): ${message}`);
+  return windsurfBlockOutput(internalErrorReason(err));
 }

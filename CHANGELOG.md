@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **When a sandbox around the agent closes Stroq's own folder, the hook says so.** The call is refused as before, and the reason now names `~/.stroq` and says to give it read and write access in the sandbox, instead of "the policy file is there but cannot be read (ENOENT)" for a file the sandbox hid.
+- **[Stroq and a sandbox](docs/SANDBOXES.md) says how to run Stroq inside one**, such as Agent Safehouse, and what happens when `~/.stroq` is left out: an install made with `npx` is then off, a global install refuses every shell command. Asked on the Show HN thread.
+
 ## [0.31.1] - 2026-11-09
 
 ### Fixed
