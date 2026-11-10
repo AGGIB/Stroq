@@ -331,13 +331,14 @@ export function commandEvidence(
       for (const part of runnerEvidence(basename(word), root, budget, depth, argsAfter(at)))
         found.add(part);
     // A Windows path in a line that cmd.exe or PowerShell runs keeps its backslashes, which the shell's
-    // reading takes for escapes (`C:\Users` reads as `C:Users`): the word as written is tried first.
+    // reading takes for escapes (`C:\Users` reads as `C:Users`). Which of the two runs depends on the
+    // host, so both readings go into the evidence, and a change to either file changes it.
     const written = w.raw?.replace(/["']/g, '');
-    const asWritten =
-      written !== undefined && written !== word && written.includes('\\')
-        ? wordEvidence(written, root, bases, budget, true)
-        : null;
-    const named = asWritten ?? wordEvidence(word, root, bases, budget, true);
+    if (written !== undefined && written !== word && written.includes('\\')) {
+      const asWritten = wordEvidence(written, root, bases, budget, true);
+      if (asWritten !== null) found.add(asWritten);
+    }
+    const named = wordEvidence(word, root, bases, budget, true);
     if (named !== null) found.add(named);
   }
   return [...found].sort();

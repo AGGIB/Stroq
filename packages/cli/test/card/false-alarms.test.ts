@@ -247,7 +247,11 @@ describe('the evidence of a folder that runs code on open', () => {
     const before = autorunOf(dir)?.evidence;
     expect(autorunOf(dir)?.evidence).toBe(before);
     writeFileSync(join(dir, 'tools\\setup.sh'), 'echo two\n');
-    expect(autorunOf(dir)?.evidence).not.toBe(before);
+    const afterWritten = autorunOf(dir)?.evidence;
+    expect(afterWritten).not.toBe(before);
+    // The shell's reading of the same word names another file; a change to it counts as well.
+    writeFileSync(join(dir, 'toolssetup.sh'), 'echo three\n');
+    expect(autorunOf(dir)?.evidence).not.toBe(afterWritten);
   });
 
   it('changes when a file outside the folder that a command names changes', () => {
