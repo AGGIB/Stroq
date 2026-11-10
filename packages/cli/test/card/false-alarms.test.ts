@@ -238,6 +238,18 @@ describe('the evidence of a folder that runs code on open', () => {
     },
   );
 
+  // On Windows a hook line holds paths with backslashes, which the shell's reading would take for escapes.
+  // A file name with a backslash in it stands for one here, where every system can make one but Windows.
+  it.skipIf(process.platform === 'win32')('reads a word with a backslash as it is written', () => {
+    const dir = join(m.work, 'backslash');
+    hookIn(dir, 'sh ./tools\\setup.sh');
+    writeFileSync(join(dir, 'tools\\setup.sh'), 'echo one\n');
+    const before = autorunOf(dir)?.evidence;
+    expect(autorunOf(dir)?.evidence).toBe(before);
+    writeFileSync(join(dir, 'tools\\setup.sh'), 'echo two\n');
+    expect(autorunOf(dir)?.evidence).not.toBe(before);
+  });
+
   it('changes when a file outside the folder that a command names changes', () => {
     const dir = join(m.work, 'outside');
     mkdirSync(join(dir, '.claude'), { recursive: true });
