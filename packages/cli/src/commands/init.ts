@@ -64,6 +64,7 @@ import {
   chooseHookCommand,
   hookCommand,
   needsTsxLoader,
+  withoutFailClosed,
   type Started,
   type WindowsTools,
 } from './hook-command.js';
@@ -171,8 +172,9 @@ export const stroqHandler = (command: string): HookHandler => ({
   command,
   timeout: HOOK_TIMEOUT_SECONDS,
 });
+/** Stroq's Claude Code handler, as any version of `init` wrote it: with `CLAUDE_CODE_FAIL_CLOSED` or not. */
 export const isStroqHandler = (handler: HookHandler): boolean =>
-  / hook claude-code$/.test(handler.command);
+  / hook claude-code$/.test(withoutFailClosed(handler.command));
 
 const withoutStroq = (groups: readonly HookGroup[]): HookGroup[] =>
   withoutStroqGroups<HookGroup>(groups, (handler) => isStroqHandler(handler as HookHandler));

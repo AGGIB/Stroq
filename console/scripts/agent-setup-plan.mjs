@@ -1,6 +1,7 @@
 import { isDeepStrictEqual } from 'node:util';
 import { join } from 'node:path';
 import { MAX_CONFIG, snapshotFile } from './agent-setup-files.mjs';
+import { hookLine } from './hook-line.mjs';
 
 export const AGENTS = ['claude-code', 'cursor', 'codex'];
 const EVENTS = {
@@ -247,7 +248,7 @@ export function completePlan(input, prepared, agent, scope, options, id, now) {
     !merged.equals(input.before.bytes)
   )
     throw new Error('invalid-engine-preview');
-  const command = `"${process.execPath}" "${options.paths.cli}" hook ${agent}`;
+  const command = hookLine(process.execPath, options.paths.cli, agent);
   const templates = templatesFor(options.expected, agent, command);
   if (
     !isDeepStrictEqual(

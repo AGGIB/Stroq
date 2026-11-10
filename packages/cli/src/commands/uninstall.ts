@@ -11,6 +11,7 @@ import { codexHooksPath } from './codex-hooks.js';
 import { isPlainObject, readJsonObject, writeJsonObject } from './config-file.js';
 import { copilotHooksPath } from './copilot-hooks.js';
 import { cursorHooksPath } from './cursor-hooks.js';
+import { withoutFailClosed } from './hook-command.js';
 import { type HookAgent, isInitAgent, runInit, settingsPath } from './init.js';
 import { installKey, readInstallRecord } from './install-record.js';
 import { devinHooksPath, isRecordedEntry, windsurfHooksPath } from './windsurf-hooks.js';
@@ -30,7 +31,7 @@ const ownedBy =
   (handler: unknown): boolean =>
     isPlainObject(handler) &&
     typeof handler['command'] === 'string' &&
-    new RegExp(` hook ${agent}(?: \\S+)?$`).test(handler['command']);
+    new RegExp(` hook ${agent}(?: \\S+)?$`).test(withoutFailClosed(handler['command']));
 
 /**
  * One event's array without Stroq's handlers, in either shape the agents use: flat

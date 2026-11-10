@@ -16,6 +16,7 @@ import {
 import { codexHooksPath, installCodexHooks } from '../../src/commands/codex-hooks.js';
 import { copilotHooksPath, installCopilotHooks } from '../../src/commands/copilot-hooks.js';
 import { cursorHooksPath, installCursorHooks } from '../../src/commands/cursor-hooks.js';
+import { CLAUDE_CODE_FAIL_CLOSED } from '../../src/commands/hook-command.js';
 import { installHooks, settingsPath } from '../../src/commands/init.js';
 import { recordInstall } from '../../src/commands/install-record.js';
 import { runUninstall, uninstallAgent } from '../../src/commands/uninstall.js';
@@ -58,6 +59,34 @@ describe('stroq uninstall', () => {
       permissions: { allow: ['Bash(ls)'] },
       hooks: {
         PreToolUse: [{ matcher: 'Bash', hooks: [{ type: 'command', command: 'my-linter' }] }],
+      },
+    });
+  });
+
+  it("removes Claude Code's line with the end that blocks a failed start, and an older one beside it", () => {
+    const file = settingsPath('project', cwd);
+    seed(file, {
+      hooks: {
+        PreToolUse: [
+          { matcher: 'Bash', hooks: [{ type: 'command', command: `${STROQ} hook claude-code` }] },
+          {
+            matcher: 'Bash',
+            hooks: [{ type: 'command', command: `${STROQ} hook claude-code || true` }],
+          },
+        ],
+      },
+    });
+    installHooks(file, `${STROQ} hook claude-code${CLAUDE_CODE_FAIL_CLOSED}`);
+    expect(uninstallAgent('claude-code', 'project', cwd, false).removed).toBe(true);
+    // Only the line that goes on with something else is left: it is not Stroq's.
+    expect(json(file)).toEqual({
+      hooks: {
+        PreToolUse: [
+          {
+            matcher: 'Bash',
+            hooks: [{ type: 'command', command: `${STROQ} hook claude-code || true` }],
+          },
+        ],
       },
     });
   });

@@ -17,6 +17,7 @@ import { createHookCheckService } from './hook-check-service.mjs';
 import { startServer } from './serve.mjs';
 import * as schema from '../.local-engine/local-api-schema.js';
 import { expectedConfiguration } from '../.local-engine/agent-status-engine.js';
+import { hookLine } from './hook-line.mjs';
 
 const SHA = 'a'.repeat(64);
 const finished = () => ({
@@ -55,7 +56,7 @@ async function fixture(
     await mkdir(dirname(source));
     await writeFile(
       source,
-      JSON.stringify(expectedConfiguration(agent, `"${process.execPath}" "${cli}" hook ${agent}`)),
+      JSON.stringify(expectedConfiguration(agent, hookLine(process.execPath, cli, agent))),
       { mode: 0o600 },
     );
   }

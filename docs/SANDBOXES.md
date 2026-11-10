@@ -18,11 +18,11 @@ Stroq is a filter, not a sandbox. The two do different jobs, and they do not get
 
 The host starts Stroq's hook, so a sandbox around the agent (Agent Safehouse, a `sandbox-exec` profile of your own, a container) holds the hook too. The hook needs its own folder, `~/.stroq`, to read and to write: the copy of the CLI that `stroq init` put there, the policy, the audit log and what it keeps for each session. A sandbox that leaves that folder out leaves Stroq unable to work.
 
-[Agent Safehouse](https://agent-safehouse.dev)'s default policy for Claude Code grants `~/.claude` and not `~/.stroq`. This is what Stroq 0.31 does when `~/.stroq` is closed as such a sandbox closes it, measured with `sandbox-exec` profiles of our own that close only that folder, not with Safehouse itself:
+[Agent Safehouse](https://agent-safehouse.dev)'s default policy for Claude Code grants `~/.claude` and not `~/.stroq`. This is what Stroq does when `~/.stroq` is closed as such a sandbox closes it, measured with `sandbox-exec` profiles of our own that close only that folder, not with Safehouse itself:
 
 | `~/.stroq` in the sandbox | Installed with `npx @stroq/cli init`, or the plugin | Installed with `npm install -g @stroq/cli` |
 | --- | --- | --- |
-| Not granted | The hook cannot start: its code is in `~/.stroq`. Claude Code takes a hook that fails this way for a non-blocking error and runs the call, so Stroq is off. | Every shell command, edit, fetch and MCP call is refused (reads pass), and the reason names the folder to grant. |
+| Not granted | The hook cannot start: its code is in `~/.stroq`. With the line `stroq init` writes since this version, Claude Code blocks every call and shows "Stroq could not run". With a line an older version wrote, Claude Code takes the failure for a non-blocking error and runs the call, so Stroq is off: run `stroq init` again. | Every shell command, edit, fetch and MCP call is refused (reads pass), and the reason names the folder to grant. |
 | Read only | Every shell command, edit, fetch and MCP call is refused: Stroq cannot keep its state. | The same. |
 | Read and write | The hook works as it does without a sandbox. | The same. |
 
