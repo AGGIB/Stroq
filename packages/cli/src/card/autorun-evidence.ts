@@ -55,7 +55,10 @@ const ELSEWHERE: ReadonlySet<string> = new Set([
   '--manifest-path',
   '--project',
 ]);
+/** `-C<dir>`, the short flag with its directory glued on. */
+const GLUED_ELSEWHERE = /^-C./;
 const isElsewhere = (word: string): boolean =>
+  GLUED_ELSEWHERE.test(word) ||
   ELSEWHERE.has(word) ||
   [...ELSEWHERE].some((flag) => flag.startsWith('--') && word.startsWith(`${flag}=`));
 
@@ -195,16 +198,69 @@ function wordEvidence(
   return null;
 }
 
-/** The files a runner named in a command reads, and what those name in turn (`RUNNER_FILES`). */
-function runnerEvidence(runner: string, root: string, budget: Budget): string[] {
+/**
+ * The files a runner named in a command reads, and what they run. `package.json`'s scripts are commands
+ * and are read as commands are; another runner's file is read word by word, and a variable or a glob in
+ * it is taken for what the reading cannot follow. `depth` keeps a script that names a runner from
+ * leading on: past the first step the evidence cannot cover what runs.
+ */
+/** The scripts of a `package.json` a command runs: those it names, their `pre` and `post`, an install's. */
+function scriptsRun(
+  scripts: Readonly<Record<string, unknown>>,
+  words: ReadonlySet<string>,
+): string[] {
+  const names = new Set<string>();
+  for (const word of words) if (Object.hasOwn(scripts, word)) names.add(word);
+  if (['install', 'i', 'ci', 'add'].some((word) => words.has(word)))
+    for (const name of ['install', 'prepare']) names.add(name);
+  return [...names]
+    .flatMap((name) => [`pre${name}`, name, `post${name}`])
+    .filter((name) => Object.hasOwn(scripts, name));
+}
+
+function runnerEvidence(
+  runner: string,
+  root: string,
+  budget: Budget,
+  depth: number,
+  words: ReadonlySet<string>,
+): string[] {
+  if (depth > 0) return [unkeyable()];
   return (RUNNER_FILES[runner] ?? []).flatMap((config) => {
     const path = join(root, config);
+    const digest = `${config}\u0000${fileDigest(path, budget)}`;
+    const text = textOf(path);
+    if (text === '') return [digest];
+    if (config !== 'package.json')
+      return [digest, ...textEvidence(text, root, [root], budget, true)];
+    let scripts: unknown;
+    try {
+      scripts = (JSON.parse(text) as { scripts?: unknown }).scripts;
+    } catch {
+      return [unkeyable()];
+    }
+    if (scripts === undefined) return [digest];
+    if (scripts === null || typeof scripts !== 'object' || Array.isArray(scripts))
+      return [unkeyable()];
+    const table = scripts as Readonly<Record<string, unknown>>;
     return [
-      `${config}\u0000${fileDigest(path, budget)}`,
-      ...textEvidence(textOf(path), root, [root], budget),
+      digest,
+      ...scriptsRun(table, words).flatMap((name) => {
+        const script = table[name];
+        return typeof script === 'string'
+          ? commandEvidence(script, root, [root], budget, depth + 1)
+          : [unkeyable()];
+      }),
     ];
   });
 }
+
+/** The operator words of a list of commands, which `argv` gives as words of their own. */
+const LIST_OPERATORS: ReadonlySet<string> = new Set(['&&', '||', ';', '|', '|&']);
+/** An unquoted word that still holds one: the reading would not see the command after it. */
+const GLUED_OPERATOR = /[;&|]/;
+/** An input redirect: the command reads a file the words do not name as a file. */
+const INPUT_REDIRECT = /^(?:\d+|\{[A-Za-z_]\w*\})?(?:<<<|<<-|<<|<&|<>|<)/;
 
 /**
  * The evidence of a command an agent setting runs, read as the shell reads it. A runner it names adds
@@ -216,6 +272,7 @@ export function commandEvidence(
   root: string,
   bases: readonly string[],
   budget: Budget,
+  depth = 0,
 ): string[] {
   let words;
   try {
@@ -225,16 +282,22 @@ export function commandEvidence(
   }
   if (words.length > MAX_WORDS) return [unkeyable()];
   const found = new Set<string>();
-  const elsewhere = words.some((w) => isElsewhere(w.value));
+  // A list of simple commands is read stage by stage; anything else the reading does not follow.
+  if (words.some((w) => isElsewhere(w.value))) return [unkeyable()];
+  const said = new Set(words.map((w) => w.value));
   for (const w of words) {
     if (found.size > MAX_NAMED) return [unkeyable()];
+    if (!w.quoted && LIST_OPERATORS.has(w.value)) continue;
+    if (w.redirect) {
+      if (INPUT_REDIRECT.test(w.value)) return [unkeyable()];
+      continue;
+    }
+    if (!w.quoted && GLUED_OPERATOR.test(w.value)) return [unkeyable()];
     const word = w.expands ? spelledOut(w.value, root) : w.value;
     if (word === null) return [unkeyable()];
-    if (word === '' || w.redirect || word.startsWith('-') || word.includes('://')) continue;
-    if (RUNNER_FILES[basename(word)] !== undefined) {
-      if (elsewhere) return [unkeyable()];
-      for (const part of runnerEvidence(basename(word), root, budget)) found.add(part);
-    }
+    if (word === '' || word.startsWith('-') || word.includes('://')) continue;
+    if (RUNNER_FILES[basename(word)] !== undefined)
+      for (const part of runnerEvidence(basename(word), root, budget, depth, said)) found.add(part);
     const named = wordEvidence(word, root, bases, budget, true);
     if (named !== null) found.add(named);
   }
@@ -250,6 +313,7 @@ export function textEvidence(
   root: string,
   bases: readonly string[],
   budget: Budget,
+  strict = false,
 ): string[] {
   const found = new Set<string>();
   const all = text
@@ -261,9 +325,13 @@ export function textEvidence(
     if (found.size > MAX_NAMED) return [unkeyable()];
     if (raw === '' || raw.startsWith('-') || raw.includes('://')) continue;
     const word = spelledOut(raw, root);
-    // A config's own words hold globs and fields (`refs/heads/*`) that name no file: they are passed over.
-    if (word === null) continue;
-    const named = wordEvidence(word, root, bases, budget, false);
+    // A git config's own words hold globs and fields (`refs/heads/*`) that name no file: they are passed
+    // over. A runner's file runs what it says, so there a variable or a glob is not followed.
+    if (word === null) {
+      if (strict) return [unkeyable()];
+      continue;
+    }
+    const named = wordEvidence(word, root, bases, budget, strict);
     if (named !== null) found.add(named);
   }
   return [...found].sort();
