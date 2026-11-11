@@ -9,7 +9,7 @@ import {
   cursorUnavailable,
   findCursorSessions,
   readCursorSession,
-  readStoreRows,
+  storeRows,
 } from '../../src/sent/cursor.js';
 import { readerForFile } from '../../src/sent/readers.js';
 import { extractEnv } from '@stroq/core';
@@ -88,12 +88,12 @@ afterAll(() => {
 });
 
 withStore('reading a real Cursor store', () => {
-  it('skips non-text rows and refuses a partial store when the card’s limits are reached', async () => {
-    const limits = { stopAt: Infinity, maxRows: 2, maxBytes: 10_000 };
-    expect(await readStoreRows(db, null, limits)).toHaveLength(2);
-    for (const limit of [{ maxRows: 1 }, { maxBytes: 1 }, { stopAt: 0 }]) {
-      expect(await readStoreRows(db, null, { ...limits, ...limit })).toBeNull();
-    }
+  it('reads text bubble rows and skips metadata and non-text values', async () => {
+    const rows = await storeRows(db, null);
+    expect(rows.map(({ key }) => key)).toEqual([
+      `bubbleId:${SESSION_A}:a1`,
+      `bubbleId:${SESSION_B}:b1`,
+    ]);
   });
 
   it('lists every session, newest first', async () => {
