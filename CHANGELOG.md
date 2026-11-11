@@ -18,6 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **The card shows recent Cursor sessions after a long Cursor history.** Its read limit of 30,000 rows and 64 MiB counted every bubble Cursor ever stored, so past that the card showed no Cursor session, only "Cursor's session store could not be read in full". The card now reads each bubble's date first, and only the sessions with a bubble in its window count against that limit. For the whole history, the limit is now the time the read takes, about 2 seconds, not a number of rows: a very large store, or a slow disk on the first run, can still show "could not be read in full". A session with a bubble the card cannot date is read in full, and when the sessions in the window alone go over 30,000 rows or 64 MiB, the card still says the store was not read in full (#311).
 - **A Claude Code hook that cannot start no longer lets the call through.** Claude Code takes a hook that exits with any code but 2 for a non-blocking error and runs the call, so a Stroq whose entry was gone, or closed to a sandbox around the agent, guarded nothing and said nothing. The line `stroq init` writes now ends in `|| { echo '…' >&2; exit 2; }`, as the plugin's wrapper already did: such a hook blocks a `PreToolUse` call and says to run `stroq doctor`. Run `stroq init` again to get the new line; `init`, `uninstall`, `doctor`, the card and the console know both.
 
 ## [0.31.1] - 2026-11-09
