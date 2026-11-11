@@ -457,6 +457,120 @@ export async function readStoreRows(
   }
 }
 
+/** How much one bounded read of the store may take: a deadline, and rows and bytes it may hold. */
+export interface StoreBudget {
+  readonly stopAt: number;
+  readonly maxRows: number;
+  readonly maxBytes: number;
+}
+
+/**
+ * The session of a `bubbleId:<session>:<bubble>` key, in SQL, and null for a key
+ * `parseCursorStore` skips: the same split on `:` it makes, so both read a key alike.
+ */
+const SESSION_OF_KEY = `case when typeof(key) = 'text' and substr(key, 1, 9) = 'bubbleId:'
+    and instr(substr(key, 10), ':') > 1 then substr(key, 10, instr(substr(key, 10), ':') - 1) end`;
+
+/**
+ * Each bubble row's session and date, without its value. `judged` is 0 for a row the parse skips
+ * (not text), 2 for one this pass cannot judge (too large, or not plain JSON to SQLite), and 1
+ * for the rest, with `at` the text of the LAST top-level `createdAt`, as `JSON.parse` keeps it, or
+ * null when that is not a string. CASE, not AND, so a value over the limit is never parsed.
+ */
+const DATES_SQL = `
+  select ${SESSION_OF_KEY} as session,
+    case when typeof(value) <> 'text' then 0
+         when length(cast(value as blob)) > ?1 then 2
+         when not json_valid(value) then 2
+         else 1 end as judged,
+    case when typeof(value) <> 'text' then null
+         when length(cast(value as blob)) > ?1 then null
+         when not json_valid(value) then null
+         else (select case when type = 'text' then value end from json_each(cursorDiskKV.value)
+               where key = 'createdAt' order by id desc limit 1) end as at
+  from cursorDiskKV where key like 'bubbleId:%'`;
+
+/** The rows of the sessions named in ?2 (a JSON array), in the order a read of every row has. */
+const CHOSEN_ROWS_SQL = `
+  select ${SESSION_OF_KEY} as session, key, typeof(value) = 'text' as isText,
+    case when typeof(value) <> 'text' then null
+         when length(cast(value as blob)) <= ?1 then value end as value
+  from cursorDiskKV
+  where key like 'bubbleId:%' and ${SESSION_OF_KEY} in (select value from json_each(?2))`;
+
+/**
+ * Every row of the sessions that may have a bubble at or after `cutoff`, and how many sessions the
+ * store holds, or null when that could not be read in full within `budget`.
+ *
+ * The budget covers the rows of those sessions only, not the whole history: a first pass reads
+ * each row's session and date in SQLite, without its value, and a second reads the rows of the
+ * chosen sessions. The parse of those rows still decides which sessions are in the window. The
+ * first pass only leaves sessions out, and only on a date it read: a session with a row it cannot
+ * judge is read in full, so the parse judges that row. The second pass must find the rows the
+ * first one counted, or the store changed between them and nothing is returned.
+ */
+export async function readStoreWindow(
+  db: string,
+  cutoff: number,
+  budget: StoreBudget,
+): Promise<{ readonly rows: CursorRow[]; readonly sessions: number } | null> {
+  const mod = await sqlite();
+  if (mod === null || Date.now() >= budget.stopAt) return null;
+  let handle;
+  try {
+    handle = new mod.DatabaseSync(storeUrl(db), { readOnly: true });
+  } catch {
+    return null;
+  }
+  try {
+    // A session's date is the newest of its bubbles, from 0, as `parseCursorStore` takes it.
+    const seen = new Map<string, { rows: number; latest: number; unsure: boolean }>();
+    for (const { session, judged, at } of handle.prepare(DATES_SQL).iterate(budget.maxBytes)) {
+      if (Date.now() >= budget.stopAt) return null;
+      if (typeof session !== 'string' || judged === 0) continue;
+      const s = seen.get(session) ?? { rows: 0, latest: 0, unsure: false };
+      const moment = typeof at === 'string' ? Date.parse(at) : NaN;
+      // U+FFFD is where SQLite's text may differ from what `JSON.parse` reads (an escaped lone
+      // surrogate), so such a date is not judged here.
+      const lossy = typeof at === 'string' && at.includes('\uFFFD');
+      seen.set(session, {
+        rows: s.rows + 1,
+        latest: Number.isFinite(moment) ? Math.max(s.latest, moment) : s.latest,
+        unsure: s.unsure || judged !== 1 || lossy,
+      });
+    }
+    const chosen = [...seen].filter(([, s]) => s.unsure || s.latest >= cutoff);
+    if (chosen.length === 0) return { rows: [], sessions: seen.size };
+
+    const rows: CursorRow[] = [];
+    const found = new Map<string, number>();
+    let bytes = 0;
+    const records = handle
+      .prepare(CHOSEN_ROWS_SQL)
+      .iterate(budget.maxBytes, JSON.stringify(chosen.map(([id]) => id)));
+    for (const { session, key, value, isText } of records) {
+      if (Date.now() >= budget.stopAt) return null;
+      if (typeof session !== 'string' || typeof key !== 'string') continue;
+      if (typeof value !== 'string') {
+        // The query leaves out the payload of an oversized text row.
+        if (isText === 1) return null;
+        continue;
+      }
+      bytes += Buffer.byteLength(key) + Buffer.byteLength(value);
+      if (rows.length >= budget.maxRows || bytes > budget.maxBytes) return null;
+      rows.push({ key, value });
+      found.set(session, (found.get(session) ?? 0) + 1);
+    }
+    const complete =
+      found.size === chosen.length && chosen.every(([id, s]) => found.get(id) === s.rows);
+    return complete && Date.now() < budget.stopAt ? { rows, sessions: seen.size } : null;
+  } catch {
+    return null;
+  } finally {
+    handle.close();
+  }
+}
+
 /** Whether `path` is `dir` itself or lies under it, on a boundary rather than a prefix. */
 function isUnder(path: string, dir: string): boolean {
   if (dir === '') return false;
