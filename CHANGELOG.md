@@ -7,8 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.32.0] - 2026-11-11
+
 ### Added
 
+- **The card reads Cursor sessions as well.** Alongside Claude Code and Codex, it counts the sessions in Cursor's local SQLite store, read-only and with the same reader as `stroq sent`, checks them for keys, and replays them in the order their messages were written; a moment's `stroq replay --transcript` command takes a Cursor session too. What Cursor has not yet moved out of its write-ahead log is reported as pending, not read, and when the read stops at its limit the card says so. By @Nari-Ab (#298).
 - **A moment on the card can be marked as a false alarm in one step.** `stroq show <n>` ends with the line to run, `stroq show --false-alarm <id>`; the id is the moment's own, so the mark goes to what you read even if the card was made again in between, and the confirmation repeats the sentence it marked. The card stops listing that moment for as long as what it shows stays the same: one more key in that session, a longer command, another command run by the same setting of a folder, or a change to a script, an included file or the `package.json` behind `npm run` that the setting names (one step deep) is a new moment and is listed again. A moment whose evidence cannot be read in full (a variable or a glob in the command, a change of directory, more than the 64 MiB hashed for one folder) cannot be marked. The counts do not change, since they are what the rules found, and the card says how many moments it left out. `stroq show --false-alarms` lists the marks and `--clear` takes them back. Marking and clearing need a terminal (a pipe or a plain agent shell is refused), and Stroq's hook refuses them through an agent's shell as well. Neither is a wall against an agent that can get itself a terminal; the card says how many moments it left out, so a mark you did not make shows there. A marks file that cannot be read hides nothing. `stroq card --json` adds `coverage.falseAlarms` and each moment's `key`. Asked for on the Show HN thread.
 
 ### Changed
