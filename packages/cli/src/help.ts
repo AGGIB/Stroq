@@ -224,12 +224,19 @@ export const COMMANDS: readonly CommandHelp[] = [
   },
   {
     name: 'show',
-    synopsis: 'show <n>',
+    synopsis: 'show <n> | show --false-alarm <id> | show --false-alarms [--clear]',
     about: [
       'the evidence behind moment <n> of the last `stroq card`: what was read, what the',
       'agent did next, how the two are linked, the session, and the command to dig deeper.',
     ],
-    flags: [],
+    flags: [
+      [
+        '--false-alarm <id>',
+        "mark the moment whose id `stroq show <n>` printed as a false alarm: the card stops listing it while what it shows stays the same, and its counts do not change. Only in a terminal of your own; Stroq's hook refuses it through an agent's shell",
+      ],
+      ['--false-alarms', 'list the moments you marked'],
+      ['--clear', 'with --false-alarms: take every mark back'],
+    ],
   },
   {
     name: 'sent',

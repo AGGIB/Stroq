@@ -40,6 +40,7 @@ const coverage = z
     folders: z.object({ found: count, checked: count, capped: z.boolean() }).strict(),
     looked: z.array(text).max(8),
     cursorNote: text.optional(),
+    falseAlarms: z.object({ leftOut: count, unreadable: z.boolean() }).strict(),
     cacheSaved: z.boolean(),
   })
   .strict();

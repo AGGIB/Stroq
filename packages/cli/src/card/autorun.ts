@@ -6,9 +6,11 @@
 // guard off (hooks, auto-approved MCP servers, autorun tasks). The ordinary things many honest
 // repositories have (a husky hook, a `prepare` script) are not counted: `inspect` lists them as "not
 // findings" and a count of them would be a count of every repository there is.
+import { createHash } from 'node:crypto';
 import { realpathSync, statSync } from 'node:fs';
-import { basename, isAbsolute, sep } from 'node:path';
+import { basename, dirname, isAbsolute, join, sep } from 'node:path';
 import { CURSOR_EVENTS, type CursorEvent } from '../adapters/cursor.js';
+import { commandEvidence, configEvidence, folderBudget } from './autorun-evidence.js';
 import { cursorEntry } from '../commands/cursor-hooks.js';
 import { isBare, withoutFailClosed } from '../commands/hook-command.js';
 import { isFailing, tagChanges } from '../exposure/agent-change.js';
@@ -30,6 +32,15 @@ export interface AutorunRepo {
   /** The first few things, and how many more there are. */
   readonly items: readonly AutorunItem[];
   readonly more: number;
+  /**
+   * A digest of everything that runs, the items past the first few included: what each agent setting
+   * runs, the bytes of each file git reads, and the bytes of the files either names (a script a hook
+   * runs, a file a config includes, the `package.json` that `npm run` reads), one step deep. What the
+   * reading cannot cover makes it differ on every run (`unkeyable`). Never shown. A false-alarm mark is
+   * kept under it (`false-alarms.ts`), so that a mark on a folder is gone once what the folder runs
+   * changes, though its names stay the same.
+   */
+  readonly evidence: string;
 }
 
 const MAX_ITEMS = 5;
@@ -213,17 +224,41 @@ export function autorunOf(dir: string): AutorunRepo | null {
     .filter(notOwnHook(dir));
   const seen = new Set<string>();
   const items: AutorunItem[] = [];
-  const add = (item: AutorunItem): void => {
+  const runs: string[][] = [];
+  let root: string;
+  try {
+    root = realpathSync(dir);
+  } catch {
+    root = dir;
+  }
+  const budget = folderBudget();
+  const add = (item: AutorunItem, what: () => string): void => {
     const key = `${item.file}\u0000${item.name}`;
     if (seen.has(key)) return;
     seen.add(key);
     items.push(item);
+    runs.push([item.kind, item.file, item.name, what()]);
   };
+  // A finding of git's names no command, so the file it is in stands for it, with what that file names
+  // (a script, an included config); an agent setting names its command, and what the command names.
   for (const hit of surface.preTrust.filter(runsOnOpen))
-    add({ kind: hit.kind, file: hit.file, name: hit.what });
-  for (const hit of agent) add({ kind: hit.kind, file: hit.file, name: hit.name });
+    add({ kind: hit.kind, file: hit.file, name: hit.what }, () =>
+      configEvidence(root, hit.file, budget),
+    );
+  for (const hit of agent)
+    add({ kind: hit.kind, file: hit.file, name: hit.name }, () => {
+      const bases = [root, dirname(join(root, hit.file))];
+      return [hit.value, hit.runs ?? '']
+        .flatMap((command) => [command, ...commandEvidence(command, root, bases, budget)])
+        .join('\u0001');
+    });
   if (items.length === 0) return null;
-  return { dir, items: items.slice(0, MAX_ITEMS), more: Math.max(0, items.length - MAX_ITEMS) };
+  return {
+    dir,
+    items: items.slice(0, MAX_ITEMS),
+    more: Math.max(0, items.length - MAX_ITEMS),
+    evidence: createHash('sha256').update(JSON.stringify(runs)).digest('hex'),
+  };
 }
 
 export interface AutorunResult {
