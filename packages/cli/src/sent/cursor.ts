@@ -540,6 +540,7 @@ export async function readStoreWindow(
       });
     }
     const chosen = [...seen].filter(([, s]) => s.unsure || s.latest >= cutoff);
+    if (Date.now() >= budget.stopAt) return null;
     if (chosen.length === 0) return { rows: [], sessions: seen.size };
 
     const rows: CursorRow[] = [];

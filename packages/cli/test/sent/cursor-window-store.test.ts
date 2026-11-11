@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { DatabaseSync } from 'node:sqlite';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { listCursorWindow } from '../../src/card/cursor-window.js';
 import { readStoreRows, readStoreWindow } from '../../src/sent/cursor.js';
@@ -77,6 +78,52 @@ afterAll(() => {
   if (dir !== '') rmSync(dir, { recursive: true, force: true });
 });
 
+/** A throwaway store of its own for one test: `fill` writes it, and it is removed after `use`. */
+async function withOwnStore(
+  fill: (handle: DatabaseSync) => void,
+  use: (path: string) => Promise<void>,
+): Promise<void> {
+  const own = mkdtempSync(join(tmpdir(), 'stroq-cursor-window-'));
+  const path = join(own, 'state.vscdb');
+  try {
+    const handle = new sqlite!.DatabaseSync(path);
+    try {
+      handle.exec('create table cursorDiskKV (key text primary key, value text)');
+      fill(handle);
+    } finally {
+      handle.close();
+    }
+    await use(path);
+  } finally {
+    rmSync(own, { recursive: true, force: true });
+  }
+}
+
+const put = (handle: DatabaseSync, key: string, value: string): void => {
+  handle.prepare('insert into cursorDiskKV values (?, ?)').run(key, value);
+};
+
+/**
+ * With a clock that moves one step at each look, a read under every deadline it could meet
+ * returns null, and stops at the first look past it. Returns how many looks a whole read takes.
+ */
+async function refusedAtEveryDeadline(path: string, cutoff: number): Promise<number> {
+  let tick = 0;
+  const clock = vi.spyOn(Date, 'now').mockImplementation(() => tick++);
+  try {
+    expect(await readStoreWindow(path, cutoff, NO_LIMIT)).not.toBeNull();
+    const looks = tick;
+    for (let stopAt = 0; stopAt < looks; stopAt += 1) {
+      tick = 0;
+      expect(await readStoreWindow(path, cutoff, { ...NO_LIMIT, stopAt })).toBeNull();
+      expect(tick).toBe(stopAt + 1);
+    }
+    return looks;
+  } finally {
+    clock.mockRestore();
+  }
+}
+
 withStore('reading only the window of a Cursor store', () => {
   it('returns every row of the sessions that may be in the window, as a read of every row has them', async () => {
     const read = await readStoreWindow(db, CUTOFF, NO_LIMIT);
@@ -108,20 +155,39 @@ withStore('reading only the window of a Cursor store', () => {
   });
 
   it('refuses a store with a row too large to judge, even in an old session', async () => {
-    const dir2 = mkdtempSync(join(tmpdir(), 'stroq-cursor-window-'));
-    const db2 = join(dir2, 'state.vscdb');
-    try {
-      const handle = new sqlite!.DatabaseSync(db2);
-      handle.exec('create table cursorDiskKV (key text primary key, value text)');
-      const put = handle.prepare('insert into cursorDiskKV values (?, ?)');
-      put.run('bubbleId:recent:1', bubble(NEW));
-      put.run('bubbleId:old:1', bubble(OLD, 'x'.repeat(10_000)));
-      handle.close();
-      expect((await readStoreWindow(db2, CUTOFF, NO_LIMIT))?.rows).toHaveLength(1);
-      expect(await readStoreWindow(db2, CUTOFF, { ...NO_LIMIT, maxBytes: 5_000 })).toBeNull();
-    } finally {
-      rmSync(dir2, { recursive: true, force: true });
-    }
+    await withOwnStore(
+      (handle) => {
+        put(handle, 'bubbleId:recent:1', bubble(NEW));
+        put(handle, 'bubbleId:old:1', bubble(OLD, 'x'.repeat(10_000)));
+      },
+      async (path) => {
+        expect((await readStoreWindow(path, CUTOFF, NO_LIMIT))?.rows).toHaveLength(1);
+        expect(await readStoreWindow(path, CUTOFF, { ...NO_LIMIT, maxBytes: 5_000 })).toBeNull();
+      },
+    );
+  });
+
+  it('reads a session whose newest bubble is exactly at the cutoff, as the card shows it', async () => {
+    const atCutoff = Date.parse(NEW);
+    const read = await readStoreWindow(db, atCutoff, NO_LIMIT);
+    expect(new Set(read?.rows.map((row) => sessionOf(row.key)))).toEqual(new Set(HANDED_TO_PARSE));
+    const listed = await listCursorWindow(db, atCutoff, Infinity);
+    expect(listed.sessions.map((s) => s.path.split('#')[1]).sort()).toEqual([...IN_WINDOW].sort());
+  });
+
+  it('reads no rows, and says nothing, when every session is old', async () => {
+    await withOwnStore(
+      (handle) => {
+        put(handle, 'bubbleId:first:1', bubble(OLD));
+        put(handle, 'bubbleId:first:2', bubble(null));
+        put(handle, 'bubbleId:second:1', bubble(OLD));
+        handle.prepare('insert into cursorDiskKV values (?, ?)').run('bubbleId:third:1', null);
+      },
+      async (path) => {
+        expect(await readStoreWindow(path, CUTOFF, NO_LIMIT)).toEqual({ rows: [], sessions: 2 });
+        expect(await listCursorWindow(path, CUTOFF, Infinity)).toEqual({ sessions: [], older: 2 });
+      },
+    );
   });
 
   it('reads only the rows it could not judge when no date is in the window', async () => {
@@ -136,21 +202,22 @@ withStore('reading only the window of a Cursor store', () => {
   });
 
   it('stops at the first look at the clock past the deadline, and looks at it on every row', async () => {
-    let tick = 0;
-    const clock = vi.spyOn(Date, 'now').mockImplementation(() => tick++);
-    try {
-      expect(await readStoreWindow(db, CUTOFF, NO_LIMIT)).not.toBeNull();
-      const looks = tick;
-      // Every bubble row of the first pass, and every row of the second.
-      expect(looks).toBeGreaterThanOrEqual(ROWS.length - 1 + WINDOW_ROWS);
-      for (let stopAt = 0; stopAt < looks; stopAt += 1) {
-        tick = 0;
-        expect(await readStoreWindow(db, CUTOFF, { ...NO_LIMIT, stopAt })).toBeNull();
-        expect(tick).toBe(stopAt + 1);
-      }
-    } finally {
-      clock.mockRestore();
-    }
+    const looks = await refusedAtEveryDeadline(db, CUTOFF);
+    // Every bubble row of the first pass, and every row of the second.
+    expect(looks).toBeGreaterThanOrEqual(ROWS.length - 1 + WINDOW_ROWS);
+  });
+
+  it('does not return an empty window once the deadline has passed', async () => {
+    await withOwnStore(
+      (handle) => {
+        put(handle, 'bubbleId:first:1', bubble(OLD));
+        put(handle, 'bubbleId:second:1', bubble(OLD));
+      },
+      async (path) => {
+        // The start, the two rows, and once more after the first pass.
+        expect(await refusedAtEveryDeadline(path, CUTOFF)).toBe(4);
+      },
+    );
   });
 
   it('says the store was not read in full when the deadline has passed', async () => {
@@ -159,21 +226,41 @@ withStore('reading only the window of a Cursor store', () => {
     expect(listed.note).toContain('could not be read in full');
   });
 
-  it('returns nothing when the second pass does not find the rows the first one counted', async () => {
-    // A key that is not UTF-8 reads back as U+FFFD, and so names no row on the second pass.
-    const dir2 = mkdtempSync(join(tmpdir(), 'stroq-cursor-window-'));
-    const db2 = join(dir2, 'state.vscdb');
-    try {
-      const handle = new sqlite!.DatabaseSync(db2);
-      handle.exec('create table cursorDiskKV (key text primary key, value text)');
-      const put = handle.prepare(
-        "insert into cursorDiskKV values (cast(? as text) || cast(x'ff' as text) || ':1', ?)",
-      );
-      put.run('bubbleId:bad', bubble(NEW));
-      handle.close();
-      expect(await readStoreWindow(db2, CUTOFF, NO_LIMIT)).toBeNull();
-    } finally {
-      rmSync(dir2, { recursive: true, force: true });
-    }
+  /** Writes `<prefix>` + a byte that is not UTF-8 + `<suffix>`: it reads back as U+FFFD. */
+  const putNotUtf8 = (
+    handle: DatabaseSync,
+    prefix: string,
+    suffix: string,
+    value: string,
+  ): void => {
+    handle
+      .prepare("insert into cursorDiskKV values (cast(? as text) || cast(x'ff' as text) || ?, ?)")
+      .run(prefix, suffix, value);
+  };
+
+  it('returns nothing when the second pass finds no row of a session the first one counted', async () => {
+    // The session reads back as `bad` + U+FFFD, and that text names no row on the second pass.
+    await withOwnStore(
+      (handle) => putNotUtf8(handle, 'bubbleId:bad', ':1', bubble(NEW)),
+      async (path) => expect(await readStoreWindow(path, CUTOFF, NO_LIMIT)).toBeNull(),
+    );
+  });
+
+  it('returns nothing when the second pass finds fewer rows of a session than the first counted', async () => {
+    // Two keys the first pass reads as one session, `a` + U+FFFD: one written as UTF-8, one with a
+    // byte that is not. The second pass finds only the first, as if a row had gone between the two.
+    // (A row written by another connection between the passes cannot stand in: the handle is
+    // immutable, keeps its pages, and sees the store as the first pass did.)
+    await withOwnStore(
+      (handle) => {
+        put(handle, 'bubbleId:a\uFFFD:1', bubble(NEW));
+        putNotUtf8(handle, 'bubbleId:a', ':2', bubble(NEW));
+      },
+      async (path) => expect(await readStoreWindow(path, CUTOFF, NO_LIMIT)).toBeNull(),
+    );
+    await withOwnStore(
+      (handle) => put(handle, 'bubbleId:a\uFFFD:1', bubble(NEW)),
+      async (path) => expect((await readStoreWindow(path, CUTOFF, NO_LIMIT))?.rows).toHaveLength(1),
+    );
   });
 });
