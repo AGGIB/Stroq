@@ -24,8 +24,12 @@ export interface CardPresentation {
   readonly shown: number;
 }
 
-/** A moment as `stroq show` prints it: every word made safe once more, since the file is data. */
-function safeMoment(moment: Moment): Moment {
+/**
+ * A moment as `stroq show` prints it: every word made safe once more, since the file is data. Its key
+ * (the digest a false-alarm mark is kept under) stays behind: the screen marks nothing, and the page
+ * takes a moment with exactly the fields it shows.
+ */
+function safeMoment({ key: _key, ...moment }: Moment): Moment {
   return {
     ...moment,
     line: clean(moment.line, 600),

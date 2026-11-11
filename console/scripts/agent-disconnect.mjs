@@ -9,6 +9,7 @@ import { runtimeDigest } from './agent-setup-cli.mjs';
 import { targetFor } from './agent-setup-plan.mjs';
 import { withAgentConfigurationLock } from './agent-configuration-lock.mjs';
 import { runtimeLayout } from './runtime-layout.mjs';
+import { hookLine } from './hook-line.mjs';
 
 const AGENTS = ['claude-code', 'cursor', 'codex'];
 const TTL = 300_000,
@@ -465,7 +466,7 @@ export async function createAgentDisconnect(configuration = {}) {
         const { adapter, schema } = await modules(runtime);
         const root = roots[input.scope];
         const source = await capture(root, join(root.path, targetFor(input.agent, input.scope)));
-        const command = `"${process.execPath}" "${paths.cli}" hook ${input.agent}`;
+        const command = hookLine(process.execPath, paths.cli, input.agent);
         const prepared = adapter.prepareAgentDisconnect(decode(source.bytes), input.agent, command);
         const candidate =
           prepared.candidateText === null ? null : Buffer.from(prepared.candidateText, 'utf8');

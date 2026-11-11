@@ -3,6 +3,7 @@
  * what it enforces, and which of them start another program. Tables only, so that the file
  * that reads a command line is the logic and not the lists it reads by.
  */
+import { REDIRECT } from './shell-word-reader.js';
 
 // -------------------------------------------------------------------------------------------
 // Which words run Stroq
@@ -129,6 +130,25 @@ const isOnlineFlag = (word: string): boolean => word === '--online' || word.star
  */
 const isProbeFlag = (word: string): boolean => word === '--probe' || word.startsWith('--probe=');
 
+/**
+ * Whether the words after `show` are one of its readings, `<n>` and `--false-alarms`, with any
+ * redirect of its output (`2>&1`, `> notes.txt`): an operator alone takes the word after it, its target.
+ * A quoted `">"` is taken for one as well; then the CLI is given it as a word, which neither reading
+ * takes, and it refuses the command.
+ */
+function showReads(after: readonly string[]): boolean {
+  const own: string[] = [];
+  for (let i = 0; i < after.length; i += 1) {
+    const word = after[i] as string;
+    const redirect = REDIRECT.exec(word);
+    if (redirect === null) own.push(word);
+    else if (redirect[0].length === word.length) i += 1;
+  }
+  // No word at all only prints how the command is used.
+  if (own.length === 0) return true;
+  return own.length === 1 && (/^\d{1,2}$/.test(own[0] as string) || own[0] === '--false-alarms');
+}
+
 /** Whether the subcommand `sub`, with the words of the command (`args`, `sub` among them), changes state. */
 export function subcommandChangesState(sub: string, args: readonly string[]): boolean {
   if (STATE_COMMANDS.has(sub)) return true;
@@ -142,6 +162,11 @@ export function subcommandChangesState(sub: string, args: readonly string[]): bo
   }
   if (sub === 'vet') return args.some(isOnlineFlag);
   if (sub === 'exposure') return args.some(isProbeFlag);
+  // `show <n>` and `show --false-alarms` read. `--false-alarm` marks a moment so that the card stops
+  // listing it, and `--clear` takes the marks back: hiding a moment is the person's call. Only those two
+  // readings are open, word for word, so that no spelling of a flag (`${X:---false-alarm}`, `$X--clear`)
+  // passes as one of them.
+  if (sub === 'show') return !showReads(after);
   if (sub !== 'trust') return false;
   return (
     after.includes('--remove') ||
