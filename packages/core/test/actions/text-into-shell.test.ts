@@ -64,10 +64,24 @@ describe('reading text fed to a shell stays linear on a command built to be slow
    * and coverage, or a machine that is swapping, doubles and triples that.
    */
   const BOUND_MS = 5000;
-  const timed = (command: string): number => {
+  /**
+   * How often a reading that looks too slow is timed, the first time included. Noise only adds to a
+   * time: on a shared Linux runner with coverage the linear reading of `echo x | bash; ` repeated took
+   * 5.08 s once against this bound, and passed in the same job on runs before, while a quadratic reader
+   * is slow every time. So a time at or over the bound is taken again, twice, and the least is kept,
+   * as the classifier's own gate does (`classify-redos-gate.test.ts`).
+   */
+  const TRIES = 3;
+  const timedOnce = (command: string): number => {
     const started = cpuNow();
     classes(command);
     return cpuNow() - started;
+  };
+  const timed = (command: string): number => {
+    let least = timedOnce(command);
+    for (let tries = 1; tries < TRIES && least >= BOUND_MS; tries += 1)
+      least = Math.min(least, timedOnce(command));
+    return least;
   };
   it.each<[string, string]>([
     ['many pipes into a shell', 'echo x | bash; '.repeat(Math.ceil(SIZE / 15))],

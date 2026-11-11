@@ -13,7 +13,8 @@ import { availableParallelism } from 'node:os';
 import { loadPolicyWithSource } from '../engine-factory.js';
 import { CARD_SCHEMA, KEPT, type CardCounts, type CardData } from './data.js';
 import type { CardJob, CardResult } from './jobs.js';
-import { buildMoments, type ToldInput } from './moments.js';
+import { falseAlarmKeys } from './false-alarms.js';
+import { keptMoments, type ToldInput } from './moments.js';
 import { runPool, type Channel } from './pool.js';
 import type { AutorunResult } from './autorun.js';
 import { startKeys, type KeyOutcome } from './keys-run.js';
@@ -322,13 +323,13 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
   });
   const findings = got.keys.findings;
   const cursorCount = sessions.filter((s) => s.agent === 'cursor').length;
-  // The moments are made from what each session did; the counts are of keys.
-  const moments = buildMoments({
-    told,
-    findings: got.keys.bySession,
-    repos: got.folders.repos,
-    home: run.home,
-  });
+  // The moments are made from what each session did; the counts are of keys. A moment the person
+  // marked as a false alarm is left out of the list, and only of the list.
+  const marks = falseAlarmKeys(run.stroqHome);
+  const { moments, leftOut } = keptMoments(
+    { told, findings: got.keys.bySession, repos: got.folders.repos, home: run.home },
+    marks.keys,
+  );
   const counts: CardCounts = {
     commands: inside.reduce((sum, s) => sum + s.commands, 0),
     toldByText: inside.reduce((sum, s) => sum + s.told, 0),
@@ -377,6 +378,7 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
       },
       looked: ctx.listing.looked,
       ...(ctx.listing.cursorNote === undefined ? {} : { cursorNote: ctx.listing.cursorNote }),
+      falseAlarms: { leftOut, unreadable: marks.unreadable },
       cacheSaved: got.cacheSaved,
     },
     timing: {
