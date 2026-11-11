@@ -17,6 +17,8 @@ export const WIDTH = 55;
 export const INIT_COMMAND = 'npx @stroq/cli init';
 export const ATTACK_COMMAND = 'npx @stroq/cli attack';
 export const SHARE_TAIL = 'npx @stroq/cli';
+/** Lists the marks, and says how to take them back. */
+export const FALSE_ALARMS_COMMAND = 'stroq show --false-alarms';
 
 const days = (n: number): string => plural(n, 'day', 'days');
 
@@ -126,6 +128,16 @@ function notes(data: CardData): string[] {
     out.push(
       `Looked at ${num(k.folders.checked)} of ${num(k.folders.found)} folders for code that runs on open.`,
     );
+  if (k.falseAlarms.leftOut > 0)
+    out.push(
+      k.falseAlarms.leftOut === 1
+        ? `1 moment you marked as a false alarm is not listed: ${FALSE_ALARMS_COMMAND}.`
+        : `${num(k.falseAlarms.leftOut)} moments you marked as false alarms are not listed: ${FALSE_ALARMS_COMMAND}.`,
+    );
+  if (k.falseAlarms.unreadable)
+    out.push(
+      `Your false alarm marks could not be read, so every moment is listed: ${FALSE_ALARMS_COMMAND}.`,
+    );
   return out;
 }
 
@@ -170,9 +182,11 @@ export function cardView(data: CardData, home: string): CardView {
     notes: notes(data),
     nothing: found
       ? null
-      : data.coverage.notChecked > 0
-        ? 'Nothing worth a look in the sessions checked so far.'
-        : 'Nothing worth a look in these sessions.',
+      : data.coverage.falseAlarms.leftOut > 0
+        ? 'Nothing worth a look that you have not marked as a false alarm.'
+        : data.coverage.notChecked > 0
+          ? 'Nothing worth a look in the sessions checked so far.'
+          : 'Nothing worth a look in these sessions.',
     moments: data.moments.slice(0, SHOWN).map((m) => ({ n: m.n, line: m.line })),
     next: found
       ? { label: 'Stop this next time:', command: INIT_COMMAND }

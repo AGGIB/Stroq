@@ -21,6 +21,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { build } from 'tsup';
 import { createAgentDisconnect } from './agent-disconnect.mjs';
 import { ENGINE_PATHS } from './control-engine.mjs';
+import { hookLine } from './hook-line.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const output = await mkdtemp(join(tmpdir(), 'stroq-disconnect-test-'));
@@ -81,10 +82,7 @@ async function fixture(t, extra = {}) {
   t.after(() => service.close());
   async function installed(agent = 'claude-code', scope = 'project', overrides = {}) {
     const config = {
-      ...adapter.expectedConfiguration(
-        agent,
-        `"${process.execPath}" "${ENGINE_PATHS.cli}" hook ${agent}`,
-      ),
+      ...adapter.expectedConfiguration(agent, hookLine(process.execPath, ENGINE_PATHS.cli, agent)),
       env: { PRIVATE_TOKEN: 'PRIVATE_SENTINEL' },
       ...overrides,
     };

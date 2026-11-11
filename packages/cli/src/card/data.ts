@@ -72,6 +72,13 @@ export interface CardCoverage {
   readonly looked: readonly string[];
   /** A Cursor store that was unreadable, cut short, or has uncommitted changes. */
   readonly cursorNote?: string;
+  /** Moments the person marked as false alarms (`stroq show <n> --false-alarm`). */
+  readonly falseAlarms: {
+    /** Left out of `moments`. The counts still hold them: they are what the rules found. */
+    readonly leftOut: number;
+    /** The marks could not be read, so none was applied. */
+    readonly unreadable: boolean;
+  };
   /** Whether the cache could be saved. */
   readonly cacheSaved: boolean;
 }

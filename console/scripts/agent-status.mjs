@@ -7,6 +7,7 @@ import { rootIdentity, snapshotFile } from './agent-setup-files.mjs';
 import { AGENTS, parseObject, plain, targetFor } from './agent-setup-plan.mjs';
 import { inspectConfiguration, validConfiguration } from './agent-status-config.mjs';
 import { runtimeLayout } from './runtime-layout.mjs';
+import { hookLine } from './hook-line.mjs';
 
 const ADAPTER = runtimeLayout().adapter('agent-status-engine.js');
 const ISO = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
@@ -180,7 +181,7 @@ export async function createAgentStatus(configuration = {}) {
     }
     const agents = await Promise.all(
       AGENTS.map(async (agent) => {
-        const command = `"${process.execPath}" "${paths.cli}" hook ${agent}`;
+        const command = hookLine(process.execPath, paths.cli, agent);
         const expected = adapter.expectedConfiguration(agent, command);
         const scopes = await Promise.all(
           ['project', 'user'].map((scope) =>

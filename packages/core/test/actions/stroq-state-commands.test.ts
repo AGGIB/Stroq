@@ -62,6 +62,19 @@ const CHANGING: ReadonlyArray<readonly string[]> = [
   ['canary', '--name', 'STROQ_CANARY_KEY'],
   ['canary', '--file', '~/.zprofile', '--name', 'x'],
   ['canary', '--file=/tmp/decoy'],
+  // A mark hides a moment from the card, so an agent marking its own would hide what it did.
+  ['show', '--false-alarm', '1a2b3c4d5e6f'],
+  ['show', '2', '--false-alarm'],
+  ['show', '--false-alarms', '--clear'],
+  ['show', '--clear'],
+  ['show', '--false-alarm=1a2b3c4d5e6f'],
+  // Only the readings are open, word for word: a word the CLI does not know counts here, and so does
+  // any expansion that could make one of the flags (`${X:---false-alarm}`).
+  ['show', '2', '--false'],
+  ['show', '1', '${NOPE:---false-alarm}'],
+  ['show', '$NOPE--false-alarm', '1a2b3c4d5e6f'],
+  ['show', '--false-alarms', '${X:---clear}'],
+  ['show', '1', '2'],
 ];
 
 /** What follows `stroq` in a call that only reads, or only asks how it works. */
@@ -98,6 +111,16 @@ const READING: ReadonlyArray<readonly string[]> = [
   ['exposure', '--probe', '--help'],
   ['canary', '--help'],
   ['canary', '-h'],
+  ['show', '1'],
+  ['show', '12'],
+  ['show'],
+  ['show', '--false-alarms'],
+  ['show', '--false-alarm', '1a2b3c4d5e6f', '--help'],
+  // The output of a reading may go anywhere: a redirect is the shell's, and its target is a file.
+  ['show', '1', '2>&1'],
+  ['show', '1', '>', 'notes.txt'],
+  ['show', '--false-alarms', '2>/dev/null'],
+  ['show', '1', '>', '--false-alarm'],
 ];
 
 describe('the matrix of spellings', () => {
@@ -196,6 +219,8 @@ describe('what the classifier does with them', () => {
     ['PowerShell', 'stroq.exe exposure --json --probe'],
     ['Bash', 'stroq canary --file ~/.zprofile --name x'],
     ['Monitor', 'stroq canary'],
+    ['Bash', 'stroq show --false-alarm 1a2b3c4d5e6f'],
+    ['PowerShell', 'stroq.exe show --false-alarms --clear'],
   ])('%s: %s is config.self', (tool, command) => {
     expect(classifyTool(tool, { command }, '/work').classes).toContain('config.self');
   });
@@ -208,6 +233,8 @@ describe('what the classifier does with them', () => {
     ['Bash', 'stroq exposure --json'],
     ['PowerShell', 'stroq.exe exposure'],
     ['Bash', 'stroq canary --help'],
+    ['Bash', 'stroq show 3 2>&1'],
+    ['Bash', 'npx @stroq/cli show --false-alarms'],
   ])('%s: %s is not', (tool, command) => {
     expect(classifyTool(tool, { command }, '/work').classes).not.toContain('config.self');
   });

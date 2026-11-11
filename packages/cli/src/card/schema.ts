@@ -132,6 +132,14 @@ export const momentSchema = z
     groups: z.array(groupSchema).max(8),
     /** Commands to dig deeper, ready to paste. */
     next: z.array(text).max(4),
+    /**
+     * The digest a false-alarm mark is kept under (`false-alarms.ts`). A card an older version kept
+     * has none, and its moments cannot be marked until the card is made again.
+     */
+    key: z
+      .string()
+      .regex(/^[0-9a-f]{64}$/)
+      .optional(),
   })
   .strict();
 export type Moment = z.infer<typeof momentSchema>;
