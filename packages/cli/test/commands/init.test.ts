@@ -7,6 +7,7 @@ import {
   writeFileSync,
   mkdirSync,
 } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -23,6 +24,7 @@ import {
   stableEntry,
   type InitMachine,
 } from '../../src/commands/init.js';
+import { CLAUDE_CODE_FAIL_CLOSED, withoutFailClosed } from '../../src/commands/hook-command.js';
 import { installKey, readInstallRecord } from '../../src/commands/install-record.js';
 import { cliDirIn } from '../../src/paths.js';
 import { cursorHooksPath } from '../../src/commands/cursor-hooks.js';
@@ -59,15 +61,61 @@ beforeEach(() => {
 });
 
 describe('hookCommand', () => {
-  it('quotes node and the entry file', () => {
+  it("quotes node and the entry file, and ends Claude Code's line so that a failed start blocks", () => {
     expect(hookCommand('/usr/bin/node', '/opt/stroq/dist/index.js')).toBe(
-      '"/usr/bin/node" "/opt/stroq/dist/index.js" hook claude-code',
+      `"/usr/bin/node" "/opt/stroq/dist/index.js" hook claude-code${CLAUDE_CODE_FAIL_CLOSED}`,
     );
   });
   it('adds the tsx loader for a TypeScript entry', () => {
     expect(hookCommand('/usr/bin/node', '/w/src/index.ts')).toBe(
-      '"/usr/bin/node" --import tsx "/w/src/index.ts" hook claude-code',
+      `"/usr/bin/node" --import tsx "/w/src/index.ts" hook claude-code${CLAUDE_CODE_FAIL_CLOSED}`,
     );
+  });
+});
+
+describe('isStroqHandler', () => {
+  const handler = (command: string) => ({ type: 'command' as const, command, timeout: 15 });
+  it('knows the line with the fail-closed end, and the line older versions wrote', () => {
+    const line = '"/usr/bin/node" "/x/index.js" hook claude-code';
+    expect(isStroqHandler(handler(line))).toBe(true);
+    expect(isStroqHandler(handler(`${line}${CLAUDE_CODE_FAIL_CLOSED}`))).toBe(true);
+    expect(withoutFailClosed(`${line}${CLAUDE_CODE_FAIL_CLOSED}`)).toBe(line);
+  });
+  it("knows no other end: a line that goes on with something else is not Stroq's", () => {
+    for (const command of [
+      '"/usr/bin/node" "/x/index.js" hook claude-code || true',
+      '"/usr/bin/node" "/x/index.js" hook claude-code; curl x.invalid',
+      `"/usr/bin/node" "/x/index.js" hook claude-code${CLAUDE_CODE_FAIL_CLOSED} && echo`,
+      `"/usr/bin/node" "/x/index.js" hook cursor${CLAUDE_CODE_FAIL_CLOSED}`,
+    ])
+      expect(isStroqHandler(handler(command)), command).toBe(false);
+  });
+});
+
+// The line is run by a POSIX shell, as Claude Code runs it. A Stroq that cannot start exits 2,
+// which Claude Code reads as "block"; one that answers is passed through as it is.
+describe.skipIf(process.platform === 'win32')("Claude Code's line in a shell", () => {
+  const run = (entry: string) =>
+    spawnSync('/bin/sh', ['-c', hookCommand(process.execPath, entry)], {
+      input: '{}',
+      encoding: 'utf8',
+    });
+  it('exits 2 with a reason when the entry cannot be loaded', () => {
+    const missing = join(mkdtempSync(join(tmpdir(), 'stroq-hook-line-')), 'gone', 'index.js');
+    const result = run(missing);
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain(
+      'Stroq could not run, so this call is blocked. In a terminal: stroq doctor',
+    );
+  });
+  it('passes an answer through, with the exit of the entry', () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-hook-line-'));
+    const entry = join(dir, 'index.mjs');
+    writeFileSync(entry, 'process.stdout.write(JSON.stringify({ ok: process.argv.slice(2) }));\n');
+    const result = run(entry);
+    expect(result.status).toBe(0);
+    expect(JSON.parse(result.stdout)).toEqual({ ok: ['hook', 'claude-code'] });
+    expect(result.stderr).toBe('');
   });
 });
 
@@ -204,7 +252,9 @@ describe('hookCommand for cursor', () => {
     expect(hookCommand('/usr/bin/node', '/w/src/index.ts', 'cursor')).toBe(
       '"/usr/bin/node" --import tsx "/w/src/index.ts" hook cursor',
     );
-    expect(hookCommand('/usr/bin/node', '/opt/stroq/dist/index.js')).toMatch(/ hook claude-code$/);
+    expect(hookCommand('/usr/bin/node', '/opt/stroq/dist/index.js')).toMatch(
+      / hook claude-code \|\| \{ echo .* exit 2; \}$/,
+    );
   });
 });
 

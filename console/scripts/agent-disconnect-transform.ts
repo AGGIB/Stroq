@@ -4,6 +4,7 @@ import {
   parseJsonDocument,
   serializeJson,
 } from '../../packages/cli/src/harden/json-doc.js';
+import { withoutFailClosed } from '../../packages/cli/src/commands/hook-command.js';
 import type { JsonObject, JsonValue } from '../../packages/cli/src/harden/types.js';
 
 const MAX_BYTES = 1024 * 1024;
@@ -108,7 +109,7 @@ export function transformAgentDisconnect(text: string | null, agent: string, exp
     if (!isObject(value)) return;
     if (typeof value.command === 'string') {
       preservedHooks += 1;
-      if (lookalike.test(value.command)) remainingLookalikes += 1;
+      if (lookalike.test(withoutFailClosed(value.command))) remainingLookalikes += 1;
     }
     if (Array.isArray(value.hooks)) count(value.hooks, depth + 1);
   }

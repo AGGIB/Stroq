@@ -100,7 +100,7 @@ describe('runInteractiveInit, answered yes with --yes', () => {
     expect(existsSync(file)).toBe(true);
     const commands = hookCommandsIn(file, 'PreToolUse');
     expect(commands).toHaveLength(1);
-    expect(commands[0]).toMatch(/ hook claude-code$/);
+    expect(commands[0]).toMatch(/ hook claude-code \|\| \{ echo .* exit 2; \}$/);
     expect(fake.out()).toContain('Claude Code');
     expect(fake.out()).toContain('Guard Claude Code in this project? yes (--yes)');
     expect(fake.out()).toContain('Done. Stroq is guarding Claude Code');

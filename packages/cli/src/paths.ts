@@ -127,5 +127,8 @@ export const liveResultFile = (agent: string): string => liveResultFileIn(stroqH
 export const cardDirIn = (home: string): string => join(home, 'card');
 export const cardSessionsFileIn = (home: string): string => join(cardDirIn(home), 'sessions.json');
 export const cardLastFileIn = (home: string): string => join(cardDirIn(home), 'last.json');
+/** The moments a person said were false alarms (`stroq show <n> --false-alarm`), by a digest of each. */
+export const cardFalseAlarmsFileIn = (home: string): string =>
+  join(cardDirIn(home), 'false-alarms.json');
 /** What the key check found per transcript, under a digest of the keys it looked for. Names and counts, no values. */
 export const cardKeysFileIn = (home: string): string => join(cardDirIn(home), 'keys.json');

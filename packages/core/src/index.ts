@@ -25,6 +25,8 @@ export * from './actions/shell-tools.js';
 // a key by the same stages and words the hook judges.
 export { lex, type Lexed, type Stage as LexedStage } from './actions/shell-lex.js';
 export { REDIRECT, resolve, type Resolved, type Word } from './actions/shell-words.js';
+/** The words of one stage of a command, as the shell reads them; the card reads a folder's hook commands with it. */
+export { argv } from './actions/shell-word-reader.js';
 export * from './taint/trust.js';
 export * from './taint/guarded-clear.js';
 export * from './policy/policy-types.js';
