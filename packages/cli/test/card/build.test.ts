@@ -230,12 +230,40 @@ describe('the card when the time runs out', () => {
     };
   }
 
+  async function buildWithStalledWorker(): Promise<CardData> {
+    const budgetMs = 1_000;
+    const graceMs = 100;
+    const replaysToFinish = 2;
+    let finishReplays = (): void => undefined;
+    const replaysFinished = new Promise<void>((resolve) => {
+      finishReplays = resolve;
+    });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      const card = buildCard(
+        30,
+        env({
+          budgetMs,
+          graceMs,
+          workers: 1,
+          open: stalling(replaysToFinish),
+          progress: (checked) => {
+            if (checked === replaysToFinish) finishReplays();
+          },
+        }),
+      );
+      // Give the real replays time to finish before expiring the worker pool's timers.
+      await Promise.race([replaysFinished, card]);
+      await vi.advanceTimersByTimeAsync(budgetMs + graceMs);
+      return await card;
+    } finally {
+      vi.useRealTimers();
+    }
+  }
+
   it('says how many sessions were checked and counts only those', async () => {
     populate(m);
-    const data = await buildCard(
-      30,
-      env({ budgetMs: 1_000, graceMs: 100, workers: 1, open: stalling(2) }),
-    );
+    const data = await buildWithStalledWorker();
     expect(data.coverage.found).toBe(4);
     expect(data.coverage.checked).toBe(2);
     expect(data.coverage.notChecked).toBe(2);
@@ -244,7 +272,7 @@ describe('the card when the time runs out', () => {
 
   it('continues from the cache on the next run', async () => {
     populate(m);
-    await buildCard(30, env({ budgetMs: 1_000, graceMs: 100, workers: 1, open: stalling(2) }));
+    await buildWithStalledWorker();
     const next = await buildCard(30, env());
     expect(next.coverage.notChecked).toBe(0);
     expect(next.coverage.fromCache).toBe(2);
