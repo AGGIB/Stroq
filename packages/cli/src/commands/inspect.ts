@@ -1,4 +1,4 @@
-import { existsSync, realpathSync } from 'node:fs';
+import { realpathSync, statSync } from 'node:fs';
 import { resolve, sep } from 'node:path';
 import { parseArgs } from 'node:util';
 import {
@@ -472,14 +472,16 @@ export function runInspect(argv: readonly string[]): number {
     process.stdout.write(hardeningExports());
     return EXIT.pass;
   }
-  if (!existsSync(args.dir)) {
-    process.stderr.write(`stroq inspect: no such directory: ${args.dir}\n`);
-    return EXIT.usage;
-  }
   // Only what runs by itself fails the command, never the on-open list: a check that fails
   // on every repository with a pre-commit hook is one people stop running — which would
   // cost exactly the repositories this exists to catch.
   try {
+    const target = statSync(args.dir, { throwIfNoEntry: false });
+    if (!target?.isDirectory()) {
+      const problem = target === undefined ? 'no such directory' : 'not a directory';
+      process.stderr.write(`stroq inspect: ${problem}: ${args.dir}\n`);
+      return EXIT.usage;
+    }
     return args.changedFrom === undefined
       ? inspectCheckout(args.dir, args.format, args.failOn)
       : inspectChange(args.dir, args.format, args.failOn, args.changedFrom);

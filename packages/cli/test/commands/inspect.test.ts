@@ -1,4 +1,4 @@
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import {
   chmodSync,
   existsSync,
@@ -20,6 +20,7 @@ import {
   runInspect,
 } from '../../src/commands/inspect.js';
 import { repoSurface } from '../../src/exposure/repo-surface.js';
+import { CLI_ENTRY } from '../helpers/cli-entry.js';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -104,6 +105,22 @@ describe('stroq inspect', () => {
     out.restore();
     expect(code).toBe(2);
     expect(out.lines.join('')).toContain('no such directory');
+  });
+
+  it.each([
+    { mode: 'checkout', args: [] },
+    { mode: 'change', args: ['--changed-from', 'HEAD'] },
+  ])('rejects a file as the inspection directory in $mode mode', ({ args }) => {
+    const dir = mkdtempSync(join(tmpdir(), 'stroq-inspect-file-'));
+    dirs.push(dir);
+    const file = join(dir, 'README.md');
+    writeFileSync(file, '# A file\n');
+    const out = spawnSync(process.execPath, [CLI_ENTRY, 'inspect', '--json', ...args, file], {
+      encoding: 'utf8',
+    });
+    expect(out.status).toBe(2);
+    expect(out.stdout).toBe('');
+    expect(out.stderr).toContain(`not a directory: ${file}`);
   });
 
   it('emits a machine-readable record with --json', () => {
