@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type { DatabaseSync } from 'node:sqlite';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { listCursorWindow } from '../../src/card/cursor-window.js';
-import { readStoreRows, readStoreWindow } from '../../src/sent/cursor.js';
+import { readStoreWindow, storeRows } from '../../src/sent/cursor.js';
 
 /**
  * The card's read of a Cursor store (#311): only the sessions with a bubble in the window count
@@ -127,7 +127,7 @@ async function refusedAtEveryDeadline(path: string, cutoff: number): Promise<num
 withStore('reading only the window of a Cursor store', () => {
   it('returns every row of the sessions that may be in the window, as a read of every row has them', async () => {
     const read = await readStoreWindow(db, CUTOFF, NO_LIMIT);
-    const every = (await readStoreRows(db, null)) ?? [];
+    const every = await storeRows(db, null);
     const wanted = new Set(HANDED_TO_PARSE);
     expect(read?.rows).toEqual(every.filter((row) => wanted.has(sessionOf(row.key))));
     expect(new Set(read?.rows.map((row) => sessionOf(row.key)))).toEqual(wanted);
