@@ -4,4 +4,11 @@
  * and not copied, so that recalibrating it on a new runner changes every timing test at once and
  * none is left with the old calibration.
  */
-export { SLOWNESS, cpuNow } from '../../../core/test/cpu-time.js';
+export {
+  GATE_TIMINGS,
+  SLOWNESS,
+  TIMINGS,
+  cpuNow,
+  leastTime,
+  timeOf,
+} from '../../../core/test/cpu-time.js';
