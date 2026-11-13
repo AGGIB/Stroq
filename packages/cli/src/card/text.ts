@@ -4,6 +4,7 @@
 // name, a key's name) goes through `clean` before it is put in a sentence: blanks folded to one space,
 // every control character written out as a visible `\uXXXX` (the existing neutraliser), and a cut to a
 // length. The card then holds nothing a terminal could obey.
+import { win32 } from 'node:path';
 import { neutralizeControls } from '@stroq/core';
 
 /** `31785` as `31,785`. */
@@ -24,8 +25,19 @@ export function clean(text: string, max = 80): string {
   return cut(neutralizeControls(text.replace(/\s+/g, ' ').trim()), max);
 }
 
+/** A drive-rooted path or a UNC path with a server and share. */
+const windowsPath = (path: string): boolean =>
+  /^(?:[A-Za-z]:[\\/]|[\\/]{2}[^\\/]+[\\/]+[^\\/]+(?:[\\/]|$))/.test(path);
+
 /** A path with the home folder written as `~`. */
 export function tilde(path: string, home: string): string {
+  if (windowsPath(home)) {
+    if (!windowsPath(path)) return path;
+    const relative = win32.relative(home, path);
+    if (relative === '') return '~';
+    if (relative === '..' || relative.startsWith('..\\') || win32.isAbsolute(relative)) return path;
+    return `~/${relative.replace(/\\/g, '/')}`;
+  }
   if (home === '' || home === '/') return path;
   if (path === home) return '~';
   return path.startsWith(`${home}/`) ? `~/${path.slice(home.length + 1)}` : path;
