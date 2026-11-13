@@ -7,6 +7,7 @@ import {
   BUDGET_MS,
   type BuildEnv,
 } from '../../src/card/build.js';
+import type { CardData } from '../../src/card/data.js';
 import { handleJob, type CardJob, type CardResult } from '../../src/card/jobs.js';
 import type { Channel } from '../../src/card/pool.js';
 import { renderCard, WIDTH } from '../../src/card/render.js';
@@ -37,6 +38,9 @@ afterEach(() => {
   vi.unstubAllEnvs();
 });
 
+const budgetMs = 2_000;
+const graceMs = 100;
+
 const env = (over: Partial<BuildEnv> = {}): BuildEnv => ({
   home: m.home,
   env: process.env,
@@ -45,16 +49,19 @@ const env = (over: Partial<BuildEnv> = {}): BuildEnv => ({
   now: new Date(),
   version: '0.29.0',
   workers: 1,
-  budgetMs: 2_000,
-  graceMs: 100,
+  budgetMs,
+  graceMs,
   ...over,
 });
 
 /**
- * A worker that does one job at a time and says when it begins each, and that never finishes the replay
- * of `stuck`: whatever is behind it waits, as behind a real one.
+ * A worker that does one job at a time and reports when each begins.
+ * When a replay stalls, the jobs behind it wait.
  */
-function stuckOn(stuck: string, log: CardJob[] = []): () => Channel<CardJob, CardResult> {
+function testWorker(
+  log: CardJob[] = [],
+  stall?: { readonly path: string; readonly began: () => void },
+): () => Channel<CardJob, CardResult> {
   return () => {
     let message: (id: number, result: CardResult) => void = () => undefined;
     let began: (id: number) => void = () => undefined;
@@ -66,7 +73,10 @@ function stuckOn(stuck: string, log: CardJob[] = []): () => Channel<CardJob, Car
           if (closed) return;
           began(id);
           log.push(job);
-          if (job.kind === 'session' && job.path === stuck) await new Promise(() => undefined);
+          if (job.kind === 'session' && job.path === stall?.path) {
+            stall.began();
+            await new Promise(() => undefined);
+          }
           const result = await handleJob(job);
           if (!closed) message(id, result);
         });
@@ -86,6 +96,17 @@ function stuckOn(stuck: string, log: CardJob[] = []): () => Channel<CardJob, Car
   };
 }
 
+async function buildWithStalledReplay(stuck: string): Promise<CardData> {
+  let signalStall = (): void => undefined;
+  const stalled = new Promise<void>((resolve) => {
+    signalStall = resolve;
+  });
+  const card = buildCard(30, env({ open: testWorker([], { path: stuck, began: signalStall }) }));
+  await Promise.race([stalled, card]);
+  await vi.advanceTimersByTimeAsync(budgetMs + graceMs);
+  return card;
+}
+
 const replays = (log: readonly CardJob[]): string[] =>
   log.flatMap((j) => (j.kind === 'session' ? [j.path] : []));
 
@@ -100,35 +121,40 @@ function withStuckSession(): string {
 }
 
 describe('a replay that runs out the time', () => {
+  beforeEach(() => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+  });
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('is noted as too slow, and the sessions behind it as not yet checked', async () => {
     const stuck = withStuckSession();
-    const first = await buildCard(30, env({ open: stuckOn(stuck) }));
+    const first = await buildWithStalledReplay(stuck);
     expect(first.coverage).toMatchObject({ found: 5, tooSlow: 1, checked: 0 });
     // The ones held behind it were only waiting: they are not blamed, and a later run does them.
     expect(first.coverage.notChecked).toBe(4);
     const kept = readSessionCache(m.stroqHome);
     const entries = [...kept.values()];
     expect(entries).toHaveLength(1);
-    expect(entries[0]).toMatchObject({ unfinished: true, budgetMs: 2_000 });
+    expect(entries[0]).toMatchObject({ unfinished: true, budgetMs });
   });
 
   it('is not waited for in the runs after it, which go on with the others', async () => {
     const stuck = withStuckSession();
-    await buildCard(30, env({ open: stuckOn(stuck) }));
+    await buildWithStalledReplay(stuck);
     const log: CardJob[] = [];
-    const started = Date.now();
-    const again = await buildCard(30, env({ open: stuckOn(stuck, log) }));
-    // Not waited for: no replay of it was sent, and the run did not sit out its time.
+    // The other replays finish without the budget timer firing.
+    const again = await buildCard(30, env({ open: testWorker(log) }));
     expect(replays(log)).not.toContain(stuck);
-    expect(Date.now() - started).toBeLessThan(1_900);
     expect(again.coverage).toMatchObject({ tooSlow: 1, notChecked: 0, checked: 4 });
     expect(again.counts.commands).toBe(5);
   });
 
   it('says so on the card, once, in plain words', async () => {
     const stuck = withStuckSession();
-    await buildCard(30, env({ open: stuckOn(stuck) }));
-    const again = await buildCard(30, env({ open: stuckOn(stuck) }));
+    await buildWithStalledReplay(stuck);
+    const again = await buildCard(30, env({ open: testWorker() }));
     const lines = renderCard(again, m.home);
     const said = lines.filter((l) => l.includes('could not be checked in time'));
     expect(said).toEqual(['1 session could not be checked in time.']);
@@ -137,32 +163,31 @@ describe('a replay that runs out the time', () => {
 
   it('is tried again when the file changes', async () => {
     const stuck = withStuckSession();
-    await buildCard(30, env({ open: stuckOn(stuck) }));
+    await buildWithStalledReplay(stuck);
     writeFileSync(stuck, `${readFileSync(stuck, 'utf8')}\n`);
     const when = new Date(Date.now() - DAY / 8);
     utimesSync(stuck, when, when);
     const log: CardJob[] = [];
-    await buildCard(30, env({ budgetMs: 5_000, open: stuckOn('/none', log) }));
+    await buildCard(30, env({ budgetMs: 5_000, open: testWorker(log) }));
     expect(replays(log)).toContain(stuck);
   });
 
   it('is tried again by a run that is given more time than it had', async () => {
     const stuck = withStuckSession();
-    await buildCard(30, env({ open: stuckOn(stuck) }));
+    await buildWithStalledReplay(stuck);
     const same: CardJob[] = [];
-    await buildCard(30, env({ open: stuckOn('/none', same) }));
+    await buildCard(30, env({ open: testWorker(same) }));
     expect(replays(same)).not.toContain(stuck);
     const more: CardJob[] = [];
-    await buildCard(30, env({ budgetMs: 4_000, open: stuckOn('/none', more) }));
+    await buildCard(30, env({ budgetMs: 4_000, open: testWorker(more) }));
     expect(replays(more)).toContain(stuck);
   });
 
   it('is the replay of the session that ran out the time, not of one that only waited', async () => {
     const stuck = withStuckSession();
-    const log: CardJob[] = [];
-    await buildCard(30, env({ open: stuckOn(stuck, log) }));
+    await buildWithStalledReplay(stuck);
     const next: CardJob[] = [];
-    await buildCard(30, env({ open: stuckOn(stuck, next) }));
+    await buildCard(30, env({ open: testWorker(next) }));
     // The four that waited behind it were replayed.
     expect(replays(next)).toHaveLength(4);
   });
