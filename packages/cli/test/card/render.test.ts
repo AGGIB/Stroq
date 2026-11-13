@@ -149,6 +149,15 @@ describe('the card: no sessions at all', () => {
         'See what Stroq stops:  npx @stroq/cli attack',
       ].join('\n'),
     );
+
+    const windows = {
+      ...none,
+      coverage: {
+        ...none.coverage,
+        looked: ['C:\\Users\\Dev\\.claude\\projects', 'C:\\Users\\Dev\\.codex\\sessions'],
+      },
+    };
+    expect(renderCard(windows, 'C:\\Users\\Dev')).toEqual(renderCard(none, HOME));
   });
 });
 
