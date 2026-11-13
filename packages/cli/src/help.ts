@@ -339,7 +339,7 @@ export const COMMANDS: readonly CommandHelp[] = [
       'inspect [<dir>] [--changed-from <rev>] [--format text|json|sarif|github] [--fail-on new|any|none] [--env]',
     about: [
       'read what a repository runs before you open it with an agent or editor. Exit 1 when',
-      'something fails the check, 2 for a usage error, 3 when the check cannot run',
+      'something fails the check, 2 for a usage error, 3 when the check cannot run.',
       'Put -- before a directory name that starts with a dash.',
     ],
     flags: [
