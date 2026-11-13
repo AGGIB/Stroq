@@ -1,4 +1,4 @@
-import { cpuNow } from './cpu-time.js';
+import { GATE_TIMINGS, leastTime, timeOf } from './cpu-time.js';
 import { expect } from 'vitest';
 
 /**
@@ -11,7 +11,6 @@ export const SIZES = [SIZE / 16, SIZE / 4, SIZE] as const;
 /** A time under this is not slow, however much it grew. */
 export const BOUND_MS = 300;
 export const MAX_GROWTH = 11;
-const TRIES = 3;
 
 export const repeat =
   (unit: string) =>
@@ -20,14 +19,9 @@ export const repeat =
 
 export type EntryPoint = (text: string) => unknown;
 
-const timed = (run: () => unknown): number => {
-  const started = cpuNow();
-  run();
-  return cpuNow() - started;
-};
-
 /**
- * Fails if a time is both slow and more than `MAX_GROWTH` times the one before it. `measure` is the
+ * Fails if a time is both slow and more than `MAX_GROWTH` times the one before it. A size that looks so is
+ * timed again, up to `GATE_TIMINGS` times in all, and the least is kept (`leastTime`). `measure` is the
  * processor time of a run, except in the test of the gate itself, which counts steps instead: a test of
  * the gate that timed a quadratic reader was slow on a coverage runner (past its time limit) and too
  * fast to cross the bound on another, and the gate's arithmetic is what that test is about.
@@ -35,23 +29,14 @@ const timed = (run: () => unknown): number => {
 export function expectLinear(
   inputs: readonly string[],
   run: EntryPoint,
-  measure: (run: () => unknown) => number = timed,
+  measure: (run: () => unknown) => number = timeOf,
 ): void {
   const times: number[] = [];
   for (const input of inputs) {
     const before = times[times.length - 1];
-    let took = measure(() => run(input));
-    for (
-      let tries = 1;
-      tries < TRIES && before !== undefined && took >= BOUND_MS && took >= MAX_GROWTH * before;
-      tries += 1
-    ) {
-      took = Math.min(
-        took,
-        measure(() => run(input)),
-      );
-    }
-    times.push(took);
+    const tooSlow = (took: number): boolean =>
+      before !== undefined && took >= BOUND_MS && took >= MAX_GROWTH * before;
+    times.push(leastTime(() => measure(() => run(input)), tooSlow, GATE_TIMINGS));
   }
   const growth = times.map((ms, i) => `${ms.toFixed(1)} ms at ${(SIZES[i] ?? 0) / 1024} KiB`);
   for (let i = 1; i < times.length; i += 1) {
