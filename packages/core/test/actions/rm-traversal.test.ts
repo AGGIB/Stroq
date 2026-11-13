@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { classifyCommand } from '../../src/actions/classify-bash.js';
 import { isDangerousRmTarget } from '../../src/actions/dangerous-target.js';
-import { cpuNow } from '../cpu-time.js';
+import { leastTime, timeOf } from '../cpu-time.js';
 
 /**
  * A delete is aimed outside the project when the path it names, read word by word from the directory
@@ -287,17 +287,16 @@ describe('reading time', () => {
   ])('stays linear in %s', (_name, build) => {
     const time = (n: number): number => {
       const target = build(n);
-      const started = cpuNow();
-      dangerous(target);
-      return cpuNow() - started;
+      return timeOf(() => dangerous(target));
     };
     const small = time(16_000);
     const limit = Math.min(500, Math.max(small * 12, 40));
-    let large = time(64_000);
-    // As in the classifier gate, recheck a slow sample so a single CPU-time spike does not fail CI.
-    for (let tries = 1; tries < 3 && large >= limit; tries += 1) {
-      large = Math.min(large, time(64_000));
-    }
+    // As in the classifier gate, a slow sample is timed again and the least is kept, so a single spike of
+    // processor time does not fail CI.
+    const large = leastTime(
+      () => time(64_000),
+      (ms) => ms >= limit,
+    );
     expect(large, `small path: ${small.toFixed(1)} ms`).toBeLessThan(limit);
   });
 });
