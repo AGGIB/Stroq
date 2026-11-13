@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { classifyTool } from '../../src/actions/classify-tool.js';
-import { cpuNow } from '../cpu-time.js';
+import { leastTime, timeOf } from '../cpu-time.js';
 
 /**
  * Text handed to a shell on its standard input is a program, as `bash -c "…"` is. The command
@@ -65,24 +65,16 @@ describe('reading text fed to a shell stays linear on a command built to be slow
    */
   const BOUND_MS = 5000;
   /**
-   * How often a reading that looks too slow is timed, the first time included. Noise only adds to a
-   * time: on a shared Linux runner with coverage the linear reading of `echo x | bash; ` repeated took
-   * 5.08 s once against this bound, and passed in the same job on runs before, while a quadratic reader
-   * is slow every time. So a time at or over the bound is taken again, twice, and the least is kept,
-   * as the classifier's own gate does (`classify-redos-gate.test.ts`).
+   * Noise only adds to a time: on a shared Linux runner with coverage the linear reading of
+   * `echo x | bash; ` repeated took 5.08 s once against this bound, and passed in the same job on runs
+   * before, while a quadratic reader is slow every time. So a time at or over the bound is taken again,
+   * twice, and the least is kept (`leastTime`), as the classifier's own gate does.
    */
-  const TRIES = 3;
-  const timedOnce = (command: string): number => {
-    const started = cpuNow();
-    classes(command);
-    return cpuNow() - started;
-  };
-  const timed = (command: string): number => {
-    let least = timedOnce(command);
-    for (let tries = 1; tries < TRIES && least >= BOUND_MS; tries += 1)
-      least = Math.min(least, timedOnce(command));
-    return least;
-  };
+  const timed = (command: string): number =>
+    leastTime(
+      () => timeOf(() => classes(command)),
+      (ms) => ms >= BOUND_MS,
+    );
   it.each<[string, string]>([
     ['many pipes into a shell', 'echo x | bash; '.repeat(Math.ceil(SIZE / 15))],
     ['one very long echo', `echo ${'a'.repeat(SIZE)} | bash`],
@@ -183,14 +175,18 @@ describe('nested programs share one budget, so nesting is not a multiplier', () 
   it('a command that decodes a program that decodes a program stays bounded', () => {
     const inner = `printf "${'echo x|bash;'.repeat(5)}%s" ${'a '.repeat(1024)}| bash`;
     const command = `echo '${inner}' | bash;`.repeat(Math.ceil(120_000 / (inner.length + 20)));
-    const started = cpuNow();
-    const found = classes(command);
+    const answers: (readonly string[])[] = [];
     // About 2 s of processor time alone; under coverage, which makes the reading three times slower,
-    // on a busy machine it took 5.6 s. What this guards against was minutes, not seconds.
-    expect(cpuNow() - started).toBeLessThan(10_000);
+    // on a busy machine it took 5.6 s, and 8.05 s on a shared Linux runner. What this guards against
+    // was minutes, not seconds, so a time at or over the bound is taken again and the least is kept.
+    const took = leastTime(
+      () => timeOf(() => answers.push(classes(command))),
+      (ms) => ms >= 10_000,
+    );
+    expect(took).toBeLessThan(10_000);
     // Every level draws on one meter, so a command that decodes this much is not read to its end
-    // and the answer is a question, not a guess.
-    expect(found).toContain('shell.unparsed');
+    // and the answer is a question, not a guess: every time it is read.
+    for (const found of answers) expect(found).toContain('shell.unparsed');
   });
 });
 
