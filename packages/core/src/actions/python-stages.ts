@@ -178,9 +178,16 @@ export function readPythonStages(context: PythonStageContext): PythonStages {
   });
   let masked: string | null = null;
   if (replaced.length > 0 && texts[0] !== undefined) {
-    masked = texts[0];
-    for (const [from, to] of [...replaced].sort((a, b) => b[0] - a[0]))
-      masked = `${masked.slice(0, from)}true${masked.slice(to)}`;
+    // The spans belong to separate stages of this text. Take each gap from the original once:
+    // replacing one stage at a time kept copying the whole line for every Python it contained.
+    const parts: string[] = [];
+    let at = 0;
+    for (const [from, to] of [...replaced].sort((a, b) => a[0] - b[0])) {
+      parts.push(texts[0].slice(at, from), 'true');
+      at = to;
+    }
+    parts.push(texts[0].slice(at));
+    masked = parts.join('');
   }
   return { signals, unparsed, masked, started };
 }
