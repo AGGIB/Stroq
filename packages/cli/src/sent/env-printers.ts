@@ -18,11 +18,14 @@ const ENV_PRINTERS: ReadonlySet<string> = new Set([
  */
 const ENVIRON = /environb?(?![a-z])/i;
 const SHELL_VARIABLE = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})/g;
-const HTTP_URL = /\bhttps?:\/\/(?:[^\s'"`<>()$;|]|\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\}))+/gi;
+const HTTP_URL = new RegExp(`\\bhttps?://(?:[^\\s'"\`<>()$;|]|${SHELL_VARIABLE.source})+`, 'gi');
 // A triple-quoted one first: it may span lines, and its first quote would otherwise end it at once.
 const PYTHON_F_STRING =
   /\b(?:fr?|rf)(?:'''(?:(?!''')[\s\S])*'''|"""(?:(?!""")[\s\S])*"""|(\\?['"])(?:(?!\1)(?:\\[^\r\n]|[^\\\r\n]))*\1)/gi;
-const INTERPOLATED_URL = /\bhttps?:\/\/(?:\{\{|\}\}|\{[^{}]*\}|[^\s'"`<>(){}$;|])+/gi;
+const INTERPOLATED_URL = new RegExp(
+  `\\bhttps?://(?:\\{\\{|\\}\\}|\\{[^{}]*\\}|[^\\s'"\`<>(){}$;|]|${SHELL_VARIABLE.source})+`,
+  'gi',
+);
 
 /** Keep evidence from a replacement field without exposing the literal URL around it. */
 function maskInterpolatedUrl(url: string): string {
@@ -30,7 +33,7 @@ function maskInterpolatedUrl(url: string): string {
   for (const [, field] of url.matchAll(/\{\{|\{([^{}]*)/g)) {
     if (field !== undefined && ENVIRON.test(field)) return ' environ ';
   }
-  return ' ';
+  return maskShellUrl(url);
 }
 
 /** A simple shell variable can sit inside a URL. Keep any environment reference in the expansion. */
