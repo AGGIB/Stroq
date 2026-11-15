@@ -27,18 +27,21 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  publish:
+  build:
     # Tag pushes always run; manual runs without test_version are honoured from main.
-    # When test_version is given, skip publish and run the smoke-test job directly.
+    # When test_version is given, skip build/publish and run the smoke-test job directly.
     if: (github.event.inputs.test_version == '' || github.event.inputs.test_version == null) && (github.event_name == 'push' || github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
-    # The OIDC token for npm provenance and trusted publishing, granted to this job
-    # only. Job-level permissions replace the top-level ones, so `contents` is repeated.
+    # Project dependencies and lifecycle scripts run here, without npm credentials
+    # or the ability to request an OIDC token. Only the finished archive crosses jobs.
     permissions:
       contents: read
-      id-token: write
+    outputs:
+      version: ${{ steps.metadata.outputs.version }}
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
 
@@ -47,22 +50,25 @@ jobs:
         with:
           node-version: 24
           cache: pnpm
-          registry-url: https://registry.npmjs.org
-
-      # The npm token is deliberately NOT exposed to install/test/build: a compromised
-      # dependency's postinstall or test code must never be able to read it. Only the two
-      # steps below (mode detection and the token publish) receive it.
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
 
       - name: Validate tag and package version
-        if: github.event_name == 'push'
+        id: metadata
         run: |
-          version=$(node -p "require('./packages/cli/package.json').version")
-          if [ "$GITHUB_REF_NAME" != "v$version" ]; then
-            echo "Tag $GITHUB_REF_NAME does not match @stroq/cli version $version" >&2
-            exit 1
-          fi
+          node --input-type=module <<'NODE'
+          import { appendFileSync, readFileSync } from 'node:fs';
+          const { name, version } = JSON.parse(readFileSync('packages/cli/package.json', 'utf8'));
+          if (name !== '@stroq/cli' || typeof version !== 'string' || version.length > 100 ||
+              !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
+            throw new Error('Expected @stroq/cli with one exact package version');
+          }
+          if (process.env.GITHUB_EVENT_NAME === 'push' && process.env.GITHUB_REF_NAME !== `v${version}`) {
+            throw new Error('The release tag does not match the package version');
+          }
+          appendFileSync(process.env.GITHUB_OUTPUT, `version=${version}\n`);
+          NODE
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
 
       - name: Check formatting and types
         run: |
@@ -126,24 +132,100 @@ jobs:
           '
           exit "$status"
 
-      # Node 24's bundled npm version is not fixed. Staged publishing requires
-      # npm >=11.15.0; pin and verify it before a token or OIDC is available.
+      # prepack installs and builds the console. It must run in this job, before
+      # any npm token or OIDC permission is available, never in the staging job.
+      - name: Pack the checked release
+        working-directory: packages/cli
+        env:
+          VERSION: ${{ steps.metadata.outputs.version }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/stroq-package"
+          npm pack --pack-destination "$RUNNER_TEMP/stroq-package"
+          mv -- "$RUNNER_TEMP/stroq-package/stroq-cli-$VERSION.tgz" "$RUNNER_TEMP/stroq-package/stroq-cli.tgz"
+
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: stroq-release-package
+          path: ${{ runner.temp }}/stroq-package/stroq-cli.tgz
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    needs: build
+    runs-on: ubuntu-latest
+    # This fresh runner only stages the archive. It does not check out the project,
+    # install its dependencies, or execute its lifecycle scripts or bundled code.
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+
+      # Bootstrap only the pinned publishing CLI, with lifecycle scripts disabled.
+      # There is no project checkout or npm configuration in the working directory.
       - name: Install staged-publishing npm CLI
         run: |
-          npm install --global npm@11.15.0
+          npm install --global npm@11.15.0 --ignore-scripts
           npm stage --help >/dev/null
+
+      # No run-id, repository or github-token override: download from this run only.
+      - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: stroq-release-package
+          path: ${{ runner.temp }}/stroq-package
+
+      - name: Verify the packed release
+        env:
+          VERSION: ${{ needs.build.outputs.version }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { execFileSync } from 'node:child_process';
+          import { lstatSync, readdirSync } from 'node:fs';
+          import { join } from 'node:path';
+          const version = process.env.VERSION;
+          if (!version || version.length > 100 ||
+              !/^[0-9]+\.[0-9]+\.[0-9]+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(version)) {
+            throw new Error('Expected one exact release version');
+          }
+          if (process.env.GITHUB_EVENT_NAME === 'push' && process.env.GITHUB_REF_NAME !== `v${version}`) {
+            throw new Error('The release tag does not match the archive version');
+          }
+          const directory = join(process.env.RUNNER_TEMP, 'stroq-package');
+          const archive = join(directory, 'stroq-cli.tgz');
+          const entries = readdirSync(directory);
+          if (entries.length !== 1 || entries[0] !== 'stroq-cli.tgz' || !lstatSync(archive).isFile()) {
+            throw new Error('Expected only one regular release archive');
+          }
+          // Read JSON to stdout; never extract files or load code from the artifact.
+          const manifest = JSON.parse(execFileSync('tar', ['-xOf', archive, 'package/package.json'], {
+            encoding: 'utf8', maxBuffer: 1024 * 1024,
+          }));
+          if (manifest.name !== '@stroq/cli' || manifest.version !== version || manifest.private === true) {
+            throw new Error('The archive is not the expected public @stroq/cli release');
+          }
+          // npm also reads publishConfig from an archive. Reject configuration
+          // that could redirect scoped registry requests, change TLS/proxies,
+          // or replace provenance in this credentialed job.
+          const config = manifest.publishConfig;
+          if (config !== undefined && (config === null || typeof config !== 'object' ||
+              Array.isArray(config) || Object.keys(config).length !== 1 || config.access !== 'public')) {
+            throw new Error('The archive has unexpected publishing configuration');
+          }
+          NODE
 
       - name: Decide how to publish
         id: mode
-        working-directory: packages/cli
         env:
+          VERSION: ${{ needs.build.outputs.version }}
           NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
           TRUSTED_PUBLISHING: ${{ vars.NPM_TRUSTED_PUBLISHING }}
         run: |
-          V=$(node -p "require('./package.json').version")
-          if npm view "@stroq/cli@$V" version >/dev/null 2>&1; then
+          if npm view "@stroq/cli@$VERSION" version >/dev/null 2>&1; then
             echo "mode=already-published" >> "$GITHUB_OUTPUT"
-            echo "@stroq/cli@$V is already published; skipping"
+            echo "@stroq/cli@$VERSION is already published; skipping"
           elif [ -n "$NPM_TOKEN" ]; then
             echo "mode=token" >> "$GITHUB_OUTPUT"
           elif [ "$TRUSTED_PUBLISHING" = "true" ]; then
@@ -160,8 +242,7 @@ jobs:
       # Path 1: an npm granular access token stored as the NPM_TOKEN repository secret.
       - name: Stage on npm (token)
         if: steps.mode.outputs.mode == 'token'
-        working-directory: packages/cli
-        run: npm stage publish --provenance --access public
+        run: npm stage publish "$RUNNER_TEMP/stroq-package/stroq-cli.tgz" --ignore-scripts --registry=https://registry.npmjs.org --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
@@ -170,8 +251,7 @@ jobs:
       # NPM_TRUSTED_PUBLISHING=true. No secret needed; provenance is attached automatically.
       - name: Stage on npm (trusted publishing)
         if: steps.mode.outputs.mode == 'trusted'
-        working-directory: packages/cli
-        run: npm stage publish --access public
+        run: npm stage publish "$RUNNER_TEMP/stroq-package/stroq-cli.tgz" --ignore-scripts --registry=https://registry.npmjs.org --access public
 
       - name: Staged, awaiting approval
         if: steps.mode.outputs.mode == 'token' || steps.mode.outputs.mode == 'trusted'
