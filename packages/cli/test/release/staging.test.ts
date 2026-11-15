@@ -22,15 +22,20 @@ interface Job {
 const workflow = parse(
   readFileSync(new URL('../../../../.github/workflows/release.yml', import.meta.url), 'utf8'),
 ) as { permissions: Record<string, string>; jobs: Record<string, Job> };
+const getJob = (name: string): Job => {
+  const found = workflow.jobs[name];
+  if (!found) throw new Error(`missing ${name} job`);
+  return found;
+};
 const step = (job: string, name: string): Step => {
-  const found = workflow.jobs[job]?.steps.find((entry) => entry.name === name);
+  const found = getJob(job).steps.find((entry) => entry.name === name);
   if (!found) throw new Error(`missing ${job} step ${name}`);
   return found;
 };
 
 describe('release credential boundary', () => {
   it('keeps the checked build and package lifecycle scripts outside the credentialed job', () => {
-    const build = workflow.jobs.build;
+    const build = getJob('build');
     expect(build).toBeDefined();
     expect(workflow.permissions).toEqual({ contents: 'read' });
     expect(build.permissions).toEqual({ contents: 'read' });
@@ -49,12 +54,12 @@ describe('release credential boundary', () => {
     expect(step('build', 'Pack the checked release').run).toContain('npm pack ');
     expect(build.if).toContain("github.event.inputs.test_version == ''");
     expect(build.if).toContain("github.ref == 'refs/heads/main'");
-    expect(workflow.jobs.publish.needs).toBe('build');
-    expect(workflow.jobs['github-release'].needs).toBe('publish');
+    expect(getJob('publish').needs).toBe('build');
+    expect(getJob('github-release').needs).toBe('publish');
   });
 
   it('stages only an archive without checkout, project installs, or package scripts', () => {
-    const publish = workflow.jobs.publish;
+    const publish = getJob('publish');
     expect(publish.permissions).toEqual({ contents: 'read', 'id-token': 'write' });
     for (const entry of publish.steps) {
       expect(entry.uses ?? '').not.toContain('actions/checkout');
@@ -74,10 +79,10 @@ describe('release credential boundary', () => {
   });
 
   it('downloads only this run\u2019s named artifact with no credentials or run override', () => {
-    const upload = workflow.jobs.build.steps.find((s) =>
+    const upload = getJob('build').steps.find((s) =>
       s.uses?.startsWith('actions/upload-artifact@'),
     );
-    const download = workflow.jobs.publish.steps.find((s) =>
+    const download = getJob('publish').steps.find((s) =>
       s.uses?.startsWith('actions/download-artifact@'),
     );
     expect(upload?.with?.['if-no-files-found']).toBe('error');
@@ -86,7 +91,7 @@ describe('release credential boundary', () => {
       name: upload?.with?.name,
       path: '${{ runner.temp }}/stroq-package',
     });
-    for (const job of [workflow.jobs.build, workflow.jobs.publish]) {
+    for (const job of [getJob('build'), getJob('publish')]) {
       for (const entry of job.steps.filter((s) => s.uses)) {
         expect(entry.uses).toMatch(/@[0-9a-f]{40}$/);
       }
