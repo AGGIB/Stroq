@@ -215,27 +215,83 @@ describe('the card on a machine with sessions', () => {
 });
 
 describe('the card when the time runs out', () => {
-  /** A worker that takes the first `n` transcripts and never finishes the rest. */
-  function stalling(n: number): () => Channel<CardJob, CardResult> {
+  const BUDGET_MS = 1_000;
+  const GRACE_MS = 100;
+
+  /**
+   * A worker that takes the first `n` transcripts and never finishes the rest. `idle` is settled once every
+   * job it took is answered and it holds only the ones it never finishes: from then on only the clock can
+   * end the run.
+   */
+  function stalling(n: number) {
     let taken = 0;
-    return () => {
+    let passed = 0;
+    let answered = 0;
+    let kept = 0;
+    let closed = false;
+    let settle = (): void => undefined;
+    const idle = new Promise<void>((resolve) => {
+      settle = resolve;
+    });
+    const check = (): void => {
+      if (kept > 0 && answered === passed) settle();
+    };
+    const open = (): Channel<CardJob, CardResult> => {
       const real = inProcessChannel();
       return {
         ...real,
         send: (id, job) => {
-          if (job.kind === 'session' && (taken += 1) > n) return;
+          if (job.kind === 'session' && (taken += 1) > n) {
+            kept += 1;
+            // After the pool has given out what it gives out in this turn.
+            queueMicrotask(check);
+            return;
+          }
+          passed += 1;
           real.send(id, job);
+        },
+        onMessage: (callback) =>
+          real.onMessage((id, result) => {
+            answered += 1;
+            callback(id, result);
+            check();
+          }),
+        close: () => {
+          closed = true;
+          return real.close();
         },
       };
     };
+    return { open, idle, closed: (): boolean => closed };
+  }
+
+  /**
+   * `buildCard` with a budget that is spent on the clock the test moves, not on the wall clock: a shared macOS
+   * runner took longer than the budget for the two sessions the worker does finish and checked one. The clock
+   * moves once that work is done, to the moment before the run may end, and then to it: the budget and then
+   * the grace, to the millisecond, so a budget that ends the run early or never fails here too.
+   */
+  async function outOfTime(stall: ReturnType<typeof stalling>): Promise<CardData> {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    try {
+      const building = buildCard(
+        30,
+        env({ budgetMs: BUDGET_MS, graceMs: GRACE_MS, workers: 1, open: stall.open }),
+      );
+      await stall.idle;
+      await vi.advanceTimersByTimeAsync(BUDGET_MS + GRACE_MS - 1);
+      expect(stall.closed(), 'the run ended before its budget and grace').toBe(false);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(stall.closed(), 'the run did not end at its budget and grace').toBe(true);
+      return await building;
+    } finally {
+      vi.useRealTimers();
+    }
   }
 
   it('says how many sessions were checked and counts only those', async () => {
     populate(m);
-    const data = await buildCard(
-      30,
-      env({ budgetMs: 1_000, graceMs: 100, workers: 1, open: stalling(2) }),
-    );
+    const data = await outOfTime(stalling(2));
     expect(data.coverage.found).toBe(4);
     expect(data.coverage.checked).toBe(2);
     expect(data.coverage.notChecked).toBe(2);
@@ -244,7 +300,7 @@ describe('the card when the time runs out', () => {
 
   it('continues from the cache on the next run', async () => {
     populate(m);
-    await buildCard(30, env({ budgetMs: 1_000, graceMs: 100, workers: 1, open: stalling(2) }));
+    await outOfTime(stalling(2));
     const next = await buildCard(30, env());
     expect(next.coverage.notChecked).toBe(0);
     expect(next.coverage.fromCache).toBe(2);

@@ -21,7 +21,7 @@ import { NO_NAMES, functionBodies, mergeNames } from '../../src/actions/program-
 import { lex } from '../../src/actions/shell-lex.js';
 import { splitCommand } from '../../src/actions/shell-segments.js';
 import { stroqStateReading } from '../../src/actions/stroq-state.js';
-import { cpuNow } from '../cpu-time.js';
+import { cpuNow, leastTime, timeOf } from '../cpu-time.js';
 
 const CWD = '/home/dev/project';
 const classes = (command: string): readonly string[] => classifyCommand(command, CWD).classes;
@@ -363,21 +363,29 @@ describe('the time that the reading of a call takes', () => {
     const one = (i: number): string =>
       `x${i}=$(\nf${i}() { ${body(i)}}\n${Array.from({ length: 12 }, (_, k) => `f${i} ${k}`).join('; ')}\n)\n`;
     const command = `echo 1\n${Array.from({ length: 6 }, (_, i) => one(i)).join('')}`;
-    const started = cpuNow();
-    const typed = classifyTool('Bash', { command }, CWD);
-    const took = cpuNow() - started;
+    const readings: ReturnType<typeof classifyTool>[] = [];
+    // The host gives up at fifteen seconds, and a hook that is given up on is allowed. Where the clock of the
+    // reading (eight seconds of wall time) is what stops it, its processor time is about that of the clock: a
+    // shared runner with coverage on read 8,199 ms once, in a test that took 8,147 ms. Noise only adds to a time
+    // and a reading that does not stop is slow every time, so a time at or over the bound is taken again and the
+    // least is kept.
+    const took = leastTime(
+      () => timeOf(() => readings.push(classifyTool('Bash', { command }, CWD))),
+      (ms) => ms >= 8_000,
+    );
 
-    // The host gives up at fifteen seconds, and a hook that is given up on is allowed.
     expect(took, `${took} ms`).toBeLessThan(8_000);
-    expect(typed.classes).toContain('shell.unparsed');
-    // What was not read is said: by the count of calls where the machine is quick, and by the clock where it is not
-    // (a shared runner with coverage on gets to the clock first, and the clock is the better answer there).
-    expect(
-      typed.signals.some(
-        (signal) => signal === 'function-call-not-read' || signal === 'reading-took-too-long',
-      ),
-      typed.signals.join(', '),
-    ).toBe(true);
+    for (const typed of readings) {
+      expect(typed.classes).toContain('shell.unparsed');
+      // What was not read is said: by the count of calls where the machine is quick, and by the clock where it is
+      // not (a shared runner with coverage on gets to the clock first, and the clock is the better answer there).
+      expect(
+        typed.signals.some(
+          (signal) => signal === 'function-call-not-read' || signal === 'reading-took-too-long',
+        ),
+        typed.signals.join(', '),
+      ).toBe(true);
+    }
   }, 60_000);
 });
 

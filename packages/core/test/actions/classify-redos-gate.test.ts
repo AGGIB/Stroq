@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { classifyCommand, commandUrls } from '../../src/actions/classify-bash.js';
 import { isOwnText } from '../../src/scan/own-text.js';
-import { cpuNow } from '../cpu-time.js';
+import { GATE_TIMINGS, leastTime, timeOf } from '../cpu-time.js';
 
 /**
  * A command is written by the agent and reaches the classifier whole: hook stdin has
@@ -16,9 +16,9 @@ import { cpuNow } from '../cpu-time.js';
  * sixteenth of its size, a quarter and its full size, and each is compared with the one
  * before. Linear work takes about four times as long; the patterns this guards against
  * took sixteen times as long or more. Only an input that is both slow and growing faster
- * than it should fails. A size that looks too slow is timed again, twice, and the least is kept: on a shared
- * runner one measurement of the same input has differed by a factor of three, and a quadratic pattern is slow
- * every time. A time alone does not work on a shared runner — linear work on
+ * than it should fails. A size that looks too slow is timed again, up to `GATE_TIMINGS` times in all, and the
+ * least is kept (`leastTime`): on a shared runner one measurement of the same input has differed by a factor of
+ * three, and a quadratic pattern is slow every time. A time alone does not work on a shared runner — linear work on
  * 37,000 lines of `eval x` took 1.3 s there under coverage, against 0.2 s on a laptop —
  * and a ratio alone does not work on timings of a millisecond, which are noise. Three
  * sizes and not two, because a command that is estimated to cost too much to read is not
@@ -528,15 +528,9 @@ const at = (build: Build, size: number): string =>
 /** How long `read` takes to read one command, in the processor time of the reference machine. */
 const timedBy =
   (read: (command: string) => unknown) =>
-  (command: string): number => {
-    const started = cpuNow();
-    read(command);
-    return cpuNow() - started;
-  };
+  (command: string): number =>
+    timeOf(() => read(command));
 const timed = timedBy((command) => classifyCommand(command, '/tmp'));
-
-/** How often a size that looks too slow is timed, the first time included: noise only adds to a time. */
-const TRIES = 3;
 
 /** `build` at the three sizes, each held against the one before it (see the top of this file). */
 function holdsLinear(build: Build, time: (command: string) => number): void {
@@ -544,10 +538,8 @@ function holdsLinear(build: Build, time: (command: string) => number): void {
   for (let i = 1; i < SIZES.length; i += 1) {
     const command = at(build, SIZES[i] as number);
     const small = times[i - 1] as number;
-    let big = time(command);
-    for (let tries = 1; tries < TRIES && big >= BOUND_MS && big >= MAX_GROWTH * small; tries += 1)
-      big = Math.min(big, time(command));
-    times.push(big);
+    const tooSlow = (big: number): boolean => big >= BOUND_MS && big >= MAX_GROWTH * small;
+    times.push(leastTime(() => time(command), tooSlow, GATE_TIMINGS));
   }
   const growth = times.map((ms, i) => `${ms.toFixed(0)} ms at ${(SIZES[i] as number) / 1024} KiB`);
   for (let i = 1; i < times.length; i += 1) {
