@@ -465,7 +465,9 @@ const CHOSEN_ROWS_SQL = `
     case when typeof(value) <> 'text' then null
          when length(cast(value as blob)) <= ?1 then value end as value
   from cursorDiskKV
-  where key like 'bubbleId:%' and ${SESSION_OF_KEY} in (select value from json_each(?2))`;
+  where key like 'bubbleId:%'
+    and case when stroq_check_deadline() then
+      ${SESSION_OF_KEY} in (select value from json_each(?2)) end`;
 
 /**
  * Every row of the sessions that may have a bubble at or after `cutoff`, and how many sessions the
@@ -515,6 +517,11 @@ export async function readStoreWindow(
     const rows: CursorRow[] = [];
     const found = new Map<string, number>();
     let bytes = 0;
+    // Check while SQLite skips old rows, before it can yield the next selected row.
+    handle.function('stroq_check_deadline', () => {
+      if (Date.now() >= budget.stopAt) throw new Error('Cursor read deadline reached');
+      return 1;
+    });
     const records = handle
       .prepare(CHOSEN_ROWS_SQL)
       .iterate(budget.maxBytes, JSON.stringify(chosen.map(([id]) => id)));

@@ -35,6 +35,23 @@ describe('paths', () => {
     expect(tilde('/srv/app', '')).toBe('/srv/app');
   });
 
+  it('shortens Windows paths under home regardless of separator or case', () => {
+    const home = 'C:\\Users\\Dev';
+    expect(tilde('c:\\users\\dev', home)).toBe('~');
+    expect(tilde('c:/Users/dev\\shop\\src', home)).toBe('~/shop/src');
+    expect(tilde('C:\\Users\\Devil\\shop', home)).toBe('C:\\Users\\Devil\\shop');
+    expect(tilde('D:\\Users\\Dev\\shop', home)).toBe('D:\\Users\\Dev\\shop');
+    expect(tilde('C:\\Users\\Dev\\..', home)).toBe('C:\\Users\\Dev\\..');
+    expect(tilde('C:shop', home)).toBe('C:shop');
+    expect(tilde('C:\\Users\\Dev\\shop', `${home}\\`)).toBe('~/shop');
+    expect(tilde('//host/share/dev/shop', '\\\\host\\share\\Dev')).toBe('~/shop');
+  });
+
+  it('keeps backslashes as filename characters in POSIX paths', () => {
+    expect(tilde('/Users/dev\\shop', '/Users/dev')).toBe('/Users/dev\\shop');
+    expect(tilde('/Users/dev/shop\\src', '/Users/dev')).toBe('~/shop\\src');
+  });
+
   it('cuts the middle out of a long path', () => {
     const shown = shortPath(
       '/Users/dev/very/long/folder/names/that/go/on/and/on/forever/app',

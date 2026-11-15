@@ -130,30 +130,33 @@ describe('what a dev container already there is built from', () => {
    * under the folder of a compose file it names, under the dev container's folder, to a file named
    * like a compose file or a Dockerfile anywhere fails.
    */
-  it('fails any change near a compose file, or to a compose file or a Dockerfile anywhere', () => {
-    const files = {
-      [DC]: json({ dockerComposeFile: '../deploy/compose.yml', service: 'app' }),
-      'deploy/compose.yml': 'services: {}\n',
-      'deploy/env/app.env': 'A=1\n',
-      '.devcontainer/notes.txt': 'x\n',
-      'services/app.Dockerfile': 'FROM node:20\n',
-      'db/Dockerfile.dev': 'FROM postgres\n',
-      'ops/docker-compose.prod.yaml': 'services: {}\n',
-      'ops/Compose.override.yml': 'services: {}\n',
-      'services/other.txt': 'x\n',
-    };
-    for (const path of [
-      'deploy/env/app.env',
-      '.devcontainer/notes.txt',
-      'services/app.Dockerfile',
-      'db/Dockerfile.dev',
-      'ops/docker-compose.prod.yaml',
-      'ops/Compose.override.yml',
-    ])
-      expect(changedIn(files, { [path]: 'changed\n' })).toEqual([
-        `changed devcontainer-setting ${path} build input changed`,
-      ]);
-    expect(changedIn(files, { 'services/other.txt': 'y\n' })).toEqual([]);
+  const composeInputs = {
+    [DC]: json({ dockerComposeFile: '../deploy/compose.yml', service: 'app' }),
+    'deploy/compose.yml': 'services: {}\n',
+    'deploy/env/app.env': 'A=1\n',
+    '.devcontainer/notes.txt': 'x\n',
+    'services/app.Dockerfile': 'FROM node:20\n',
+    'db/Dockerfile.dev': 'FROM postgres\n',
+    'ops/docker-compose.prod.yaml': 'services: {}\n',
+    'ops/Compose.override.yml': 'services: {}\n',
+    'services/other.txt': 'x\n',
+  };
+
+  it.each([
+    'deploy/env/app.env',
+    '.devcontainer/notes.txt',
+    'services/app.Dockerfile',
+    'db/Dockerfile.dev',
+    'ops/docker-compose.prod.yaml',
+    'ops/Compose.override.yml',
+  ])('fails a change to the compose input %s', (path) => {
+    expect(changedIn(composeInputs, { [path]: 'changed\n' })).toEqual([
+      `changed devcontainer-setting ${path} build input changed`,
+    ]);
+  });
+
+  it('passes a change to an unrelated file outside the compose and dev container folders', () => {
+    expect(changedIn(composeInputs, { 'services/other.txt': 'y\n' })).toEqual([]);
   });
 
   /**
