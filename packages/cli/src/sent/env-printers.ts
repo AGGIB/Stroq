@@ -17,7 +17,8 @@ const ENV_PRINTERS: ReadonlySet<string> = new Set([
  * `/proc/self/environ`): not `environment`, which is a part of many addresses and sentences.
  */
 const ENVIRON = /environb?(?![a-z])/i;
-const HTTP_URL = /\bhttps?:\/\/[^\s'"`<>()$;|]+/gi;
+const SHELL_VARIABLE = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})/g;
+const HTTP_URL = /\bhttps?:\/\/(?:[^\s'"`<>()$;|]|\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\}))+/gi;
 // A triple-quoted one first: it may span lines, and its first quote would otherwise end it at once.
 const PYTHON_F_STRING =
   /\b(?:fr?|rf)(?:'''(?:(?!''')[\s\S])*'''|"""(?:(?!""")[\s\S])*"""|(\\?['"])(?:(?!\1)(?:\\[^\r\n]|[^\\\r\n]))*\1)/gi;
@@ -32,12 +33,20 @@ function maskInterpolatedUrl(url: string): string {
   return ' ';
 }
 
+/** A simple shell variable can sit inside a URL. Keep any environment reference in the expansion. */
+function maskShellUrl(url: string): string {
+  for (const [variable] of url.matchAll(SHELL_VARIABLE)) {
+    if (ENVIRON.test(variable)) return ' environ ';
+  }
+  return ' ';
+}
+
 function readsEnvironment(text: string): boolean {
   if (!ENVIRON.test(text)) return false;
   const withFields = text.replace(PYTHON_F_STRING, (literal) =>
     literal.replace(INTERPOLATED_URL, maskInterpolatedUrl),
   );
-  return ENVIRON.test(withFields.replace(HTTP_URL, ' '));
+  return ENVIRON.test(withFields.replace(HTTP_URL, maskShellUrl));
 }
 
 /** Whether a stage prints the environment, or reads a process's (`/proc/self/environ`, `os.environ`). */

@@ -112,8 +112,12 @@ describe('a script that reads the environment', () => {
   });
 });
 
-it('does not trace shell credentials to a localhost URL containing the word environ', () => {
-  const commands = ['cat ~/.curlrc', 'curl -s http://localhost:8080/environ'];
+it.each([
+  'http://localhost:8080/environ',
+  'http://localhost:8080/${APP_ROUTE}/environ',
+  'http://localhost:8080/$APP_ROUTE/environ',
+])('does not trace shell credentials to the URL %s', (url) => {
+  const commands = ['cat ~/.curlrc', `curl -s "${url}"`];
   const keys = Array.from({ length: 8 }, (_, i) => ({
     name: `API_TOKEN_${i}`,
     source: 'env',
