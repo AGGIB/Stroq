@@ -207,6 +207,31 @@ withStore('reading only the window of a Cursor store', () => {
     expect(looks).toBeGreaterThanOrEqual(ROWS.length - 1 + WINDOW_ROWS);
   });
 
+  it('stops in the second pass while skipping rows outside the window', async () => {
+    const oldRows = 20;
+    await withOwnStore(
+      (handle) => {
+        for (let index = 0; index < oldRows; index += 1) {
+          put(handle, `bubbleId:old:${index}`, bubble(OLD));
+        }
+        put(handle, 'bubbleId:recent:1', bubble(NEW));
+      },
+      async (path) => {
+        expect((await readStoreWindow(path, CUTOFF, NO_LIMIT))?.rows).toHaveLength(1);
+        let tick = 0;
+        const clock = vi.spyOn(Date, 'now').mockImplementation(() => tick++);
+        try {
+          // Leave time to finish the date pass and begin skipping old rows.
+          const stopAt = oldRows + 10;
+          expect(await readStoreWindow(path, CUTOFF, { ...NO_LIMIT, stopAt })).toBeNull();
+          expect(tick).toBe(stopAt + 1);
+        } finally {
+          clock.mockRestore();
+        }
+      },
+    );
+  });
+
   it('does not return an empty window once the deadline has passed', async () => {
     await withOwnStore(
       (handle) => {
