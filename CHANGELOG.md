@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **One pitch in every place: "Let your agent work. Stroq keeps watch over your data."** The README, the npm page, the site's headline and link previews, and the package, plugin and marketplace descriptions now say the same thing: Stroq watches what your AI coding agent does with your keys and files, blocks the sends it recognises as a leak, and shows where your keys have already gone. No command, rule or decision changed.
+
 ## [0.32.0] - 2026-11-11
 
 ### Added

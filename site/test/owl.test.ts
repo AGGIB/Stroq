@@ -63,11 +63,11 @@ describe('Hoo on the landing page', () => {
 
 describe('the hero says what the README says', () => {
   const lead = /<p class="lead">([\s\S]*?)<\/p>/.exec(html)?.[1] ?? '';
-  const promise = /<\/div>\n\n(Stroq reads[^\n]*)\n/.exec(readme)?.[1] ?? '';
+  const promise = /<\/div>\n\n(Stroq watches[^\n]*)\n/.exec(readme)?.[1] ?? '';
 
-  it('asks the question the README asks, as its headline', () => {
-    expect(html).toContain('<h1 id="hero-title">Who is really in charge of your agent?</h1>');
-    expect(readme).toContain('### Who is really in charge of your agent?');
+  it('has the README headline as its own', () => {
+    expect(html).toContain('<h1 id="hero-title">Let your agent work. Stroq keeps watch over your data.</h1>');
+    expect(readme).toContain('### Let your agent work. Stroq keeps watch over your data.');
   });
 
   it('has the README promise as its lead', () => {

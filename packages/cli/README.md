@@ -5,7 +5,7 @@
   <img src="https://raw.githubusercontent.com/AGGIB/Stroq/main/docs/assets/logo.svg" alt="Stroq" width="340">
 </picture>
 
-### Who is really in charge of your agent?
+### Let your agent work. Stroq keeps watch over your data.
 
 [![CI](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml/badge.svg)](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml)
 [![stroq attack: 0 of 36 passed through](https://img.shields.io/badge/stroq%20attack-0%20of%2036%20passed%20through-1f9d55)](https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#replay-thirty-six-attacks-from-public-reports-and-synthetic-cells)
@@ -15,7 +15,7 @@
 
 </div>
 
-Stroq reads your own Claude Code, Codex and Cursor sessions and shows how many commands came from text your agent read, and which keys left your machine.
+Stroq watches what your AI coding agent does with your keys and files, blocks sends it recognises as leaks, and shows where your keys went.
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AGGIB/Stroq/main/docs/assets/readme/card-dark.png">
