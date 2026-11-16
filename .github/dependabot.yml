@@ -35,7 +35,7 @@ updates:
       - dependency-name: '@types/node'
         update-types: [version-update:semver-major]
   - package-ecosystem: npm
-    directory: /.github/tools/mcp-probe
+    directory: /tools/ci/mcp-probe
     schedule:
       interval: weekly
     open-pull-requests-limit: 1
