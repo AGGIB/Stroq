@@ -234,12 +234,13 @@ describe('the key check when the time runs out', () => {
     populate(m);
     // The worker starts after the original budget plus grace. Only the budget is virtual:
     // a busy CI worker must still produce the two results this continuation test needs.
-    const started = new Promise<void>((resolve) => setTimeout(resolve, 1_250));
+    const realSetTimeout = globalThis.setTimeout;
     await partialKeys(
       2,
       env({
         open: () => {
           const real = inProcessChannel();
+          const started = new Promise<void>((resolve) => realSetTimeout(resolve, 1_250));
           return {
             ...real,
             send: (id, job) => {
