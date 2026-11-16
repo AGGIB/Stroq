@@ -3,6 +3,9 @@ packages:
 allowBuilds:
   esbuild: true
 overrides:
+  # GHSA-g7r4-m6w7-qqqr: esbuild's Windows dev server can read outside servedir.
+  # tsup 8 still requests 0.27; use the patched version already required by tsx.
+  esbuild: 0.28.2
   # GHSA alert 2: source-map-js before 1.2.2 can be made to loop on indexed source-map
   # offsets. Dev only (postcss, magicast under tsup and vitest); 1.2.2 is inside every
   # parent's range, this only lifts the floor until magicast asks for it itself.
