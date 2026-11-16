@@ -17,17 +17,29 @@ const ENV_PRINTERS: ReadonlySet<string> = new Set([
  * `/proc/self/environ`): not `environment`, which is a part of many addresses and sentences.
  */
 const ENVIRON = /environb?(?![a-z])/i;
-const HTTP_URL = /\bhttps?:\/\/[^\s'"`<>()$;|]+/gi;
+const SHELL_VARIABLE = /\$(?:[A-Za-z_]\w*|\{[A-Za-z_]\w*\})/g;
+const HTTP_URL = new RegExp(`\\bhttps?://(?:[^\\s'"\`<>()$;|]|${SHELL_VARIABLE.source})+`, 'gi');
 // A triple-quoted one first: it may span lines, and its first quote would otherwise end it at once.
 const PYTHON_F_STRING =
   /\b(?:fr?|rf)(?:'''(?:(?!''')[\s\S])*'''|"""(?:(?!""")[\s\S])*"""|(\\?['"])(?:(?!\1)(?:\\[^\r\n]|[^\\\r\n]))*\1)/gi;
-const INTERPOLATED_URL = /\bhttps?:\/\/(?:\{\{|\}\}|\{[^{}]*\}|[^\s'"`<>(){}$;|])+/gi;
+const INTERPOLATED_URL = new RegExp(
+  `\\bhttps?://(?:\\{\\{|\\}\\}|\\{[^{}]*\\}|[^\\s'"\`<>(){}$;|]|${SHELL_VARIABLE.source})+`,
+  'gi',
+);
 
 /** Keep evidence from a replacement field without exposing the literal URL around it. */
 function maskInterpolatedUrl(url: string): string {
   // A doubled opening brace is literal in a Python f-string.
   for (const [, field] of url.matchAll(/\{\{|\{([^{}]*)/g)) {
     if (field !== undefined && ENVIRON.test(field)) return ' environ ';
+  }
+  return maskShellUrl(url);
+}
+
+/** A simple shell variable can sit inside a URL. Keep any environment reference in the expansion. */
+function maskShellUrl(url: string): string {
+  for (const [variable] of url.matchAll(SHELL_VARIABLE)) {
+    if (ENVIRON.test(variable)) return ' environ ';
   }
   return ' ';
 }
@@ -37,7 +49,7 @@ function readsEnvironment(text: string): boolean {
   const withFields = text.replace(PYTHON_F_STRING, (literal) =>
     literal.replace(INTERPOLATED_URL, maskInterpolatedUrl),
   );
-  return ENVIRON.test(withFields.replace(HTTP_URL, ' '));
+  return ENVIRON.test(withFields.replace(HTTP_URL, maskShellUrl));
 }
 
 /** Whether a stage prints the environment, or reads a process's (`/proc/self/environ`, `os.environ`). */
