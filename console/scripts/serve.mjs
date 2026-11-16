@@ -439,7 +439,15 @@ export async function startServer({
             : await jsonAction(
                 req,
                 origin,
-                (input) => mcpGovernance[parsed.path.split('/').at(-1)](input),
+                (input) => {
+                  if (parsed.path === '/api/mcp-governance/capture')
+                    return mcpGovernance.capture(input);
+                  if (parsed.path === '/api/mcp-governance/preview')
+                    return mcpGovernance.preview(input);
+                  if (parsed.path === '/api/mcp-governance/apply')
+                    return mcpGovernance.apply(input);
+                  return mcpGovernance.recheck(input);
+                },
                 16 * 1024,
                 (text) => {
                   const parsed = apiSchema?.parsePolicyHistoryJson?.(text);

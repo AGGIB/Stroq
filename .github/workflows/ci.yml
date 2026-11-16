@@ -72,7 +72,10 @@ jobs:
         run: brew install ripgrep
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
-      - run: npm install -g @anthropic-ai/sandbox-runtime@0.0.79
+      - name: Install locked sandbox runtime
+        run: |
+          npm ci --prefix .github/tools/mcp-probe --ignore-scripts --no-audit --no-fund
+          echo "$GITHUB_WORKSPACE/.github/tools/mcp-probe/node_modules/.bin" >> "$GITHUB_PATH"
       - run: pnpm install --frozen-lockfile
       - run: pnpm exec vitest run packages/cli/test/install/mcp-probe-native.test.ts
         env:

@@ -11,8 +11,10 @@
  * this line.
  */
 
-/** What each tool may be called with, as the words after its name joined by a space. */
-const INIT_TOOLS: Readonly<Record<string, RegExp>> = {
+type InitArguments = RegExp | ((words: readonly string[]) => boolean);
+
+/** What each tool may be called with, as plain words or those words joined by a space. */
+const INIT_TOOLS: Readonly<Record<string, InitArguments>> = {
   'ssh-agent': /^(?:-[scDk]|-t \d+)?(?: (?:-[scDk]|-t \d+))*$/,
   'gpg-agent': /^--daemon$/,
   'dbus-launch': /^--(?:sh|csh)-syntax(?: --exit-with-session)?$/,
@@ -32,7 +34,7 @@ const INIT_TOOLS: Readonly<Record<string, RegExp>> = {
   rtx: /^(?:activate|hook-env|completion) [a-z]+(?: --[a-z-]+(?:=[\w.-]+)?)*$/,
   brew: /^shellenv(?: (?:bash|zsh|fish|sh|csh|tcsh))?$/,
   starship: /^init [a-z]+(?: --[a-z-]+)?$/,
-  zoxide: /^init [a-z]+(?: --(?:cmd|hook|no-cmd) ?[\w.-]*)*$/,
+  zoxide: zoxideInit,
   atuin: /^init [a-z]+(?: --[a-z-]+)*$/,
   mcfly: /^init [a-z]+$/,
   fzf: /^--(?:bash|zsh|fish)$/,
@@ -61,6 +63,26 @@ const INIT_TOOLS: Readonly<Record<string, RegExp>> = {
 };
 
 /**
+ * Read zoxide's previously accepted argument words once. A bare option can take one value;
+ * an attached value cannot take another. When a value also looks like an option, reading it
+ * as the next option preserves every possible continuation, without trying both partitions.
+ */
+function zoxideInit(words: readonly string[]): boolean {
+  if (words[0] !== 'init' || !/^[a-z]+$/.test(words[1] ?? '')) return false;
+  let valueAllowed = false;
+  for (const word of words.slice(2)) {
+    const option = /^--(?:cmd|hook|no-cmd)([\w.-]*)$/.exec(word);
+    if (option !== null) {
+      valueAllowed = option[1] === '';
+      continue;
+    }
+    if (!valueAllowed || !/^[\w.-]+$/.test(word)) return false;
+    valueAllowed = false;
+  }
+  return true;
+}
+
+/**
  * Where a tool called by a path may live: where packages put them. Not the project, and not the home
  * (`~/.cache/bin/ssh-agent`): what the agent can write is not a tool it can be trusted to have named.
  */
@@ -82,5 +104,6 @@ export function isInitSubstitution(text: string): boolean {
   const name = tool.slice(tool.lastIndexOf('/') + 1);
   if (tool.includes('/') && !SYSTEM_PATH.test(tool)) return false;
   if (!Object.hasOwn(INIT_TOOLS, name)) return false;
-  return (INIT_TOOLS[name] as RegExp).test(args.join(' '));
+  const accepted = INIT_TOOLS[name] as InitArguments;
+  return typeof accepted === 'function' ? accepted(args) : accepted.test(args.join(' '));
 }
