@@ -71,6 +71,7 @@ function render(configure: (state: any) => void) {
         };
       if (name === 'next/link')
         return {
+          __esModule: true,
           default: ({ children, ...props }: any) => React.createElement('a', props, children),
         };
       if (name === 'lucide-react')
