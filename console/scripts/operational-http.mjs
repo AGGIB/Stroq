@@ -56,7 +56,11 @@ export async function routeOperational(
     return jsonAction(
       req,
       origin,
-      (input) => workspaceReview[path.slice('/api/workspace-review/'.length)](input),
+      (input) => {
+        if (path === '/api/workspace-review/check') return workspaceReview.check(input);
+        if (path === '/api/workspace-review/cancel') return workspaceReview.cancel(input);
+        return workspaceReview.review(input);
+      },
       4096,
     );
   if (path === '/api/hook-checks')
@@ -75,7 +79,11 @@ export async function routeOperational(
     return jsonAction(
       req,
       origin,
-      (input) => hookChecks[path.slice('/api/hook-checks/'.length)](input),
+      (input) => {
+        if (path === '/api/hook-checks/preview') return hookChecks.preview(input);
+        if (path === '/api/hook-checks/start') return hookChecks.start(input);
+        return hookChecks.cancel(input);
+      },
       4096,
     );
   if (path === '/api/agents') return req.method === 'GET' ? agents.read() : noMethod();
@@ -114,7 +122,11 @@ export async function routeOperational(
     return jsonAction(
       req,
       origin,
-      (input) => secrets[path.slice('/api/secrets/'.length)](input),
+      (input) => {
+        if (path === '/api/secrets/preview') return secrets.preview(input);
+        if (path === '/api/secrets/start') return secrets.start(input);
+        return secrets.cancel(input);
+      },
       4096,
     );
   return { status: 404, body: { error: 'not-found' } };
