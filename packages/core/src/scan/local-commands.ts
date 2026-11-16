@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, statSync } from 'node:fs';
+import { closeSync, constants, existsSync, fstatSync, openSync, readSync } from 'node:fs';
 import { join } from 'node:path';
 import { splitCommand } from '../actions/shell-segments.js';
 import { commandSegments } from '../actions/shell-top-level.js';
@@ -564,17 +564,37 @@ function localPython(program: string): boolean {
   return true;
 }
 
-/** The scripts of the project's package.json, or none. */
+/** The scripts of one bounded, stable package.json descriptor, or none when it cannot be read. */
 function projectScripts(cwd: string): Readonly<Record<string, unknown>> {
+  let fd: number | undefined;
   try {
-    const file = join(cwd, 'package.json');
-    if (statSync(file).size > MAX_MANIFEST_BYTES) return {};
-    const scripts = (JSON.parse(readFileSync(file, 'utf8')) as { scripts?: unknown }).scripts;
+    fd = openSync(join(cwd, 'package.json'), constants.O_RDONLY | (constants.O_NONBLOCK ?? 0));
+    const before = fstatSync(fd);
+    if (!before.isFile() || before.size > MAX_MANIFEST_BYTES) return {};
+    const bytes = Buffer.alloc(before.size + 1);
+    let filled = 0;
+    while (filled < bytes.length) {
+      const count = readSync(fd, bytes, filled, bytes.length - filled, filled);
+      if (count === 0) break;
+      filled += count;
+    }
+    const after = fstatSync(fd);
+    if (
+      filled !== before.size ||
+      after.size !== before.size ||
+      after.mtimeMs !== before.mtimeMs ||
+      after.ctimeMs !== before.ctimeMs
+    )
+      return {};
+    const scripts = (JSON.parse(bytes.toString('utf8', 0, filled)) as { scripts?: unknown })
+      .scripts;
     return typeof scripts === 'object' && scripts !== null
       ? (scripts as Record<string, unknown>)
       : {};
   } catch {
     return {};
+  } finally {
+    if (fd !== undefined) closeSync(fd);
   }
 }
 
