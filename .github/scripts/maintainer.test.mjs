@@ -18,6 +18,7 @@ const MERGE = 'c'.repeat(40);
 const CI = [
   'test (22)',
   'test (24)',
+  'console',
   'suite (macos-latest)',
   'suite (windows-latest)',
   'python-oracle (ubuntu-latest)',
@@ -267,6 +268,31 @@ function fakeClient(snapshot = fixture()) {
 
 test('complete current-head human approval and trusted current-base CI passes', () => {
   assert.deepEqual(readiness(fixture()), []);
+});
+
+test('a missing console job prevents merge even when every reported check is green', async () => {
+  const snapshot = fixture();
+  snapshot.checks = snapshot.checks.filter((check) => check.name !== 'console');
+  const client = fakeClient(snapshot);
+
+  const decisions = await maintain(client, { mode: 'merge' });
+
+  assert.ok(decisions[0].reasons.includes('required-ci.yml-matrix-incomplete'));
+  assert.ok(client.calls.every((call) => ['GET', 'QUERY'].includes(call.method)));
+});
+
+test('the repository ruleset requires console from GitHub Actions', () => {
+  const ruleset = JSON.parse(
+    readFileSync(new URL('../maintainer-ruleset.json', import.meta.url), 'utf8'),
+  );
+  const checks = ruleset.rules
+    .filter((rule) => rule.type === 'required_status_checks')
+    .flatMap((rule) => rule.parameters.required_status_checks);
+
+  assert.deepEqual(
+    checks.filter((check) => check.context === 'console'),
+    [{ context: 'console', integration_id: 15368 }],
+  );
 });
 
 for (const [name, mutate, reason] of [

@@ -42,6 +42,10 @@
             "integration_id": 15368
           },
           {
+            "context": "console",
+            "integration_id": 15368
+          },
+          {
             "context": "suite (macos-latest)",
             "integration_id": 15368
           },
