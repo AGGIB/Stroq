@@ -26,10 +26,10 @@ export const COMMANDS: readonly CommandHelp[] = [
     name: 'console',
     synopsis: 'console [--workspace <directory>] [--port <number>]',
     about: [
-      'start the local security platform for the selected workspace and OS user.',
+      'start the local console for the selected workspace and OS user.',
       'Binds only to 127.0.0.1 and prints a private URL; keep its fragment token private.',
       'Reading credential values, changing configuration and live provider checks',
-      'require their own explicit confirmation in the platform.',
+      'require their own explicit confirmation in the console.',
     ],
     flags: [
       ['--workspace <directory>', 'existing project directory (default: current directory)'],

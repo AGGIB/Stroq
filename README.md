@@ -15,7 +15,9 @@
 
 </div>
 
-Stroq watches what your AI coding agent does with your keys and files, blocks sends it recognises as leaks, and shows where your keys went.
+Stroq watches how agents use your keys and files, blocks recognised leaks, and shows where keys went.
+
+**Who is really in charge of your agent?**
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/card-dark.png">
@@ -43,7 +45,7 @@ Every moment on the card has a `stroq show` line that prints the evidence behind
 
 ## Beyond the card
 
-Stroq is a local security platform for AI coding agents: Claude Code, Cursor, Codex CLI and others. Its hooks judge every tool call before it runs. They deny `curl | sh` and outbound calls that carry a known secret from your machine, and they ask you first when a command repeats text the agent read, naming that text. The console shows which agents actually ask Stroq, and every decision with its reason. Sessions you already had can be checked too, without installing anything.
+Stroq runs locally and keeps watch over your data while AI coding agents work: Claude Code, Cursor, Codex CLI and others. Its hooks judge every tool call before it runs. They deny `curl | sh` and outbound calls that carry a known secret from your machine, and they ask you first when a command repeats text the agent read, naming that text. The console shows which agents actually ask Stroq, and every decision with its reason. Sessions you already had can be checked too, without installing anything.
 
 ```bash
 npx @stroq/cli console        # the console: a private page on 127.0.0.1

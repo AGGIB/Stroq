@@ -144,7 +144,7 @@ describe('the two first screens', () => {
 
   it('make the same promise', () => {
     const promise =
-      'Stroq watches what your AI coding agent does with your keys and files, blocks sends it recognises as leaks, and shows where your keys went.';
+      'Stroq watches how agents use your keys and files, blocks recognised leaks, and shows where keys went.';
     expect(prose(github.firstScreen)[0]).toBe(promise);
     expect(prose(npm.firstScreen)[0]).toBe(promise);
   });
@@ -163,5 +163,12 @@ describe('the two first screens', () => {
     expect(headline(npm.firstScreen)).toBe(headline(github.firstScreen));
     expect(alt(github.firstScreen).length).toBeGreaterThan(100);
     expect(alt(npm.firstScreen)).toBe(alt(github.firstScreen));
+  });
+
+  it('ask the question the card answers, on the line above its picture', () => {
+    for (const { name, firstScreen } of PAGES)
+      expect(firstScreen, name).toContain(
+        '\n\n**Who is really in charge of your agent?**\n\n<picture>\n',
+      );
   });
 });
