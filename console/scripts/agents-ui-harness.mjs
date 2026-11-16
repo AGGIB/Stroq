@@ -110,7 +110,10 @@ export function harness(props = {}, agent = null, query = '') {
         if (name === 'next/navigation')
           return { useSearchParams: () => new URLSearchParams(query) };
         if (name === 'next/link')
-          return { default: ({ children, ...props }) => React.createElement('a', props, children) };
+          return {
+            __esModule: true,
+            default: ({ children, ...props }) => React.createElement('a', props, children),
+          };
         if (name === '@/components/platform-provider') return { usePlatform: () => platform };
         const stubs = {
           './agent-setup': 'SetupDialog',

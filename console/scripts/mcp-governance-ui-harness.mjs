@@ -131,7 +131,7 @@ export function governanceUI(query = '', { effects: runEffects = false } = {}) {
             },
           };
         if (name === 'radix-ui') return { Dialog };
-        if (name === 'next/link') return { default: wrap('a') };
+        if (name === 'next/link') return { __esModule: true, default: wrap('a') };
         if (name === 'next/navigation')
           return { useSearchParams: () => new URLSearchParams(query) };
         if (name === '@/components/platform-provider')

@@ -84,7 +84,10 @@ function harness(query = '', configure?: (state: any) => void) {
           useRouter: () => ({ push: (href: string) => calls.push(href) }),
         };
       if (name === 'next/link')
-        return { default: ({ children, ...p }: any) => React.createElement('a', p, children) };
+        return {
+          __esModule: true,
+          default: ({ children, ...p }: any) => React.createElement('a', p, children),
+        };
       if (name === 'lucide-react')
         return new Proxy({}, { get: () => () => React.createElement('svg') });
       if (name === '@/components/control-provider') return { useControl: () => state };
