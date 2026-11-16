@@ -23,7 +23,7 @@
  */
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { isAbsolute, join, resolve } from 'node:path';
 import { codexToolName, commandOf, isPatchTool } from '../adapters/codex-input.js';
 import {
   directoryAndParents,
@@ -442,7 +442,11 @@ export function createCodexParser(
   return { push, finish: () => ({ sessionId, cwd, events, skipped }) };
 }
 
-export const codexRoot = (home = homedir()): string => join(home, '.codex', 'sessions');
+export const codexRoot = (home = homedir(), codexHome?: string): string =>
+  join(
+    codexHome !== undefined && isAbsolute(codexHome) ? codexHome : join(home, '.codex'),
+    'sessions',
+  );
 
 /** What a rollout's first record says about it: the folder it ran in, and when it started. */
 export interface RolloutMeta {
