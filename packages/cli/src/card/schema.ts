@@ -36,6 +36,8 @@ export const toldMomentSchema = z
     command: text,
     at: text,
     decision: z.enum(['allow', 'ask', 'deny', 'none']),
+    /** A stop recorded by the host, independent of the replay's policy decision. */
+    blockedBy: z.enum(['stroq', 'user']).optional(),
     read: readSchema,
   })
   .strict();
@@ -52,7 +54,7 @@ export const MAX_HOURS = 10_000;
 
 /**
  * What happened in one hour of a session: the hour as whole hours since 1970 (or null for events whose
- * record gave no time that reads as one), the shell commands the agent ran in it, and how many of them a
+ * record gave no time that reads as one), the shell commands the agent requested, and how many of them a
  * text told it to run. The card's window is applied to these when the card is made, by when each event
  * happened and not by when the file was last written to.
  */
@@ -66,7 +68,7 @@ export const sessionSummarySchema = z
     cwd: text.nullable(),
     first: text.nullable(),
     last: text.nullable(),
-    /** Shell commands the agent ran. */
+    /** Shell commands the agent requested. */
     commands: count,
     /** How many of them a text told it to run (all of them, though only some are kept below). */
     told: count,

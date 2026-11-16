@@ -5,7 +5,7 @@ import type { Moment } from './schema.js';
 export const CARD_SCHEMA = 'stroq-card/1';
 
 export interface CardCounts {
-  /** Shell commands the agents ran. */
+  /** Shell commands the agents requested. */
   readonly commands: number;
   /** Of them, the ones a text the agent had read told it to run (the strict rule). */
   readonly toldByText: number;
