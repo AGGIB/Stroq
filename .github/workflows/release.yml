@@ -164,12 +164,26 @@ jobs:
           node-version: 24
           registry-url: https://registry.npmjs.org
 
-      # Bootstrap only the pinned publishing CLI, with lifecycle scripts disabled.
+      # Verify the publishing CLI and all its bundled dependencies before execution.
       # There is no project checkout or npm configuration in the working directory.
       - name: Install staged-publishing npm CLI
         run: |
-          npm install --global npm@11.15.0 --ignore-scripts
-          npm stage --help >/dev/null
+          TOOL_DIR="$(mktemp -d "$RUNNER_TEMP/stroq-npm.XXXXXX")"
+          curl --fail --silent --show-error --location --proto '=https' --tlsv1.2 \
+            https://registry.npmjs.org/npm/-/npm-11.15.0.tgz --output "$TOOL_DIR/npm.tgz"
+          node --input-type=module - "$TOOL_DIR/npm.tgz" <<'NODE'
+          import { createHash } from 'node:crypto';
+          import { readFileSync } from 'node:fs';
+          const expected = 'fa4d2d93b9519e93143e70bb913b94ff2ad5fe69c5a0f84943be557cbb59e9fc1bcce55768fb1313f225f4f9f50c78b8f366f2332aa41effd7b10efa98d8d72f';
+          const actual = createHash('sha512').update(readFileSync(process.argv[2])).digest('hex');
+          if (actual !== expected) throw new Error('npm CLI integrity mismatch');
+          NODE
+          tar -xzf "$TOOL_DIR/npm.tgz" -C "$TOOL_DIR"
+          mkdir "$TOOL_DIR/bin"
+          ln -s "$TOOL_DIR/package/bin/npm-cli.js" "$TOOL_DIR/bin/npm"
+          test "$("$TOOL_DIR/bin/npm" --version)" = '11.15.0'
+          "$TOOL_DIR/bin/npm" stage --help >/dev/null
+          echo "$TOOL_DIR/bin" >> "$GITHUB_PATH"
 
       # No run-id, repository or github-token override: download from this run only.
       - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7

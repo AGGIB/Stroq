@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -34,6 +42,45 @@ const step = (job: string, name: string): Step => {
 };
 
 describe('release credential boundary', () => {
+  // The publishing bootstrap runs only on Ubuntu and uses a POSIX shell.
+  it.skipIf(process.platform === 'win32')(
+    'rejects changed npm CLI bytes before extracting or executing them',
+    () => {
+      const directory = mkdtempSync(join(tmpdir(), 'stroq-npm-integrity-'));
+      try {
+        const bin = join(directory, 'bin');
+        mkdirSync(bin);
+        const marker = join(directory, 'extracted');
+        writeFileSync(
+          join(bin, 'curl'),
+          `#!/usr/bin/env node\nconst fs = require('node:fs'); const args = process.argv.slice(2); fs.writeFileSync(args[args.indexOf('--output') + 1], 'changed archive');\n`,
+          { mode: 0o755 },
+        );
+        writeFileSync(join(bin, 'tar'), `#!/bin/sh\ntouch '${marker}'\n`, { mode: 0o755 });
+        const pathFile = join(directory, 'github-path');
+        const result = spawnSync(
+          'bash',
+          ['-eo', 'pipefail', '-c', step('publish', 'Install staged-publishing npm CLI').run ?? ''],
+          {
+            env: {
+              ...process.env,
+              PATH: `${bin}:${process.env['PATH'] ?? ''}`,
+              RUNNER_TEMP: directory,
+              GITHUB_PATH: pathFile,
+            },
+            encoding: 'utf8',
+          },
+        );
+        expect(result.status).not.toBe(0);
+        expect(result.stderr).toContain('npm CLI integrity mismatch');
+        expect(existsSync(marker)).toBe(false);
+        expect(existsSync(pathFile)).toBe(false);
+      } finally {
+        rmSync(directory, { recursive: true, force: true });
+      }
+    },
+  );
+
   it('keeps the checked build and package lifecycle scripts outside the credentialed job', () => {
     const build = getJob('build');
     expect(build).toBeDefined();
@@ -73,9 +120,12 @@ describe('release credential boundary', () => {
       expect(run).toContain('--ignore-scripts');
       expect(run).toContain('--registry=https://registry.npmjs.org');
     }
-    expect(step('publish', 'Install staged-publishing npm CLI').run).toContain(
-      'npm install --global npm@11.15.0 --ignore-scripts',
-    );
+    const bootstrap = step('publish', 'Install staged-publishing npm CLI').run ?? '';
+    expect(bootstrap).not.toContain('npm install');
+    expect(bootstrap).toContain('https://registry.npmjs.org/npm/-/npm-11.15.0.tgz');
+    expect(bootstrap).toContain("createHash('sha512')");
+    expect(bootstrap.indexOf("createHash('sha512')")).toBeLessThan(bootstrap.indexOf('tar -xzf'));
+    expect(bootstrap).toContain('"$TOOL_DIR/bin/npm" stage --help');
   });
 
   it('downloads only this run\u2019s named artifact with no credentials or run override', () => {
