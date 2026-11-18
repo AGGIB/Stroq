@@ -20,6 +20,7 @@ import { renderShow } from '../../src/card/show.js';
 import { readLastCard, writeLastCard } from '../../src/card/store.js';
 import { listWindow } from '../../src/card/window.js';
 import { inProcessChannel } from '../../src/card/worker.js';
+import { partialKeys } from './partial-keys.js';
 import { cardDirIn, cardKeysFileIn } from '../../src/paths.js';
 import { checkSessions } from '../../src/sent/run.js';
 import {
@@ -78,21 +79,6 @@ function noting(log: CardJob[]): () => Channel<CardJob, CardResult> {
       ...real,
       send: (id, job) => {
         log.push(job);
-        real.send(id, job);
-      },
-    };
-  };
-}
-
-/** A channel that answers the first `n` key checks and never the rest. */
-function stallingKeys(n: number): () => Channel<CardJob, CardResult> {
-  let taken = 0;
-  return () => {
-    const real = inProcessChannel();
-    return {
-      ...real,
-      send: (id, job) => {
-        if (job.kind === 'keys' && (taken += 1) > n) return;
         real.send(id, job);
       },
     };
@@ -224,10 +210,7 @@ describe('the key check, kept from one run to the next', () => {
 describe('the key check when the time runs out', () => {
   it('says how many sessions it covered and counts only those', async () => {
     populate(m);
-    const data = await buildCard(
-      30,
-      env({ budgetMs: 1_000, graceMs: 100, workers: 1, open: stallingKeys(2) }),
-    );
+    const data = await partialKeys(2, env());
     expect(data.coverage).toMatchObject({
       found: 4,
       keys: 'not-finished',
@@ -249,7 +232,24 @@ describe('the key check when the time runs out', () => {
 
   it('goes on from what was kept at the next run', async () => {
     populate(m);
-    await buildCard(30, env({ budgetMs: 1_000, graceMs: 100, workers: 1, open: stallingKeys(2) }));
+    // The worker starts after the original budget plus grace. Only the budget is virtual:
+    // a busy CI worker must still produce the two results this continuation test needs.
+    const realSetTimeout = globalThis.setTimeout;
+    await partialKeys(
+      2,
+      env({
+        open: () => {
+          const real = inProcessChannel();
+          const started = new Promise<void>((resolve) => realSetTimeout(resolve, 1_250));
+          return {
+            ...real,
+            send: (id, job) => {
+              void started.then(() => real.send(id, job));
+            },
+          };
+        },
+      }),
+    );
     const log: CardJob[] = [];
     const next = await buildCard(30, env({ open: noting(log) }));
     expect(keyJobs(log)).toBe(2);
@@ -266,7 +266,7 @@ describe('the key check when the time runs out', () => {
   it('gives, once everything is checked, the card of a run that checked everything at once', async () => {
     populate(m);
     furnishMore();
-    await buildCard(30, env({ budgetMs: 1_000, graceMs: 100, workers: 1, open: stallingKeys(3) }));
+    await partialKeys(3, env());
     const resumed = await buildCard(30, env());
     rmSync(cardDirIn(m.stroqHome), { recursive: true, force: true });
     const whole = await buildCard(30, env({ workers: 3 }));
