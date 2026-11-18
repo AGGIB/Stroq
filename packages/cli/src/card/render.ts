@@ -70,7 +70,7 @@ function rowsOf(data: CardData): CountRow[] {
     {
       id: 'commands',
       count: c.commands,
-      text: c.commands === 1 ? 'command your agent ran' : 'commands your agent ran',
+      text: c.commands === 1 ? 'command your agent requested' : 'commands your agent requested',
     },
     {
       id: 'told',
@@ -228,7 +228,7 @@ export function shareLine(data: CardData): string {
   const c = data.counts;
   return (
     `Hoo checked ${days(data.days)} of my agent sessions: ` +
-    `${plural(c.commands, 'command', 'commands')}, ${num(c.toldByText)} came from text the agent read, ` +
+    `${plural(c.commands, 'command request', 'command requests')}, ${num(c.toldByText)} came from text the agent read, ` +
     `${plural(c.keysSent, 'key', 'keys')} left this machine, ` +
     `${plural(c.autorunRepos, 'repo runs', 'repos run')} code as soon as an agent opens ${c.autorunRepos === 1 ? 'it' : 'them'}. ` +
     SHARE_TAIL

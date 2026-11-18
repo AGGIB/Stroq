@@ -94,6 +94,44 @@ describe('the card on a machine with sessions', () => {
     ]);
   });
 
+  it.each([
+    {
+      result: 'Stroq blocked this action (deny-origin-suspect): the hook blocked this call.',
+      isError: true,
+      outcome: 'Stroq blocked the request.',
+    },
+    {
+      result: "The user doesn't want to proceed with this tool use.",
+      isError: true,
+      outcome: 'You declined the request.',
+    },
+    {
+      result: 'Stroq blocked this action (deny-origin-suspect): just text in the output.',
+      isError: false,
+      outcome: 'It requested the command.',
+    },
+  ])('reports the recorded command outcome as "$outcome"', async ({ result, isError, outcome }) => {
+    claudeSession(m, {
+      id: 'recorded-outcome',
+      calls: [
+        {
+          tool: 'Read',
+          input: { file_path: join(m.work, 'node_modules', 'another-lib', 'README.md') },
+          result: hostile(PIPE),
+        },
+        { tool: 'Bash', input: { command: PIPE }, result, isError },
+      ],
+    });
+    const card = await buildCard(30, env());
+    expect(card.counts).toMatchObject({ commands: 1, toldByText: 1 });
+    const moment = card.moments.find((row) => row.session?.id === 'recorded-outcome');
+    expect(moment?.line).toContain(outcome);
+    expect(moment?.groups.map((group) => group.title)).toContain('What it requested');
+    const warm = await buildCard(30, env());
+    expect(warm.moments).toContainEqual(moment);
+    expect(warm.coverage.fromCache).toBe(1);
+  });
+
   it('leaves out the moments marked as false alarms, from the cache too, and keeps the counts', async () => {
     populate(m);
     const first = await buildCard(30, env());

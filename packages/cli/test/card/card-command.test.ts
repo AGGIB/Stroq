@@ -57,6 +57,7 @@ describe('stroq card', () => {
     expect(out).toMatch(
       /^Hoo checked 30 days of your agent sessions\n4 sessions · Claude Code and Codex · this machine\n/,
     );
+    expect(out).toContain('commands your agent requested');
     expect(out).toContain('Worth a look');
     expect(out).toContain('stroq show 1');
     expect(out).toContain('Stop this next time:  npx @stroq/cli init');
@@ -166,7 +167,7 @@ describe('stroq show', () => {
     expect(code).toBe(0);
     expect(out).toContain('Moment 1 of the last card');
     expect(out).toContain('What your agent read');
-    expect(out).toContain('What it did next');
+    expect(out).toContain('What it requested');
     expect(out).toContain('stroq replay --transcript');
     expect(out).not.toContain(AWS_KEY);
   });

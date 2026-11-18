@@ -80,6 +80,11 @@ const POLICY_WORDS: Readonly<Record<ToldMoment['decision'], string>> = {
   none: 'have no rule for it',
 };
 
+const STOP_WORDS: Readonly<Record<NonNullable<ToldMoment['blockedBy']>, string>> = {
+  stroq: 'Stroq blocked the request.',
+  user: 'You declined the request.',
+};
+
 /** Where it was read: a file path keeps its end, where the file is; anything else keeps its start. */
 function whereOf(read: ToldMoment['read'], home: string): string {
   return FILE_TOOL.test(read.tool) ? shortPath(read.source, home, 120) : clean(read.source, 120);
@@ -87,10 +92,12 @@ function whereOf(read: ToldMoment['read'], home: string): string {
 
 function toldMoment({ moment, session }: ToldInput, home: string): Omit<Moment, 'n'> {
   const read = moment.read;
+  const outcome =
+    moment.blockedBy === undefined ? 'It requested the command.' : STOP_WORDS[moment.blockedBy];
   return {
     kind: 'told-by-text',
     line:
-      `${subjectOf(read)} told your agent to ${WHAT_IT_SAID[moment.shape](moment)}. It did. ` +
+      `${subjectOf(read)} told your agent to ${WHAT_IT_SAID[moment.shape](moment)}. ${outcome} ` +
       'Whoever wrote that text can steer your agent.',
     session,
     groups: [
@@ -104,7 +111,7 @@ function toldMoment({ moment, session }: ToldInput, home: string): Omit<Moment, 
         ],
       },
       {
-        title: 'What it did next',
+        title: 'What it requested',
         rows: [
           ['Command', clean(moment.command, 200)],
           ['Tool', clean(moment.tool, 60)],
