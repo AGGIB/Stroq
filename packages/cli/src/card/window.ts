@@ -118,7 +118,8 @@ export async function listWindow(
 ): Promise<WindowListing> {
   const cutoff = windowStart(days, now);
   const claude = await claudeMains(home, env);
-  const codex = await everyRollout(codexRoot(home));
+  const codexDir = codexRoot(home, env['CODEX_HOME']);
+  const codex = await everyRollout(codexDir);
   const inside = (m: { mtimeMs: number }): boolean => m.mtimeMs >= cutoff;
   const sessions: WindowSession[] = [];
   for (const main of claude.filter(inside)) {
@@ -152,7 +153,7 @@ export async function listWindow(
   return {
     sessions,
     older,
-    looked: [lookedForClaude(home, env), codexRoot(home), cursorDb],
+    looked: [lookedForClaude(home, env), codexDir, cursorDb],
     ...(cursor.note === undefined ? {} : { cursorNote: cursor.note }),
   };
 }

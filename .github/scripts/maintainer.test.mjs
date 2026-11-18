@@ -419,6 +419,20 @@ for (const [name, mutate, reason] of [
     'automation-policy-requires-manual-merge',
   ],
   [
+    'CI tool lockfile changes',
+    (s) => {
+      s.files[0].filename = 'tools/ci/mcp-probe/package-lock.json';
+    },
+    'automation-policy-requires-manual-merge',
+  ],
+  [
+    'renamed CI tool lockfile',
+    (s) => {
+      s.files[0].previous_filename = 'tools/ci/mcp-probe/package-lock.json';
+    },
+    'automation-policy-requires-manual-merge',
+  ],
+  [
     'renamed agent policy',
     (s) => {
       s.files[0].previous_filename = 'AGENTS.md';

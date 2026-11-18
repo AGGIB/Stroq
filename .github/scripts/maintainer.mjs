@@ -250,7 +250,7 @@ export function readiness(snapshot) {
       [file.filename, file.previous_filename].some(
         (name) =>
           typeof name === 'string' &&
-          /(?:^\.github\/|^\.claude\/|(?:^|\/)(?:AGENTS|CLAUDE)\.md$)/.test(name),
+          /(?:^\.github\/|^tools\/ci\/|^\.claude\/|(?:^|\/)(?:AGENTS|CLAUDE)\.md$)/.test(name),
       ),
     )
   )
