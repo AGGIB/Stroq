@@ -1,13 +1,14 @@
 Dual-use disclosure for @stroq/cli
 ===================================
 
-Stroq is an open-source (Apache-2.0) local "action firewall" for AI coding
-agents such as Claude Code, Cursor and OpenAI Codex CLI. It is a defensive
-security tool. It runs entirely on the developer's own machine, and it makes
-no network requests of its own: the strings `fetch(`, `curl ... | sh`,
-`base64 -d`, `~/.ssh/id_rsa` and similar that appear in this package are
-detection rules and recorded attack fixtures, not code paths that execute
-them. Source, tests and the rule corpus: https://github.com/AGGIB/Stroq
+Stroq is an open-source (Apache-2.0) local tool that keeps watch over what
+AI coding agents such as Claude Code, Cursor and OpenAI Codex CLI do with a
+developer's keys and files. It is a defensive security tool. It runs
+entirely on the developer's own machine, and it makes no network requests
+of its own: the strings `fetch(`, `curl ... | sh`, `base64 -d`,
+`~/.ssh/id_rsa` and similar that appear in this package are detection rules
+and recorded attack fixtures, not code paths that execute them. Source,
+tests and the rule corpus: https://github.com/AGGIB/Stroq
 
 Why an automated scanner may flag this package
 ----------------------------------------------

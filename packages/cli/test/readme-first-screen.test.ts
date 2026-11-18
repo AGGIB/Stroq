@@ -57,7 +57,7 @@ const prose = (screen: string): string[] =>
 describe.each(PAGES)('the first screen of $name', ({ firstScreen, pictureBase }) => {
   it('ends where the first section starts, and is not empty', () => {
     expect(firstScreen.length).toBeGreaterThan(500);
-    expect(firstScreen).toContain('Who is really in charge of your agent?');
+    expect(firstScreen).toContain('Let your agent work. Stroq keeps watch over your data.');
   });
 
   it('uses none of the words the card itself avoids', () => {
@@ -144,7 +144,7 @@ describe('the two first screens', () => {
 
   it('make the same promise', () => {
     const promise =
-      'Stroq reads your own Claude Code, Codex and Cursor sessions and shows how many commands came from text your agent read, and which keys left your machine.';
+      'Stroq watches how agents use your keys and files, blocks recognised leaks, and shows where keys went.';
     expect(prose(github.firstScreen)[0]).toBe(promise);
     expect(prose(npm.firstScreen)[0]).toBe(promise);
   });
@@ -154,12 +154,21 @@ describe('the two first screens', () => {
     expect(splitFences(github.firstScreen).code).toHaveLength(2);
   });
 
-  it('put the same question first and describe the card picture the same way', () => {
+  it('put the same headline first and describe the card picture the same way', () => {
     const alt = (screen: string): string => /alt="(The Stroq card[^"]*)"/.exec(screen)?.[1] ?? '';
-    const question = (screen: string): string => /^### (.+)$/m.exec(screen)?.[1] ?? '';
-    expect(question(npm.firstScreen)).toBe('Who is really in charge of your agent?');
-    expect(question(npm.firstScreen)).toBe(question(github.firstScreen));
+    const headline = (screen: string): string => /^### (.+)$/m.exec(screen)?.[1] ?? '';
+    expect(headline(npm.firstScreen)).toBe(
+      'Let your agent work. Stroq keeps watch over your data.',
+    );
+    expect(headline(npm.firstScreen)).toBe(headline(github.firstScreen));
     expect(alt(github.firstScreen).length).toBeGreaterThan(100);
     expect(alt(npm.firstScreen)).toBe(alt(github.firstScreen));
+  });
+
+  it('ask the question the card answers, on the line above its picture', () => {
+    for (const { name, firstScreen } of PAGES)
+      expect(firstScreen, name).toContain(
+        '\n\n**Who is really in charge of your agent?**\n\n<picture>\n',
+      );
   });
 });

@@ -7,7 +7,7 @@ import { PlatformShell } from '@/components/platform-shell';
 import { ControlProvider } from '@/components/control-provider';
 import './globals.css';
 export const metadata: Metadata = {
-  title: { template: '%s · Stroq', default: 'Stroq · Security platform' },
+  title: { template: '%s · Stroq', default: 'Stroq console' },
   description:
     'Understand what your AI agents do. Investigate decisions, review exposure, and verify coverage — on your machine.',
   robots: { index: false, follow: false },

@@ -3,8 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Stroq — find secrets in AI coding agent sessions</title>
-<meta name="description" content="Scan recorded Claude Code, Codex CLI and Cursor sessions for known credentials without printing their values. Stroq also guards supported agent actions against prompt injection and secret egress. Local, open source.">
+<title>Let your agent work. Stroq keeps watch over your data.</title>
+<meta name="description" content="Stroq watches what your AI coding agent does with your keys and files, blocks the sends it recognises as a leak, and shows where your keys have already gone. It reads Claude Code, Codex CLI and Cursor sessions. Local, open source.">
 <link rel="canonical" href="https://stroq.dev/">
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" media="(prefers-color-scheme: light)" content="#f1f2f0">
@@ -12,15 +12,15 @@
 <meta property="og:type" content="website">
 <meta property="og:site_name" content="Stroq">
 <meta property="og:url" content="https://stroq.dev/">
-<meta property="og:title" content="Stroq — find secrets in AI coding agent sessions">
-<meta property="og:description" content="Find known credentials in recorded agent sessions, then guard supported future actions. Local and open source.">
+<meta property="og:title" content="Let your agent work. Stroq keeps watch over your data.">
+<meta property="og:description" content="Stroq watches what your AI coding agent does with your keys and files, blocks the sends it recognises as a leak, and shows where your keys have already gone. Local and open source.">
 <meta property="og:image" content="https://stroq.dev/assets/social-preview.png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="640">
 <meta property="og:image:alt" content="Stroq — find known secrets in AI coding agent sessions, then guard the next one">
 <meta name="twitter:card" content="summary_large_image">
-<meta name="twitter:title" content="Stroq — find secrets in AI coding agent sessions">
-<meta name="twitter:description" content="Find known credentials in recorded agent sessions, then guard supported future actions. Local and open source.">
+<meta name="twitter:title" content="Let your agent work. Stroq keeps watch over your data.">
+<meta name="twitter:description" content="Stroq watches what your AI coding agent does with your keys and files, blocks the sends it recognises as a leak, and shows where your keys have already gone. Local and open source.">
 <meta name="twitter:image" content="https://stroq.dev/assets/social-preview.png">
 <link rel="icon" type="image/svg+xml" href="/favicon.svg">
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -276,8 +276,8 @@
 </svg>
 <!-- owl:end -->
         </div>
-        <h1 id="hero-title">Who is really in charge of your agent?</h1>
-        <p class="lead">Stroq reads your own Claude Code, Codex and Cursor sessions and shows how many commands came from <em>text your agent read</em>, and which keys left your machine.</p>
+        <h1 id="hero-title"><span>Let your agent work.</span> <span>Stroq keeps watch over your data.</span></h1>
+        <p class="lead">Stroq watches how agents use <em>your keys and files</em>, blocks recognised leaks, and shows where keys went.</p>
         <div class="hero-cta">
           <div class="install-pill">
             <code class="install-cmd" id="install-cmd"><span class="prompt-mark" aria-hidden="true">$ </span>npx @stroq/cli</code>
@@ -297,6 +297,7 @@
       </div>
 
       <figure class="xray" data-draw aria-labelledby="xray-cap">
+        <p class="xray-ask">Who is really in charge of your agent?</p>
         <div class="xray-strip">
           <svg class="xray-svg" viewBox="0 0 600 120" role="img" aria-label="One session drawn as 64 tool calls. Three of them carry a credential; a thread from each runs down into the report below.">
             <path class="ticks" d="M8.0 96v-14 M17.2 96v-34 M26.4 96v-26 M35.6 96v-18 M44.8 96v-38 M54.0 96v-31 M63.2 96v-23 M72.4 96v-15 M81.6 96v-35 M90.8 96v-27 M100.0 96v-20 M109.2 96v-40 M118.4 96v-32 M127.6 96v-24 M146.0 96v-37 M155.2 96v-29 M164.4 96v-21 M173.6 96v-41 M182.8 96v-33 M192.0 96v-26 M201.2 96v-18 M210.4 96v-38 M219.6 96v-30 M228.8 96v-22 M238.0 96v-15 M247.2 96v-35 M256.4 96v-27 M265.6 96v-19 M274.8 96v-39 M284.0 96v-32 M293.2 96v-24 M302.4 96v-16 M320.8 96v-28 M330.0 96v-21 M339.2 96v-41 M348.4 96v-33 M357.6 96v-25 M366.8 96v-17 M376.0 96v-38 M385.2 96v-30 M394.4 96v-22 M403.6 96v-14 M412.8 96v-34 M422.0 96v-27 M431.2 96v-19 M440.4 96v-39 M449.6 96v-31 M458.8 96v-23 M468.0 96v-16 M477.2 96v-36 M495.6 96v-20 M504.8 96v-40 M514.0 96v-33 M523.2 96v-25 M532.4 96v-17 M541.6 96v-37 M550.8 96v-29 M560.0 96v-22 M569.2 96v-14 M578.4 96v-34 M587.6 96v-26"/>

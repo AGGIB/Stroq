@@ -27,13 +27,13 @@ export async function launch(args, { cwd = process.cwd(), out = console.log, sta
   const options = parseLaunchOptions(args, cwd);
   if (options.help) {
     out(
-      'Stroq local security platform\n\nUsage: pnpm platform [--workspace <directory>] [--port <number>]\n\nThe server binds to 127.0.0.1. Open its private URL to connect.\nThe selected workspace and this OS user define every local operation.',
+      'Stroq local console\n\nUsage: pnpm platform [--workspace <directory>] [--port <number>]\n\nThe server binds to 127.0.0.1. Open its private URL to connect.\nThe selected workspace and this OS user define every local operation.',
     );
     return null;
   }
   const startServer = start ?? (await import('./serve.mjs')).startServer;
   const app = await startServer({ project: options.workspace, port: options.port });
-  out(`Stroq — private local security platform\n${app.url}`);
+  out(`Stroq console — private and local\n${app.url}`);
   return app;
 }
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
