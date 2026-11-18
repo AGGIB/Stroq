@@ -82,6 +82,7 @@ const VALUE_FLAGS: ReadonlySet<string> = new Set([
 ]);
 /** The options of a runner that name the package to fetch. */
 const PACKAGE_FLAGS: ReadonlySet<string> = new Set(['-p', '--package']);
+const NPX_INFO_FLAGS: ReadonlySet<string> = new Set(['--help', '-h', '--usage', '--version', '-v']);
 
 /** Words after a phrase, which are the packages it names. */
 function namesAfter(words: readonly string[], from: number, kind: Kind): string[] {
@@ -122,6 +123,11 @@ function matchAfter(view: StageView, entry: Phrase): number {
 export function packagesOf(view: StageView): PackageMention[] {
   if (view.cmd === -1) return [];
   const tool = baseOf(view.words[view.cmd] ?? '');
+  const first = view.words[view.cmd + 1] ?? '';
+  const second = view.words[view.cmd + 2] ?? '';
+  // A standalone npx info flag ends at the first operand or --. Another launcher option can override it.
+  if (tool === 'npx' && NPX_INFO_FLAGS.has(first) && (second === '--' || !second.startsWith('-')))
+    return [];
   const out: PackageMention[] = [];
   for (const entry of PHRASES) {
     if (entry.tool !== tool) continue;
