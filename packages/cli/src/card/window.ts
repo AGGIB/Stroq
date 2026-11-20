@@ -1,3 +1,4 @@
+import { claudeUserDir } from '../paths.js';
 // The sessions of the last N days that agents keep on this machine, newest first.
 // For transcript files, read the head only when the file date is inside the window.
 import { lstatSync, statSync } from 'node:fs';
@@ -105,8 +106,7 @@ export const isTooLarge = (session: Pick<WindowSession, 'bytes'>): boolean =>
 
 /** Where Claude Code's sessions are looked for first: `CLAUDE_CONFIG_DIR` when it is set, else `~/.claude`. */
 function lookedForClaude(home: string, env: Readonly<Record<string, string | undefined>>): string {
-  const named = env['CLAUDE_CONFIG_DIR'];
-  return join(named === undefined || named === '' ? join(home, '.claude') : named, 'projects');
+  return join(claudeUserDir(home, env), 'projects');
 }
 
 export async function listWindow(
