@@ -2,9 +2,11 @@ import { homedir } from 'node:os';
 import { cpSync, existsSync, realpathSync, renameSync, rmSync } from 'node:fs';
 import { basename, join, relative, resolve } from 'node:path';
 import { parseArgs } from 'node:util';
+import type { JsonObject } from '../harden/types.js';
+import type { SandboxChoices } from '../credential-sandbox/rules.js';
 import { CURSOR_EVENTS } from '../adapters/cursor.js';
 import { recordInstall } from './install-record.js';
-import { cliDirIn, stroqHome } from '../paths.js';
+import { claudeUserDir, cliDirIn, stroqHome } from '../paths.js';
 import { stroqVersion } from '../version.js';
 import { WINDSURF_EVENTS } from '../adapters/windsurf.js';
 import {
@@ -205,7 +207,7 @@ export function mergeHooks(settings: SettingsJson, command: string): SettingsJso
 
 export function settingsPath(scope: 'project' | 'user', cwd: string = process.cwd()): string {
   return scope === 'user'
-    ? join(homedir(), '.claude', 'settings.json')
+    ? join(claudeUserDir(homedir(), process.env), 'settings.json')
     : join(cwd, '.claude', 'settings.json');
 }
 
@@ -217,13 +219,43 @@ export function installHooks(file: string, command: string): SettingsJson {
   return merged;
 }
 
-function initClaudeCode(scope: 'project' | 'user', command: string, dryRun: boolean): number {
+async function initClaudeCode(
+  scope: 'project' | 'user',
+  command: string,
+  dryRun: boolean,
+  sandbox: SandboxChoices | null,
+  platform: NodeJS.Platform,
+): Promise<number> {
   const file = settingsPath(scope);
-  if (dryRun) {
-    process.stdout.write(`${JSON.stringify(mergeHooks(readSettings(file), command), null, 2)}\n`);
-    return 0;
+  if (scope === 'user') {
+    const choices = platform === 'darwin' ? sandbox : null;
+    const { editClaudeSettings } = await import('../credential-sandbox/settings.js');
+    const result = await editClaudeSettings({
+      file,
+      home: stroqHome(),
+      dryRun,
+      choices: choices ?? 'hooks-only',
+      hooks: (doc) => mergeHooks(doc, command) as JsonObject,
+    });
+    if (dryRun) {
+      process.stdout.write(JSON.stringify(result.doc, null, 2) + '\n');
+      return 0;
+    }
+    if (choices !== null)
+      process.stdout.write(
+        'User key-file rules configured for sandboxed Bash. Run "stroq doctor" to see the settings.\n',
+      );
+  } else {
+    if (dryRun) {
+      process.stdout.write(JSON.stringify(mergeHooks(readSettings(file), command), null, 2) + '\n');
+      return 0;
+    }
+    installHooks(file, command);
+    if (platform === 'darwin' && sandbox !== null)
+      process.stdout.write(
+        'To configure user-wide key-file rules, run stroq init --agent claude-code --user.\n',
+      );
   }
-  installHooks(file, command);
   process.stdout.write(
     `Stroq hooks installed in ${file}\n  PreToolUse         → ${PRE_MATCHER}\n  PostToolUse        → ${POST_MATCHER}\n  PostToolUseFailure → ${POST_MATCHER}\nRun "stroq doctor" to verify.\n`,
   );
@@ -482,6 +514,7 @@ export const INIT_OPTIONS = {
   // and `--no-input` keeps it from being asked.
   yes: { type: 'boolean', default: false },
   'no-input': { type: 'boolean', default: false },
+  'hooks-only': { type: 'boolean', default: false },
 } as const;
 
 /** Whether an entry is in npm's npx cache, which `stableEntry` copies out of. */
@@ -489,6 +522,8 @@ export const runsFromNpxCache = (entry: string): boolean => NPX_CACHE_ROOT.test(
 
 /** What a test says about the machine `init` runs on; the real one is the default. */
 export interface InitMachine {
+  /** Separate choices made at an interactive user-scope install. */
+  readonly sandbox?: SandboxChoices;
   readonly platform?: NodeJS.Platform;
   readonly tools?: WindowsTools;
   /** Starts a hook line the way the agent's host does, with the self-check's two events. */
@@ -523,7 +558,7 @@ export async function runInit(args: readonly string[], machine: InitMachine = {}
   const node = process.execPath;
   const launched = resolve(process.argv[1] ?? '');
   const entry = stableEntry(launched, stroqHome(), stroqVersion(), dryRun);
-  if (entry !== launched)
+  if (entry !== launched && !dryRun)
     process.stdout.write(
       `Stroq ran from the npx cache, which npm prunes; the hooks run a copy at ${entry}\n`,
     );
@@ -560,7 +595,14 @@ export async function runInit(args: readonly string[], machine: InitMachine = {}
   const install: Readonly<
     Record<HookAgent, (s: typeof scope, c: string, d: boolean) => number | Promise<number>>
   > = {
-    'claude-code': initClaudeCode,
+    'claude-code': (s, c, d) =>
+      initClaudeCode(
+        s,
+        c,
+        d,
+        values['hooks-only'] ? null : (machine.sandbox ?? {}),
+        machine.platform ?? process.platform,
+      ),
     cursor: initCursor,
     codex: initCodex,
     copilot: initCopilot,

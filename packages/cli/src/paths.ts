@@ -1,6 +1,13 @@
 import { homedir } from 'node:os';
 import { join } from 'node:path';
 
+export function claudeUserDir(
+  home: string,
+  env: Readonly<Record<string, string | undefined>>,
+): string {
+  return env.CLAUDE_CONFIG_DIR || join(home, '.claude');
+}
+
 export function stroqHome(): string {
   // An empty variable is not a directory: it would put what Stroq keeps in the folder it runs in.
   const set = process.env['STROQ_HOME'];

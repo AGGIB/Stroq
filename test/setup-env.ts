@@ -46,6 +46,9 @@ if (fileTmp !== null) {
 const fakeHome = mkdtempSync(join(tmpdir(), 'stroq-home-'));
 process.env['HOME'] = fakeHome;
 process.env['USERPROFILE'] = fakeHome;
+// Agent-specific directories override the test home. Each test can select its own fixture.
+delete process.env['CLAUDE_CONFIG_DIR'];
+delete process.env['CODEX_HOME'];
 // Cursor reads APPDATA on Windows even when USERPROFILE is isolated. Never inspect
 // the developer's real state.vscdb while looking for a fixture session.
 process.env['APPDATA'] = join(fakeHome, 'AppData', 'Roaming');
