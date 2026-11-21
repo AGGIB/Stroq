@@ -5,6 +5,9 @@ import { FileSecretIndex } from '@stroq/core';
 import { secretsFile, stroqHome } from '../paths.js';
 import { stroqVersion } from '../version.js';
 import type { Timers } from '../ui/spinner.js';
+import { confirm } from '../ui/prompt.js';
+import { styleFor } from '../ui/style.js';
+import type { SandboxChoices } from '../credential-sandbox/rules.js';
 import type { Terminal } from '../ui/terminal.js';
 import { antigravityHooksPath } from './antigravity-hooks.js';
 import { codexHooksPath } from './codex-hooks.js';
@@ -150,6 +153,8 @@ export async function runInteractiveInit(
   const { cwd, home } = where;
   const scope = args.includes('--user') ? 'user' : 'project';
   const yes = args.includes('--yes');
+  const userSandbox =
+    scope === 'user' && process.platform === 'darwin' && !args.includes('--hooks-only');
   // A home that is not set is an empty string, and a path joined to it is the project's own.
   const found = new Set(home === '' ? [] : detectedAgents(cwd, home, 'user'));
   const agents: FlowAgent[] = HOOK_AGENTS.map((id) => ({
@@ -158,6 +163,9 @@ export async function runInteractiveInit(
     found: found.has(id),
     where: found.has(id) ? configOf(id, scope, cwd, home) : '',
     ...(extraFor(id) === undefined ? {} : { extra: extraFor(id) as string }),
+    ...(id === 'claude-code' && userSandbox
+      ? { extra: 'adds eight home key paths to the Bash sandbox settings for all projects' }
+      : {}),
     ...(PLUGINS[id] ?? {}),
   }));
   const named = explicitAgent(args);
@@ -178,7 +186,29 @@ export async function runInteractiveInit(
   const reads = new FileSecretIndex(secretsFile(), home)
     .sourcePaths(cwd)
     .map((file) => display(file, cwd, home));
+  let sandbox: SandboxChoices = {};
+  const offerSandbox = userSandbox && chosen.includes('claude-code');
   return runInitFlow({
+    ...(offerSandbox
+      ? {
+          configureSandbox: async () => {
+            const style = styleFor(term);
+            const enable = await confirm(
+              term,
+              style,
+              'Use the Claude Code Bash sandbox and ask before outside retries? This limits writes, can prompt for network access and can interrupt Git over SSH.',
+              false,
+            );
+            const extra = await confirm(
+              term,
+              style,
+              'Also restrict AWS, npm and GPG credentials? This can interrupt deployments, package installs and signed commits.',
+              false,
+            );
+            sandbox = { enable, extra };
+          },
+        }
+      : {}),
     term,
     stroq: stroqVersion(),
     scope,
@@ -190,7 +220,7 @@ export async function runInteractiveInit(
     show: (file) => display(file, cwd, home),
     copiesCli: runsFromNpxCache(process.argv[1] ?? ''),
     install: async (id) => {
-      const found = await captured(() => runInit([...base, '--agent', id]));
+      const found = await captured(() => runInit([...base, '--agent', id], { sandbox }));
       return {
         ...found,
         out: withSafePaths(found.out, [

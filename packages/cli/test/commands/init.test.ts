@@ -1053,6 +1053,14 @@ describe('stableEntry', () => {
       return out.lines.join('');
     }
 
+    it('prints a parseable user settings preview when run from the npx cache', async () => {
+      const { entry } = npxTree();
+      const home = mkdtempSync(join(tmpdir(), 'stroq-npx-preview-'));
+      const printed = await initFrom(entry, home, ['--user', '--dry-run']);
+      expect(JSON.parse(printed)).toHaveProperty('hooks.PreToolUse');
+      expect(existsSync(join(home, 'cli'))).toBe(false);
+    });
+
     it('warns, with what to do, when the copy fails', async () => {
       const { entry } = npxTree();
       const home = mkdtempSync(join(tmpdir(), 'stroq-stable-'));
