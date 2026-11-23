@@ -67,6 +67,17 @@ export async function routeMcpCallControls(req, path, origin, service) {
     path === '/api/mcp-call-controls/' + action &&
     ['inspect', 'preview', 'apply', 'recheck'].includes(action)
   )
-    return jsonAction(req, origin, (input) => service[action](input), 4096, parseFixedControlJson);
+    return jsonAction(
+      req,
+      origin,
+      (input) => {
+        if (action === 'inspect') return service.inspect(input);
+        if (action === 'preview') return service.preview(input);
+        if (action === 'apply') return service.apply(input);
+        return service.recheck(input);
+      },
+      4096,
+      parseFixedControlJson,
+    );
   return { status: 404, body: { error: 'not-found' } };
 }

@@ -5,7 +5,7 @@
   <img src="https://raw.githubusercontent.com/AGGIB/Stroq/main/docs/assets/logo.svg" alt="Stroq" width="340">
 </picture>
 
-### Who is really in charge of your agent?
+### Let your agent work. Stroq keeps watch over your data.
 
 [![CI](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml/badge.svg)](https://github.com/AGGIB/Stroq/actions/workflows/ci.yml)
 [![stroq attack: 0 of 36 passed through](https://img.shields.io/badge/stroq%20attack-0%20of%2036%20passed%20through-1f9d55)](https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md#replay-thirty-six-attacks-from-public-reports-and-synthetic-cells)
@@ -15,7 +15,9 @@
 
 </div>
 
-Stroq reads your own Claude Code, Codex and Cursor sessions and shows how many commands came from text your agent read, and which keys left your machine.
+Stroq watches how agents use your keys and files, blocks recognised leaks, and shows where keys went.
+
+**Who is really in charge of your agent?**
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/AGGIB/Stroq/main/docs/assets/readme/card-dark.png">
@@ -43,7 +45,7 @@ Every moment on the card has a `stroq show` line that prints the evidence behind
 
 ## Beyond the card
 
-Stroq is a local security platform for AI coding agents: Claude Code, Cursor, Codex CLI and others. Its hooks judge every tool call before it runs. They deny `curl | sh` and outbound calls that carry a known secret from your machine, and they ask you first when a command repeats text the agent read, naming that text. The console shows which agents actually ask Stroq, and every decision with its reason. Sessions you already had can be checked too, without installing anything.
+Stroq runs locally and keeps watch over your data while AI coding agents work: Claude Code, Cursor, Codex CLI and others. Its hooks judge every tool call before it runs. They deny `curl | sh` and outbound calls that carry a known secret from your machine, and they ask you first when a command repeats text the agent read, naming that text. The console shows which agents actually ask Stroq, and every decision with its reason. Sessions you already had can be checked too, without installing anything.
 
 ```bash
 npx @stroq/cli console           # the console: a private page on 127.0.0.1
@@ -107,9 +109,21 @@ npx @stroq/cli doctor                # check the installation
 
 Prefer a persistent install? `npm install -g @stroq/cli` installs the `stroq` command globally — then run `stroq init` and `stroq doctor` directly.
 
-`doctor --json` keeps its version 1 installation-wide `ok` and exit semantics, and adds `diagnosticsVersion:1` with finite reason/scope facts on each check. An absent agent can still have `ok:true` when another agent is configured; its typed observation says `not-configured`. These are recorded offline checks, not current native-host blocking proof. The human-readable report remains unchanged.
+`doctor --json` keeps its version 1 installation-wide `ok` and exit semantics, and adds `diagnosticsVersion:1` with finite reason/scope facts on each check. An absent agent can still have `ok:true` when another agent is configured; its typed observation says `not-configured`. These are recorded offline checks, not current native-host blocking proof.
 
-### Local security platform (source build)
+### Credential files in the macOS Bash sandbox
+
+`stroq init --agent claude-code --user --dry-run` previews the settings. The user install adds read-deny entries for `~/.ssh`, `~/.config/gcloud`, `~/.config/gh/hosts.yml`, `~/.kube/config`, `~/.docker/config.json`, `~/.netrc`, `~/.pgpass` and `~/.git-credentials`. They take effect in sandboxed Bash when Claude Code enables filesystem isolation. A project install writes its usual hooks. Use `--hooks-only` for the same choice in a user install.
+
+At a terminal, the user install asks separately whether to enable the sandbox and require approval for outside retries, and whether to include the three AWS credential/cache paths, `~/.npmrc` and `~/.gnupg`. Enabling sandboxing can limit writes, prompt for network access and interrupt Git over SSH. The extra paths can affect deployment, private packages and signed commits. `--yes` and `--no-input` install the eight base entries and skip both choices. Project `.env` files stay available to applications.
+
+`stroq doctor` and the card show the configured sandbox mode, how many of the 13 paths have explicit deny entries, possible read exceptions, retry policy and excluded commands. Check `/sandbox` in Claude Code for the running session. Native Windows has no Claude Code Bash sandbox. The rules apply to sandboxed shell processes. Built-in file tools, MCP servers, the keychain, inherited environment variables and commands running outside the sandbox have separate access controls. [Claude Code sandbox settings](https://code.claude.com/docs/en/sandboxing)
+
+`stroq uninstall --user` restores the settings Stroq recorded, provided they still match its edits. It preserves existing rules, masks and later edits. The per-profile receipt under `STROQ_HOME/sandbox/` stores rule identifiers and the previous boolean state. If the receipt is missing, existing sandbox settings stay in place.
+
+For Codex, `doctor` reads the selected user permission profile and `doctor --all` prints a TOML example. For Cursor, it shows the read boundary requested by user and project settings. Both integrations read local configuration files. [Codex permission profiles](https://developers.openai.com/codex/permissions/) · [Cursor sandbox settings](https://cursor.com/docs/reference/sandbox)
+
+### Local console (source build)
 
 This checkout also builds the console, a private page with five screens: Check (the card of your sessions), Live (the audit journal), Agents (hooks and settings), Rules (the policy) and Skills & MCP (what your agents load). Build and start it locally:
 
@@ -155,8 +169,8 @@ With an absolute `CODEX_HOME`, the card looks for Codex sessions in `$CODEX_HOME
 | ---------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `stroq card [--days <n>] [--json] [--share] [--plain] [--no-animation]`                                                | What `stroq` alone runs: reads the last 30 days of Claude Code, Codex and Cursor sessions locally and prints the commands your agent ran, how many a text it had read told it to run, keys sent to another company and repositories that run code as soon as an agent opens them, then the moments worth a look, with Hoo the owl beside it on a terminal. Nothing runs and nothing is sent; it exits 0. `--json` prints schema `stroq-card/1`, `--share` one line of counts with no path, name or host, `--plain` the text without the owl |
 | `stroq show <n>`                                                                                                       | Print the evidence behind moment `<n>` of the last card: what was read, what the agent did, how they are linked, the session and the transcript to replay                                                                                                                                                                                                                                                                                                                                                                                   |
-| `stroq console [--workspace <directory>] [--port <number>]`                                                            | Start the authenticated local security platform on loopback for an existing workspace. Keep its private URL token secret; configuration changes, credential scans and provider checks require their separate platform confirmation.                                                                                                                                                                                                                                                                                                         |
-| `stroq init [--agent <name>] [--user] [--dry-run] [--yes] [--no-input]`                                                | Install hooks for `claude-code`, `cursor`, `codex`, `copilot`, `openclaw`, `windsurf` or `antigravity`, or wrap an MCP client's stdio servers with `--agent mcp` (`--client <name>` or `--config <path>`; `--user` for the home-directory copy, `--unwrap` to restore, `--cloak` to redact, `--strict` to withhold unread messages; entries confirmed by `add` are kept). `--yes` answers terminal prompts, `--no-input` runs non-interactively                                                                                             |
+| `stroq console [--workspace <directory>] [--port <number>]`                                                            | Start the authenticated local console on loopback for an existing workspace. Keep its private URL token secret; configuration changes, credential scans and provider checks require their separate platform confirmation.                                                                                                                                                                                                                                                                                                                   |
+| `stroq init [--agent <name>] [--user] [--dry-run] [--yes] [--no-input]`                                                | Install hooks for `claude-code`, `cursor`, `codex`, `copilot`, `openclaw`, `windsurf` or `antigravity`, or wrap an MCP client's stdio servers with `--agent mcp` (`--client <name>` or `--config <path>`; `--user` for the home-directory copy, `--unwrap` to restore, `--cloak` to redact, `--strict` to withhold unread messages; entries confirmed by `add` are kept). `--hooks-only` skips Claude Code sandbox setup on macOS. `--yes` answers terminal prompts, `--no-input` runs non-interactively                                    |
 | `stroq uninstall [--agent <name>] [--user] [--dry-run]`                                                                | Take Stroq's hooks out of an agent's config, leaving everything else as it was; with `--agent mcp`, unwrap servers via `--client <name>` or `--config <path>`                                                                                                                                                                                                                                                                                                                                                                               |
 | `stroq hook <agent>`                                                                                                   | Hook entrypoint (reads the event on stdin; `copilot` and `openclaw` take a `pre`/`post` argument, `antigravity` takes `pre`, `post` or `preinvocation`, the others take none)                                                                                                                                                                                                                                                                                                                                                               |
 | `stroq mcp --server <name> -- <cmd>`                                                                                   | MCP stdio proxy: judges every `tools/call` and scans every result; an optional runtime pin checks locally confirmed server bytes before starting a private copy; `--strict` withholds what it cannot fully scan With `--strict --tool-approval` and explicit `--pass-env`, exact tool contracts require local platform approval; this cannot be combined with `--cloak`.                                                                                                                                                                    |
@@ -193,7 +207,7 @@ stroq vet --from ./my-server --kind mcp --probe   # a sandboxed MCP handshake, a
 
 ## Learn more
 
-The local platform can explicitly enable **Protect & review tools** on an eligible stdio registration. Its `mcp --strict --tool-approval --pass-env <names>` mode holds discovery and calls until exact advertised tool versions have been reviewed. It requires a fresh complete listing per connection. After a client root `tools/list`, the proxy can collect up to 16 pages in 30 seconds, strictly scan every page and the aggregate, and return one complete result; malformed/incomplete walks and unsupported metadata are refused. The console never probes the server. Policy and strict scanning remain independent, and approval never retries a call. Metadata is retained unencrypted in the private Stroq store. See the [tool-contract workflow and boundaries](https://github.com/AGGIB/Stroq/blob/main/docs/platform/mcp-tool-contracts-plan.md).
+The local platform can explicitly enable **Protect & review tools** on an eligible stdio registration. Its `mcp --strict --tool-approval --pass-env <names>` mode holds discovery and calls until exact advertised tool versions have been reviewed. It requires a fresh complete listing per connection. After a client root `tools/list`, the proxy can collect up to 16 pages in 30 seconds, strictly scan every page and the aggregate, and return one complete result; malformed/incomplete walks and unsupported metadata are refused. The console never probes the server. Policy and strict scanning remain independent, and approval never retries a call. Metadata is retained unencrypted in the private Stroq store. See the [tool-contract workflow and boundaries](https://github.com/AGGIB/Stroq/blob/main/docs/platform/mcp-tool-contracts.md).
 
 - Full documentation, architecture, and the demo: [github.com/AGGIB/Stroq](https://github.com/AGGIB/Stroq/blob/main/docs/GUIDE.md)
 - Report a security issue or a bypass: [SECURITY.md](https://github.com/AGGIB/Stroq/blob/main/SECURITY.md)

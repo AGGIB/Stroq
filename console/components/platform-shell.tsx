@@ -136,9 +136,7 @@ export function PlatformShell({ children }: { children: ReactNode }) {
               <Dialog.Overlay className="dialog-overlay" />
               <Dialog.Content className="mobile-sidebar">
                 <Dialog.Title className="sr-only">Navigation</Dialog.Title>
-                <Dialog.Description className="sr-only">
-                  Navigate the security platform
-                </Dialog.Description>
+                <Dialog.Description className="sr-only">Navigate the console</Dialog.Description>
                 <Navigation close={() => setMobile(false)} />
                 <Dialog.Close className="mobile-close icon-button" aria-label="Close navigation">
                   <X size={18} />
@@ -149,7 +147,7 @@ export function PlatformShell({ children }: { children: ReactNode }) {
           <div className="mobile-brand">
             <Logo />
           </div>
-          <span className="platform-label">Security platform</span>
+          <span className="platform-label">Local console</span>
           <div className="topbar-actions">
             <button
               aria-label="Search workspace"

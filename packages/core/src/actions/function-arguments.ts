@@ -258,11 +258,12 @@ export function withArguments(
   /**
    * A value put where the shell takes it as it is: a quote in it is a letter of a word, and one that would
    * open a string that does not close (`it's`) or end the string it stands in is written as a letter.
+   * A backslash in that value must not undo the escaping added to a quote.
    */
   const embedded = (value: string, inText: boolean): string => {
     if (inText) return value;
     if (double) return value.replace(/[\\"]/g, '\\$&');
-    return quotesBalance(value) ? value : value.replace(/['"]/g, '\\$&');
+    return quotesBalance(value) ? value : value.replace(/[\\'"]/g, '\\$&');
   };
   const joined = (list: readonly string[], raw: boolean, inText = false): string =>
     list.map((word) => (raw ? word : embedded(unquoteWord(word), inText))).join(' ');

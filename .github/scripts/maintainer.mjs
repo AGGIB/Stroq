@@ -10,6 +10,7 @@ const REQUIRED = {
   'ci.yml': [
     'test (22)',
     'test (24)',
+    'console',
     'suite (macos-latest)',
     'suite (windows-latest)',
     'python-oracle (ubuntu-latest)',

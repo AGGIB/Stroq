@@ -50,6 +50,8 @@ summary:hover .summary-meta { color: var(--ink); }
 .hoo { width: 120px; margin: 0 0 1.4rem -6px; }
 .hoo svg { display: block; width: 100%; height: auto; }
 .hero h1 { max-width: 11ch; }
+/* One sentence to a block, so a line never ends one and starts the other. */
+.hero h1 span { display: block; }
 .lead { max-width: 42ch; margin-top: 1.4rem; color: var(--ink-2); font-size: var(--text-lead); line-height: 1.5; }
 .lead em { font-style: normal; color: var(--ink); background: linear-gradient(transparent 58%, color-mix(in srgb, var(--signal) 42%, transparent) 58%); }
 .hero-cta { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin-top: 1.9rem; }
@@ -70,6 +72,7 @@ summary:hover .summary-meta { color: var(--ink); }
    report's rail (x = 12 of 600, i.e. 2%), so the report below is inset by exactly
    that much. */
 .xray { min-width: 0; margin: 0; }
+.xray-ask { margin: 0 0 1.25rem; font: 800 clamp(1.25rem, 1rem + .9vw, 1.7rem)/1.05 var(--font-display); font-stretch: 78%; letter-spacing: -.012em; text-wrap: balance; }
 .xray-svg { display: block; width: 100%; height: auto; overflow: visible; }
 .ticks { fill: none; stroke: var(--ink); stroke-width: 1.3; opacity: .5; }
 .tick-hit { fill: none; stroke: var(--signal); stroke-width: 3.2; }

@@ -2,7 +2,7 @@
   "name": "@stroq/console",
   "version": "0.0.0",
   "private": true,
-  "description": "Stroq's local agent security platform: configuration, static review, policy tests and activity investigation.",
+  "description": "Stroq console: a local page for configuration, static review, policy tests and activity investigation.",
   "type": "module",
   "scripts": {
     "dev": "next dev --hostname 127.0.0.1 --port 47813",
@@ -18,7 +18,7 @@
     "clsx": "2.1.1",
     "lucide-react": "1.61.0",
     "motion": "13.5.1",
-    "next": "16.4.2",
+    "next": "16.4.6",
     "next-themes": "0.4.6",
     "radix-ui": "1.8.1",
     "react": "19.3.1",

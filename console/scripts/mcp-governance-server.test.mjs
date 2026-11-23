@@ -104,8 +104,19 @@ test('server wires only the fixed MCP governance operations after all outer requ
     assert.equal(f.calls.at(-1).kind, expected);
   }
   const count = f.calls.length;
-  for (const path of ['/api/mcp-governance/all', '/api/mcp-governance/restore'])
-    assert.equal((await f.send(path)).status, 404);
+  for (const name of [
+    'all',
+    'restore',
+    'close',
+    'constructor',
+    '__proto__',
+    'toString',
+    'hasOwnProperty',
+    'capture/extra',
+    'capture-extra',
+    '',
+  ])
+    assert.equal((await f.send(`/api/mcp-governance/${name}`)).status, 404, name);
   assert.equal(f.calls.length, count);
   assert.deepEqual(await readFile(join(f.dir, 'out/index.html')), before);
 });
