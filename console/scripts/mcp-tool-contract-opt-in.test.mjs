@@ -53,6 +53,7 @@ function harness() {
         };
       if (name === 'next/link')
         return {
+          __esModule: true,
           default: ({ children, href, ...props }) =>
             React.createElement('a', { href, ...props }, children),
         };

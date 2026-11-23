@@ -38,10 +38,13 @@ const agentNames = (data: CardData): string => {
 
 /** The sentences for a machine with no agent session in the window. */
 function nothingToReadView(data: CardData, home: string): CardView {
-  const [claude, codex, cursor] = data.coverage.looked.map((path) => shortPath(path, home, 50));
+  // By position: Claude Code's folder, Codex's, Cursor's store, then any further folder read for Codex.
+  const [claude, codex, cursor, ...moreCodex] = data.coverage.looked.map((path) =>
+    shortPath(path, home, 50),
+  );
   const places = [
     `Claude Code in ${claude ?? '~/.claude/projects'}`,
-    `Codex in ${codex ?? '~/.codex/sessions'}`,
+    `Codex in ${listed([codex ?? '~/.codex/sessions', ...moreCodex])}`,
   ];
   if (cursor !== undefined) places.push(`Cursor in ${cursor}`);
   const note = [data.coverage.cursorNote, data.coverage.sandboxNote].filter(Boolean).join(' ');

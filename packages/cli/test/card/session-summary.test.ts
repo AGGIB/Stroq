@@ -80,6 +80,27 @@ describe('a text the agent read told it to run something', () => {
 });
 
 describe('what the loose link caught that was no attack: none of it counts', () => {
+  it.each(['--help', '-h', '--usage', '--version', '-v', '--help --'])(
+    'leaves out npx %s when it only displays launcher information',
+    async (flag) => {
+      const summary = await told([
+        read('npx some-unknown-pkg --fix'),
+        bash(`npx ${flag} some-unknown-pkg`, 'npm help or version output'),
+      ]);
+      expect(summary).toMatchObject({ commands: 1, told: 0, moments: [] });
+    },
+  );
+
+  it.each([
+    'npx some-unknown-pkg --help',
+    'npx -- some-unknown-pkg --help',
+    'npx --usage --no-usage some-unknown-pkg',
+  ])('keeps a package run with help-related arguments (%s)', async (command) => {
+    const summary = await told([read('npx some-unknown-pkg --fix'), bash(command)]);
+    expect(summary).toMatchObject({ commands: 1, told: 1 });
+    expect(summary.moments[0]).toMatchObject({ shape: 'pkg', pkg: 'some-unknown-pkg' });
+  });
+
   it('a heredoc that writes a test file containing a pipe to a shell', async () => {
     const summary = await told([read(PIPE), bash(`cat > test.sh <<'EOF'\n${PIPE}\nEOF`)]);
     expect(summary.commands).toBe(1);

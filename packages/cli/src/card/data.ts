@@ -70,7 +70,10 @@ export interface CardCoverage {
     /** More folders than the card looks at. */
     readonly capped: boolean;
   };
-  /** Where the agents' sessions are looked for. */
+  /**
+   * Where the agents' sessions are looked for: Claude Code's folder, Codex's, Cursor's store, then any
+   * further folder read for Codex (the default one, when `CODEX_HOME` names another).
+   */
   readonly looked: readonly string[];
   /** A Cursor store that was unreadable, cut short, or has uncommitted changes. */
   readonly cursorNote?: string;

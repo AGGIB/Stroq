@@ -31,6 +31,7 @@ export function machine(): Machine {
   vi.stubEnv('USERPROFILE', home);
   vi.stubEnv('STROQ_HOME', stroqHome);
   vi.stubEnv('CLAUDE_CONFIG_DIR', undefined);
+  vi.stubEnv('CODEX_HOME', undefined);
   vi.stubEnv('APPDATA', join(home, 'AppData', 'Roaming'));
   return { root, home, stroqHome, work };
 }
@@ -107,6 +108,7 @@ export function codexRollout(
   options: {
     readonly name: string;
     readonly cwd?: string;
+    readonly codexHome?: string;
     readonly commands: readonly {
       readonly command: string;
       readonly output?: string;
@@ -118,7 +120,7 @@ export function codexRollout(
 ): string {
   const cwd = options.cwd ?? m.work;
   const at = options.at ?? ago(DAY);
-  const dir = join(m.home, '.codex', 'sessions', '2026', '10', '20');
+  const dir = join(options.codexHome ?? join(m.home, '.codex'), 'sessions', '2026', '10', '20');
   mkdirSync(dir, { recursive: true });
   const envelope = (type: string, payload: unknown, when: string = at): string =>
     JSON.stringify({ timestamp: when, type, payload });
