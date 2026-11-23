@@ -22,7 +22,7 @@ import {
   namesFileHow,
   type Folders,
 } from './file-paths.js';
-import { embedsPrinter, printsEnvironment } from './env-printers.js';
+import { embedsPrinter, mayRenameProgram, printsEnvironment } from './env-printers.js';
 import { plainText, valueHolds } from './key-text.js';
 import { linkedByReach, type Link } from './link-by-reach.js';
 import { isDataHeredoc } from './heredoc-programs.js';
@@ -754,13 +754,16 @@ export function environmentUse(command: string, ctx: ShellContext): Place | null
   // A request is a send of the environment when it is piped what the printer printed (`env | curl -d
   // @-`) or has the printer in its own words (`curl -d "$(env)"`). One that merely ran beside `set -x`,
   // `export -p` or a script that reads `environ` may have, and is a maybe.
+  // A stage is read with what the whole command says of its program's name (`curl() { … }` in another stage).
+  const renamed = mayRenameProgram(command);
+  const embeds = (text: string): boolean => embedsPrinter(text, renamed);
   const { place } = placeIn(
     commandReading(command, ctx.cwd),
-    (text) => printsEnvironment(text) || embedsPrinter(text),
+    (text) => printsEnvironment(text, renamed) || embeds(text),
     NO_KEY,
     ctx.cwd,
     true,
-    { via: 'environment', proof: 'piped', embeds: embedsPrinter, ignoreDataBodies: true },
+    { via: 'environment', proof: 'piped', embeds, ignoreDataBodies: true },
   );
   return place === null || place.tier === 'seen' ? null : place;
 }
