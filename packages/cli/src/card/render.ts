@@ -44,11 +44,11 @@ function nothingToReadView(data: CardData, home: string): CardView {
     `Codex in ${codex ?? '~/.codex/sessions'}`,
   ];
   if (cursor !== undefined) places.push(`Cursor in ${cursor}`);
-  const note = data.coverage.cursorNote;
+  const note = [data.coverage.cursorNote, data.coverage.sandboxNote].filter(Boolean).join(' ');
   return {
     kind: 'nothing-to-read',
     title: `Hoo found no agent sessions in the last ${days(data.days)}.`,
-    looked: `Looked for ${listed(places)}.${note === undefined ? '' : ` ${note}`}`,
+    looked: `Looked for ${listed(places)}.${note === '' ? '' : ` ${note}`}`,
     next: { label: 'See what Stroq stops:', command: ATTACK_COMMAND },
   };
 }
@@ -104,6 +104,7 @@ function notes(data: CardData): string[] {
   const k = data.coverage;
   const out: string[] = [];
   if (k.cursorNote !== undefined) out.push(k.cursorNote);
+  if (k.sandboxNote !== undefined) out.push(k.sandboxNote);
   if (k.notChecked > 0)
     out.push(
       `Checked ${num(k.checked)} of ${num(k.found)} sessions, newest first; run again to check the rest.`,
