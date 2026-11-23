@@ -10,6 +10,11 @@
 // continues from the caches.
 import { statSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
+import {
+  claudeSandboxStatus,
+  hasClaudeSettings,
+  sandboxCardLine,
+} from '../credential-sandbox/status.js';
 import { loadPolicyWithSource } from '../engine-factory.js';
 import { CARD_SCHEMA, KEPT, type CardCounts, type CardData } from './data.js';
 import type { CardJob, CardResult } from './jobs.js';
@@ -338,6 +343,7 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
     keysSeen: findings.filter((f) => f.tier === 'seen').length,
     autorunRepos: got.folders.repos.length,
   };
+  const location = { cwd: run.cwd, home: run.home, env: run.env, platform: process.platform };
   return {
     schema: CARD_SCHEMA,
     version: run.version,
@@ -346,6 +352,11 @@ function assemble(days: number, run: BuildEnv, got: Gathered, ctx: Context): Car
     counts,
     moments: moments.slice(0, KEPT),
     coverage: {
+      ...(hasClaudeSettings(location)
+        ? {
+            sandboxNote: sandboxCardLine(claudeSandboxStatus(location)),
+          }
+        : {}),
       found: sessions.length,
       agents: {
         claudeCode: sessions.filter((s) => s.agent === 'claude-code').length,

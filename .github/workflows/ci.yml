@@ -77,7 +77,7 @@ jobs:
           npm ci --prefix .github/tools/mcp-probe --ignore-scripts --no-audit --no-fund
           echo "$GITHUB_WORKSPACE/.github/tools/mcp-probe/node_modules/.bin" >> "$GITHUB_PATH"
       - run: pnpm install --frozen-lockfile
-      - run: pnpm exec vitest run packages/cli/test/install/mcp-probe-native.test.ts
+      - run: pnpm exec vitest run packages/cli/test/install/mcp-probe-native.test.ts packages/cli/test/credential-sandbox/native.test.ts
         env:
           STROQ_REQUIRE_SRT: '1'
   test:

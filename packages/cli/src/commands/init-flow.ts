@@ -59,6 +59,8 @@ export interface FlowDeps {
   readonly copiesCli?: boolean;
   /** A path an installer printed, as it is shown: from the project, or from `~`. As it is, where not given. */
   readonly show?: (path: string) => string;
+  /** Additional user-wide choices after consent to install, before a spinner starts. */
+  readonly configureSandbox?: () => Promise<void>;
   /** Runs the installer for one agent and returns what it printed. */
   readonly install: (id: string) => Promise<{ readonly code: number; readonly out: string }>;
   /** The command the agent was told to run, as `init` recorded it. */
@@ -369,6 +371,8 @@ async function drawFlow(deps: FlowDeps): Promise<number> {
     );
   }
   say();
+
+  if (!deps.yes) await deps.configureSandbox?.();
 
   // 4. Do it, one line for each thing.
   let failed = 0;
