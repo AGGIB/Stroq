@@ -21,6 +21,7 @@
  * transcript path that disagreed with the hook would report findings against tools
  * the policy never judged.
  */
+import { realpathSync } from 'node:fs';
 import { readdir, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { isAbsolute, join, resolve } from 'node:path';
@@ -442,11 +443,41 @@ export function createCodexParser(
   return { push, finish: () => ({ sessionId, cwd, events, skipped }) };
 }
 
-export const codexRoot = (home = homedir(), codexHome?: string): string =>
-  join(
-    codexHome !== undefined && isAbsolute(codexHome) ? codexHome : join(home, '.codex'),
-    'sessions',
-  );
+/** Where Codex keeps its sessions when `CODEX_HOME` names no other folder. */
+export const codexRoot = (home = homedir()): string => join(home, '.codex', 'sessions');
+
+/** A path as the file system has it, or as it is spelled when nothing is there to ask about. */
+function realOrSpelled(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    // Not there, or closed to this process: two spellings of it can only be told apart as text.
+    return resolve(path);
+  }
+}
+
+/** `items`, one for each real path: a path reached twice is listed once, by its first spelling. */
+function oncePerRealPath<T>(items: readonly T[], pathOf: (item: T) => string): T[] {
+  const seen = new Set<string>();
+  return items.filter((item) => {
+    const real = realOrSpelled(pathOf(item));
+    if (seen.has(real)) return false;
+    seen.add(real);
+    return true;
+  });
+}
+
+/**
+ * The folders Codex's sessions are looked for in: the one an absolute `CODEX_HOME` names, then
+ * `~/.codex/sessions`, each once however it is reached. Both, because the variable belongs to one process:
+ * a Codex started without it keeps writing to the default folder, and those sessions are still on this
+ * machine. A relative or empty value names no folder.
+ */
+export function codexRoots(home = homedir(), codexHome?: string): string[] {
+  const named =
+    codexHome !== undefined && isAbsolute(codexHome) ? [join(codexHome, 'sessions')] : [];
+  return oncePerRealPath([...named, codexRoot(home)], (root) => root);
+}
 
 /** What a rollout's first record says about it: the folder it ran in, and when it started. */
 export interface RolloutMeta {
@@ -501,6 +532,14 @@ export async function everyRollout(root: string): Promise<TranscriptFile[]> {
     }
   }
   return files.sort((a, b) => b.mtimeMs - a.mtimeMs);
+}
+
+/** Every rollout under any of `roots`, newest first. One root may be inside another: a file is listed once. */
+export async function everyRolloutIn(roots: readonly string[]): Promise<TranscriptFile[]> {
+  const perRoot = await Promise.all(roots.map((root) => everyRollout(root)));
+  const [only] = perRoot;
+  if (only !== undefined && perRoot.length === 1) return only;
+  return oncePerRealPath(perRoot.flat(), (file) => file.path).sort((x, y) => y.mtimeMs - x.mtimeMs);
 }
 
 /**

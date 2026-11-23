@@ -161,6 +161,28 @@ describe('the card: no sessions at all', () => {
   });
 });
 
+describe('the card: no sessions, and a second Codex folder', () => {
+  it('names both folders it looked for Codex sessions in', () => {
+    const none = card({
+      coverage: {
+        ...card().coverage,
+        found: 0,
+        checked: 0,
+        agents: { claudeCode: 0, codex: 0 },
+        looked: [
+          '/Users/dev/.claude/projects',
+          '/srv/codex/sessions',
+          '/Users/dev/cursor/state.vscdb',
+          '/Users/dev/.codex/sessions',
+        ],
+      },
+    });
+    expect(renderCard(none, HOME).join(' ')).toContain(
+      'Looked for Claude Code in ~/.claude/projects, Codex in /srv/codex/sessions and ~/.codex/sessions, and Cursor in ~/cursor/state.vscdb.',
+    );
+  });
+});
+
 describe('the card: the time ran out', () => {
   it('says how many sessions were checked and that a second run checks the rest', () => {
     const cut = card({

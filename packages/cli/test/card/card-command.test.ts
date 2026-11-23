@@ -109,7 +109,7 @@ describe('stroq card', () => {
     expect(warm.coverage.fromCache).toBe(4);
   });
 
-  it('reads Codex sessions from the absolute CODEX_HOME and reports that location', () => {
+  it('reads Codex sessions from the absolute CODEX_HOME and from the default folder, and reports both', () => {
     const codexHome = join(m.root, 'custom codex');
     codexRollout(m, {
       name: 'custom',
@@ -119,10 +119,13 @@ describe('stroq card', () => {
     const { code, out, err } = stroq(['card', '--json'], { CODEX_HOME: codexHome });
     expect(code, err).toBe(0);
     expect(JSON.parse(out)).toMatchObject({
-      counts: { commands: 4 },
+      counts: { commands: 6 },
       coverage: {
-        agents: { codex: 1 },
-        looked: expect.arrayContaining([join(codexHome, 'sessions')]),
+        agents: { codex: 2 },
+        looked: expect.arrayContaining([
+          join(codexHome, 'sessions'),
+          join(m.home, '.codex', 'sessions'),
+        ]),
       },
     });
   });

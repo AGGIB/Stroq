@@ -2,7 +2,13 @@ import { mkdtempSync, mkdirSync, writeFileSync, utimesSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { findCodexRollouts, parseCodexRollout, readCodexRollout } from '../../src/sent/codex.js';
+import {
+  codexRoots,
+  everyRolloutIn,
+  findCodexRollouts,
+  parseCodexRollout,
+  readCodexRollout,
+} from '../../src/sent/codex.js';
 import { readerForFile } from '../../src/sent/readers.js';
 
 /**
@@ -270,6 +276,55 @@ describe('findCodexRollouts', () => {
     const home = mkdtempSync(join(tmpdir(), 'stroq-codex-'));
     homes.push(home);
     expect(await findCodexRollouts('/w', home)).toEqual([]);
+  });
+});
+
+describe('codexRoots', () => {
+  it('lists the folder an absolute CODEX_HOME names, then the default one', () => {
+    const home = codexHome([]);
+    const named = join(home, 'elsewhere');
+    expect(codexRoots(home, named)).toEqual([
+      join(named, 'sessions'),
+      join(home, '.codex', 'sessions'),
+    ]);
+  });
+
+  it.each([undefined, '', '.', 'relative/codex'])(
+    'lists only the default folder for the value %j',
+    (value) => {
+      const home = codexHome([]);
+      expect(codexRoots(home, value)).toEqual([join(home, '.codex', 'sessions')]);
+    },
+  );
+
+  it('lists the default folder once when CODEX_HOME names it', () => {
+    const home = codexHome([
+      { day: '2026/09/20', name: 'rollout-a.jsonl', cwd: '/w', mtime: 1000 },
+    ]);
+    expect(codexRoots(home, join(home, '.codex'))).toHaveLength(1);
+    expect(codexRoots(home, join(home, 'x', '..', '.codex'))).toHaveLength(1);
+  });
+});
+
+describe('everyRolloutIn', () => {
+  it('lists the rollouts of every folder, newest first', async () => {
+    const one = codexHome([{ day: '2026/09/19', name: 'rollout-a.jsonl', cwd: '/w', mtime: 1000 }]);
+    const two = codexHome([{ day: '2026/09/20', name: 'rollout-b.jsonl', cwd: '/w', mtime: 3000 }]);
+    const found = await everyRolloutIn([one, two].map((home) => join(home, '.codex', 'sessions')));
+    expect(found.map((f) => basename(f.path))).toEqual(['rollout-b.jsonl', 'rollout-a.jsonl']);
+  });
+
+  it('lists a rollout once when one folder is inside the other', async () => {
+    const home = codexHome([
+      { day: '2026/09/20', name: 'rollout-a.jsonl', cwd: '/w', mtime: 1000 },
+    ]);
+    const root = join(home, '.codex', 'sessions');
+    expect(await everyRolloutIn([join(root, '2026'), root])).toHaveLength(1);
+  });
+
+  it('is empty, not an error, when a folder is not there', async () => {
+    const home = codexHome([]);
+    expect(await everyRolloutIn([join(home, 'none'), join(home, 'nor this')])).toEqual([]);
   });
 });
 
