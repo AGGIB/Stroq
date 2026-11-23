@@ -27,6 +27,8 @@ npx @stroq/cli init                  # in your project: writes .claude/settings.
 - **`PostToolUse` and `PostToolUseFailure`** scan the returned tool output (`Bash`, `PowerShell`, `Read`, `WebFetch`, `WebSearch`, `mcp__.*`), taint the session on a suspect match, record provenance atoms, and surface a warning via `hookSpecificOutput.additionalContext`.
 - **Limits.** Hook enforcement covers tool calls that pass through Claude Code's hook pipeline; OS-level process sandboxing is the agent's own, or one you start it in (for example Anthropic's `srt`). Live enforcement was verified on Claude Code 2.1.271 (`packages/cli/test/fixtures/hosts/claude-code/2.1.271/deny.real.acceptEdits.jsonl`).
 
+On macOS, `stroq init --agent claude-code --user` can configure key-file rules for Claude Code's own Bash sandbox. A local check with Claude Code 2.1.301 used a temporary home and an offline fixture supplying Bash calls. In regular permission mode, Bash read a control file and received an OS permission error reading a listed file. The native regression test exercises the credential rules against the pinned Anthropic sandbox runtime. [Install choices and scope](../packages/cli/README.md#credential-files-in-the-macos-bash-sandbox)
+
 ### Cursor
 
 ```bash

@@ -8,6 +8,8 @@ import { existsSync, lstatSync, rmSync } from 'node:fs';
 import { parseArgs } from 'node:util';
 import { ANTIGRAVITY_HOOK_NAME, antigravityHooksPath } from './antigravity-hooks.js';
 import { codexHooksPath } from './codex-hooks.js';
+import type { JsonObject } from '../harden/types.js';
+import { stroqHome } from '../paths.js';
 import { isPlainObject, readJsonObject, writeJsonObject } from './config-file.js';
 import { copilotHooksPath } from './copilot-hooks.js';
 import { cursorHooksPath } from './cursor-hooks.js';
@@ -257,6 +259,33 @@ export async function runUninstall(args: readonly string[]): Promise<number> {
       ...(values.client === undefined ? [] : ['--client', values.client]),
       ...(values.config === undefined ? [] : ['--config', values.config]),
     ]);
+  if (agent === 'claude-code' && values.user) {
+    const file = settingsPath('user');
+    if (!existsSync(file) && !existsSync(stroqHome())) {
+      process.stdout.write(nothing(file).message);
+      return 0;
+    }
+    const { editClaudeSettings } = await import('../credential-sandbox/settings.js');
+    const dryRun = values['dry-run'] === true;
+    const result = await editClaudeSettings({
+      file,
+      home: stroqHome(),
+      dryRun,
+      choices: 'remove',
+      hooks: (doc) => JSON_TARGETS['claude-code'].strip(doc) as JsonObject,
+    });
+    if (!result.changed) process.stdout.write(nothing(file).message);
+    else if (dryRun) process.stdout.write(JSON.stringify(result.doc, null, 2) + '\n');
+    else
+      process.stdout.write(
+        'Removed Stroq hook entries' +
+          (result.removedRules ? ' and recorded sandbox settings' : '') +
+          ' from ' +
+          file +
+          '.\n',
+      );
+    return 0;
+  }
   const result = uninstallAgent(
     agent,
     values.user === true ? 'user' : 'project',

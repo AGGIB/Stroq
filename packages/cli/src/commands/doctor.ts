@@ -1,4 +1,6 @@
+import type { SandboxReport } from '../credential-sandbox/report.js';
 import { existsSync, readFileSync } from 'node:fs';
+import { claudeUserDir } from '../paths.js';
 import { homedir } from 'node:os';
 import { join, posix, win32 } from 'node:path';
 import {
@@ -82,6 +84,8 @@ export interface DoctorCheck {
   readonly diagnostic: DoctorDiagnostic;
 }
 export interface DoctorReport {
+  /** File-based observations, independent of installation health. */
+  readonly sandboxes?: readonly SandboxReport[];
   readonly version: 1;
   readonly diagnosticsVersion: 1;
   readonly ok: boolean;
@@ -126,9 +130,11 @@ export function detectedAgents(
 ): readonly string[] {
   return Object.entries(AGENT_DIRS)
     .filter(
-      ([, dirs]) =>
+      ([id, dirs]) =>
         (scope === 'any' && dirs.project.some((d) => existsSync(join(cwd, d)))) ||
-        dirs.user.some((d) => existsSync(join(home, d))),
+        (id === 'claude-code'
+          ? existsSync(claudeUserDir(home, process.env))
+          : dirs.user.some((d) => existsSync(join(home, d)))),
     )
     .map(([agent]) => agent);
 }
@@ -998,7 +1004,18 @@ export async function doctorReport(
     },
     secrets,
   ];
+  const { sandboxReports } = await import('../credential-sandbox/report.js');
+  const sandboxes = sandboxReports(
+    {
+      cwd,
+      home: opts.userHome ?? homedir(),
+      platform: opts.platform ?? process.platform,
+      env: process.env,
+    },
+    opts.all === true,
+  );
   return {
+    ...(sandboxes.length ? { sandboxes } : {}),
     version: 1,
     diagnosticsVersion: 1,
     ok: checks.every((c) => c.ok),
@@ -1015,6 +1032,12 @@ export async function runDoctor(argv: readonly string[] = []): Promise<number> {
   } else {
     for (const check of report.checks)
       process.stdout.write(`${check.ok ? '✔' : '✘'} ${check.name}: ${check.detail}\n`);
+    for (const entry of report.sandboxes ?? [])
+      process.stdout.write('i ' + entry.agent + ' sandbox settings: ' + entry.detail + '\n');
+    if (all) {
+      const { CODEX_EXAMPLE } = await import('../credential-sandbox/report.js');
+      process.stdout.write('Optional Codex config.toml example\n' + CODEX_EXAMPLE + '\n');
+    }
   }
   return report.ok ? 0 : 1;
 }

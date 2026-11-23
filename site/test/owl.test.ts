@@ -63,11 +63,26 @@ describe('Hoo on the landing page', () => {
 
 describe('the hero says what the README says', () => {
   const lead = /<p class="lead">([\s\S]*?)<\/p>/.exec(html)?.[1] ?? '';
-  const promise = /<\/div>\n\n(Stroq reads[^\n]*)\n/.exec(readme)?.[1] ?? '';
+  const promise = /<\/div>\n\n(Stroq watches[^\n]*)\n/.exec(readme)?.[1] ?? '';
 
-  it('asks the question the README asks, as its headline', () => {
-    expect(html).toContain('<h1 id="hero-title">Who is really in charge of your agent?</h1>');
-    expect(readme).toContain('### Who is really in charge of your agent?');
+  const h1 = /<h1 id="hero-title">([\s\S]*?)<\/h1>/.exec(html)?.[1] ?? '';
+
+  it('has the README headline as its own', () => {
+    expect(textOf(h1)).toBe('Let your agent work. Stroq keeps watch over your data.');
+    expect(readme).toContain('### Let your agent work. Stroq keeps watch over your data.');
+  });
+
+  it('gives each sentence of the headline its own block, so no line holds the end of one and the start of the other', () => {
+    expect(h1).toBe('<span>Let your agent work.</span> <span>Stroq keeps watch over your data.</span>');
+    expect(css).toContain('.hero h1 span { display: block; }');
+  });
+
+  it('asks the question the README asks, above its picture', () => {
+    const question = 'Who is really in charge of your agent?';
+    expect(readme).toContain(`\n\n**${question}**\n\n<picture>\n`);
+    expect(html).toContain(
+      `<figure class="xray" data-draw aria-labelledby="xray-cap">\n        <p class="xray-ask">${question}</p>`,
+    );
   });
 
   it('has the README promise as its lead', () => {
