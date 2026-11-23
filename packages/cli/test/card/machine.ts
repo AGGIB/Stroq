@@ -46,6 +46,7 @@ export interface Call {
   readonly tool: string;
   readonly input: Block;
   readonly result: string;
+  readonly isError?: boolean;
   /** When the call happened, as ISO 8601; the session's `at` when not given. */
   readonly at?: string;
 }
@@ -83,7 +84,14 @@ export function claudeSession(
     ),
     record(
       'user',
-      [{ type: 'tool_result', tool_use_id: `t${i}`, content: call.result }],
+      [
+        {
+          type: 'tool_result',
+          tool_use_id: `t${i}`,
+          content: call.result,
+          ...(call.isError === true ? { is_error: true } : {}),
+        },
+      ],
       call.at ?? at,
     ),
   ]);
