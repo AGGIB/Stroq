@@ -58,7 +58,10 @@ export const COMMANDS: readonly CommandHelp[] = [
         'on a terminal, init shows what it will change and asks first; --yes answers for you (with no --agent, it guards every agent it found)',
       ],
       ['--no-input', 'never ask, and print the plain installer output (what scripts and CI get)'],
-      ['--hooks-only', 'on macOS, skip the Claude Code user-scope sandbox rules'],
+      [
+        '--hooks-only',
+        'on macOS, skip the Claude Code user-scope sandbox questions; with --yes or --no-input, and in a script, no sandbox setting is written either way',
+      ],
       ['--client <name>', 'with --agent mcp: claude-desktop, windsurf, cursor or claude-code'],
       ['--config <path>', 'with --agent mcp: any file with an "mcpServers" object'],
       ['--unwrap', 'with --agent mcp: put every wrapped server back the way it was'],
@@ -76,8 +79,9 @@ export const COMMANDS: readonly CommandHelp[] = [
     name: 'uninstall',
     synopsis: 'uninstall [--agent <name>] [--user] [--dry-run]',
     about: [
-      "remove Stroq's hooks and its recorded Claude Code user sandbox settings",
-      'with --agent mcp, restore each wrapped MCP server',
+      "remove Stroq's hooks and its recorded Claude Code user sandbox settings; run it",
+      'before you delete ~/.stroq, where that record is kept. With --agent mcp, restore',
+      'each wrapped MCP server',
     ],
     flags: [
       ['--agent <name>', 'the agent to remove Stroq from, as for init (default claude-code)'],

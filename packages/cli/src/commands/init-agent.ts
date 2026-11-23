@@ -1,8 +1,9 @@
 import { homedir } from 'node:os';
 import type { Terminal } from '../ui/terminal.js';
 import { agentHookStatus, detectedAgents } from './doctor.js';
-import { isAgentFlag, mayDraw } from './init-args.js';
+import { explicitAgent, isAgentFlag, mayDraw } from './init-args.js';
 import { HOOK_AGENTS, runInit } from './init.js';
+import { claudeConfigDirProblem } from '../paths.js';
 
 /**
  * `stroq init` with no `--agent`: the command the front page and the site tell a newcomer
@@ -54,6 +55,16 @@ export async function runInitCommand(
   where: InitWhere = {},
 ): Promise<number> {
   const cwd = where.cwd ?? process.cwd();
+  // A user-scope run for Claude Code, named or found, writes in its settings folder: refused before a screen.
+  const named = explicitAgent(args);
+  const unusable =
+    args.includes('--user') && (named === null || named === 'claude-code')
+      ? claudeConfigDirProblem(process.env)
+      : null;
+  if (unusable !== null) {
+    process.stdout.write(`${unusable} Nothing was changed.\n`);
+    return 1;
+  }
   const screen = await screenFor(args, where);
   if (screen !== null) {
     const { runInteractiveInit } = await import('./init-interactive.js');

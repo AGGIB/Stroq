@@ -1,8 +1,9 @@
 // The wiring of the first-run screen: what is on this machine, what the plain installer is told, and
 // what is checked afterwards. Loaded only when a person is looking (see `init-agent.ts`): the hook
 // process, which starts for every tool call an agent makes, never reads any of this.
+import { join } from 'node:path';
 import { FileSecretIndex } from '@stroq/core';
-import { secretsFile, stroqHome } from '../paths.js';
+import { claudeUserDir, secretsFile, stroqHome } from '../paths.js';
 import { stroqVersion } from '../version.js';
 import type { Timers } from '../ui/spinner.js';
 import { confirm } from '../ui/prompt.js';
@@ -11,6 +12,7 @@ import type { SandboxChoices } from '../credential-sandbox/rules.js';
 import type { Terminal } from '../ui/terminal.js';
 import { antigravityHooksPath } from './antigravity-hooks.js';
 import { codexHooksPath } from './codex-hooks.js';
+import { isPlainObject, readJsonObject } from './config-file.js';
 import { copilotHooksPath } from './copilot-hooks.js';
 import { cursorHooksPath } from './cursor-hooks.js';
 import { detectedAgents } from './doctor.js';
@@ -138,6 +140,37 @@ async function captured(fn: () => Promise<number>): Promise<{ code: number; out:
   }
 }
 
+/** What the screen says the user-scope install for Claude Code also does, before the question. */
+const KEY_LIST_NOTE =
+  'adds eight home key paths (SSH, gcloud, gh, kube, Docker, netrc, pgpass, Git credentials) to the Bash sandbox deny list for all projects. Where the sandbox is on, a command in Bash can no longer read them, so gh, kubectl, gcloud, psql and Git over SSH lose their config there';
+
+const ENABLE_QUESTION =
+  'Turn on the Claude Code Bash sandbox for all projects? This writes three settings: the sandbox on, a question before a command is retried outside it, and autoAllowBashIfSandboxed off, so every Bash command still asks you unless you have allowed it. The sandbox limits writes, can prompt for network access and can interrupt Git over SSH.';
+const RETRY_QUESTION =
+  'Your Claude Code Bash sandbox is already on in your user settings. Add a rule that asks you before a command is retried outside the sandbox? Your other sandbox settings stay as they are.';
+const EXTRA_QUESTION =
+  'Also list the AWS, npm and GPG credential paths? This can interrupt deployments, package installs and signed commits.';
+
+/** Whether the user settings file turns the sandbox on now. A file that cannot be read says nothing. */
+function sandboxAlreadyOn(file: string): boolean {
+  try {
+    const sandbox = readJsonObject<Record<string, unknown>>(file)['sandbox'];
+    return isPlainObject(sandbox) && sandbox['enabled'] === true;
+  } catch {
+    // The installer reads the file again and says what is wrong with it.
+    return false;
+  }
+}
+
+/** The two sandbox questions of a user-scope install, each with what saying yes writes. */
+async function askSandbox(term: Terminal, file: string): Promise<SandboxChoices> {
+  const style = styleFor(term);
+  const question = sandboxAlreadyOn(file) ? RETRY_QUESTION : ENABLE_QUESTION;
+  const enable = await confirm(term, style, question, false);
+  const extra = await confirm(term, style, EXTRA_QUESTION, false);
+  return { enable, extra };
+}
+
 /** What a test replaces: the part that starts a process, and the clock of the spinner. */
 export interface InteractiveOverrides {
   readonly check?: FlowDeps['check'];
@@ -153,8 +186,9 @@ export async function runInteractiveInit(
   const { cwd, home } = where;
   const scope = args.includes('--user') ? 'user' : 'project';
   const yes = args.includes('--yes');
+  // The sandbox settings are a person's answers: `--yes` answers the install question and no other.
   const userSandbox =
-    scope === 'user' && process.platform === 'darwin' && !args.includes('--hooks-only');
+    scope === 'user' && process.platform === 'darwin' && !args.includes('--hooks-only') && !yes;
   // A home that is not set is an empty string, and a path joined to it is the project's own.
   const found = new Set(home === '' ? [] : detectedAgents(cwd, home, 'user'));
   const agents: FlowAgent[] = HOOK_AGENTS.map((id) => ({
@@ -163,9 +197,7 @@ export async function runInteractiveInit(
     found: found.has(id),
     where: found.has(id) ? configOf(id, scope, cwd, home) : '',
     ...(extraFor(id) === undefined ? {} : { extra: extraFor(id) as string }),
-    ...(id === 'claude-code' && userSandbox
-      ? { extra: 'adds eight home key paths to the Bash sandbox settings for all projects' }
-      : {}),
+    ...(id === 'claude-code' && userSandbox ? { extra: KEY_LIST_NOTE } : {}),
     ...(PLUGINS[id] ?? {}),
   }));
   const named = explicitAgent(args);
@@ -186,26 +218,16 @@ export async function runInteractiveInit(
   const reads = new FileSecretIndex(secretsFile(), home)
     .sourcePaths(cwd)
     .map((file) => display(file, cwd, home));
-  let sandbox: SandboxChoices = {};
+  let sandbox: SandboxChoices | undefined;
   const offerSandbox = userSandbox && chosen.includes('claude-code');
   return runInitFlow({
     ...(offerSandbox
       ? {
           configureSandbox: async () => {
-            const style = styleFor(term);
-            const enable = await confirm(
+            sandbox = await askSandbox(
               term,
-              style,
-              'Use the Claude Code Bash sandbox and ask before outside retries? This limits writes, can prompt for network access and can interrupt Git over SSH.',
-              false,
+              join(claudeUserDir(home, process.env), 'settings.json'),
             );
-            const extra = await confirm(
-              term,
-              style,
-              'Also restrict AWS, npm and GPG credentials? This can interrupt deployments, package installs and signed commits.',
-              false,
-            );
-            sandbox = { enable, extra };
           },
         }
       : {}),
@@ -220,7 +242,9 @@ export async function runInteractiveInit(
     show: (file) => display(file, cwd, home),
     copiesCli: runsFromNpxCache(process.argv[1] ?? ''),
     install: async (id) => {
-      const found = await captured(() => runInit([...base, '--agent', id], { sandbox }));
+      const found = await captured(() =>
+        runInit([...base, '--agent', id], sandbox === undefined ? {} : { sandbox }),
+      );
       return {
         ...found,
         out: withSafePaths(found.out, [

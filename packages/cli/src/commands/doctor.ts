@@ -1036,7 +1036,11 @@ export async function runDoctor(argv: readonly string[] = []): Promise<number> {
       process.stdout.write('i ' + entry.agent + ' sandbox settings: ' + entry.detail + '\n');
     if (all) {
       const { CODEX_EXAMPLE } = await import('../credential-sandbox/report.js');
-      process.stdout.write('Optional Codex config.toml example\n' + CODEX_EXAMPLE + '\n');
+      process.stdout.write(
+        'Optional Codex config.toml example (not checked against a Codex release)\n' +
+          CODEX_EXAMPLE +
+          '\n',
+      );
     }
   }
   return report.ok ? 0 : 1;
