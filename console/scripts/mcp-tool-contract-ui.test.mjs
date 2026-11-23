@@ -83,6 +83,7 @@ async function harness() {
         return { useSearchParams: () => new URLSearchParams(`part=tools&${query}`) };
       if (name === 'next/link')
         return {
+          __esModule: true,
           default: ({ children, href, ...props }) =>
             React.createElement('a', { href, ...props }, children),
         };

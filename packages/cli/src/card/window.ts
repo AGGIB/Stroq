@@ -4,7 +4,7 @@ import { claudeUserDir } from '../paths.js';
 import { lstatSync, statSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import { join } from 'node:path';
-import { codexRoot, everyRollout } from '../sent/codex.js';
+import { codexRoot, codexRoots, everyRolloutIn } from '../sent/codex.js';
 import { cursorStateDb } from '../sent/cursor.js';
 import { claudeRoots, claudeSession, codexSession, type SessionRef } from '../sent/sessions.js';
 import { MAX_TRANSCRIPT_BYTES } from '../replay/past.js';
@@ -33,7 +33,10 @@ export interface WindowListing {
   readonly sessions: readonly WindowSession[];
   /** Sessions the agents keep that are older than the window. */
   readonly older: number;
-  /** Where the agents keep them, for the sentence that says nothing was found. */
+  /**
+   * Where the agents keep them, for the sentence that says nothing was found: Claude Code's folder, Codex's,
+   * Cursor's store, then any further folder read for Codex (the default one, when `CODEX_HOME` names another).
+   */
   readonly looked: readonly string[];
   readonly cursorNote?: string;
 }
@@ -118,7 +121,8 @@ export async function listWindow(
 ): Promise<WindowListing> {
   const cutoff = windowStart(days, now);
   const claude = await claudeMains(home, env);
-  const codex = await everyRollout(codexRoot(home));
+  const [codexDir = codexRoot(home), ...moreCodexDirs] = codexRoots(home, env['CODEX_HOME']);
+  const codex = await everyRolloutIn([codexDir, ...moreCodexDirs]);
   const inside = (m: { mtimeMs: number }): boolean => m.mtimeMs >= cutoff;
   const sessions: WindowSession[] = [];
   for (const main of claude.filter(inside)) {
@@ -152,7 +156,7 @@ export async function listWindow(
   return {
     sessions,
     older,
-    looked: [lookedForClaude(home, env), codexRoot(home), cursorDb],
+    looked: [lookedForClaude(home, env), codexDir, cursorDb, ...moreCodexDirs],
     ...(cursor.note === undefined ? {} : { cursorNote: cursor.note }),
   };
 }

@@ -4,7 +4,15 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cardDirIn } from '../../src/paths.js';
 import { CLI_ENTRY } from '../helpers/cli-entry.js';
-import { AWS_KEY, furnish, machine, populate, PROJECT_KEY, type Machine } from './machine.js';
+import {
+  AWS_KEY,
+  codexRollout,
+  furnish,
+  machine,
+  populate,
+  PROJECT_KEY,
+  type Machine,
+} from './machine.js';
 
 /**
  * `stroq card` and `stroq show` as a person runs them: the built bundle, in its own process, on a
@@ -57,6 +65,7 @@ describe('stroq card', () => {
     expect(out).toMatch(
       /^Hoo checked 30 days of your agent sessions\n4 sessions · Claude Code and Codex · this machine\n/,
     );
+    expect(out).toContain('commands your agent requested');
     expect(out).toContain('Worth a look');
     expect(out).toContain('stroq show 1');
     expect(out).toContain('Stop this next time:  npx @stroq/cli init');
@@ -99,6 +108,27 @@ describe('stroq card', () => {
     };
     expect(warm.timing.replayed).toBe(0);
     expect(warm.coverage.fromCache).toBe(4);
+  });
+
+  it('reads Codex sessions from the absolute CODEX_HOME and from the default folder, and reports both', () => {
+    const codexHome = join(m.root, 'custom codex');
+    codexRollout(m, {
+      name: 'custom',
+      codexHome,
+      commands: [{ command: 'ls' }],
+    });
+    const { code, out, err } = stroq(['card', '--json'], { CODEX_HOME: codexHome });
+    expect(code, err).toBe(0);
+    expect(JSON.parse(out)).toMatchObject({
+      counts: { commands: 6 },
+      coverage: {
+        agents: { codex: 2 },
+        looked: expect.arrayContaining([
+          join(codexHome, 'sessions'),
+          join(m.home, '.codex', 'sessions'),
+        ]),
+      },
+    });
   });
 
   it('prints one line of counts for --share, with no path, name or host, ending with the command', () => {
@@ -166,7 +196,7 @@ describe('stroq show', () => {
     expect(code).toBe(0);
     expect(out).toContain('Moment 1 of the last card');
     expect(out).toContain('What your agent read');
-    expect(out).toContain('What it did next');
+    expect(out).toContain('What it requested');
     expect(out).toContain('stroq replay --transcript');
     expect(out).not.toContain(AWS_KEY);
   });

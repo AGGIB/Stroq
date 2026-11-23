@@ -21,7 +21,7 @@ Stroq watches how agents use your keys and files, blocks recognised leaks, and s
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/assets/readme/card-dark.png">
-  <img src="docs/assets/readme/card.png" alt="The Stroq card in a terminal, on an example machine: Hoo, an orange pixel owl, beside the counts for 30 days of agent sessions (105 commands your agent ran, 1 that came from text it read, 1 key that left the machine, 1 repo that runs code as soon as an agent opens it) and three moments worth a look, each with a stroq show line" width="800">
+  <img src="docs/assets/readme/card.png" alt="The Stroq card in a terminal, on an example machine: Hoo, an orange pixel owl, beside the counts for 30 days of agent sessions (105 commands your agent requested, 1 that came from text it read, 1 key that left the machine, 1 repo that runs code as soon as an agent opens it) and three moments worth a look, each with a stroq show line" width="800">
 </picture>
 
 <sub>An example: a made-up machine with made-up sessions, keys and hosts. Hoo is Stroq's owl. Your card shows your own sessions.</sub>
