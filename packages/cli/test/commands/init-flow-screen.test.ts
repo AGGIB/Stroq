@@ -135,7 +135,7 @@ describe('runInitFlow, with colour', () => {
     await orange.run();
     await yellow.run();
 
-    const tagline = 'Action firewall for AI coding agents';
+    const tagline = 'Keeps watch over your data';
     expect(orange.fake.out()).toContain(`${ESC}[38;5;208m${tagline}${ESC}[39m`);
     expect(yellow.fake.out()).toContain(`${ESC}[33m${tagline}${ESC}[39m`);
   });

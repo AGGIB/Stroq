@@ -24,6 +24,8 @@ export interface CardCounts {
 }
 
 export interface CardCoverage {
+  /** Current local settings, separate from the sessions in the window. */
+  readonly sandboxNote?: string;
   /** Sessions in the window, per agent. */
   readonly found: number;
   readonly agents: {

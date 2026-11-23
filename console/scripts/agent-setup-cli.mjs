@@ -15,6 +15,8 @@ export function previewFromCli(agent, scope, options) {
       agent,
     ];
     if (scope === 'user') args.push('--user');
+    // Console setup previews and owns hook registration only.
+    if (scope === 'user' && agent === 'claude-code') args.push('--hooks-only');
     const child = spawn(process.execPath, args, {
       cwd: options.project,
       env: { ...engineEnvironment(options), NODE_DISABLE_COMPILE_CACHE: '1' },
