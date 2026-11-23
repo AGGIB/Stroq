@@ -22,7 +22,7 @@ import {
   namesFileHow,
   type Folders,
 } from './file-paths.js';
-import { embedsPrinter, printsEnvironment } from './env-printers.js';
+import { embedsPrinter, printsEnvironment, runsOneClient } from './env-printers.js';
 import { plainText, valueHolds } from './key-text.js';
 import { linkedByReach, type Link } from './link-by-reach.js';
 import { isDataHeredoc } from './heredoc-programs.js';
@@ -754,13 +754,17 @@ export function environmentUse(command: string, ctx: ShellContext): Place | null
   // A request is a send of the environment when it is piped what the printer printed (`env | curl -d
   // @-`) or has the printer in its own words (`curl -d "$(env)"`). One that merely ran beside `set -x`,
   // `export -p` or a script that reads `environ` may have, and is a maybe.
+  // A quoted URL runs across a variable only when the whole command is one simple command of an HTTP
+  // client: any other stage may give the client's name another meaning (`curl() { … }`, `path=(…)`).
+  const oneClient = runsOneClient(command);
+  const embeds = (text: string): boolean => embedsPrinter(text, oneClient);
   const { place } = placeIn(
     commandReading(command, ctx.cwd),
-    (text) => printsEnvironment(text) || embedsPrinter(text),
+    (text) => printsEnvironment(text, oneClient) || embeds(text),
     NO_KEY,
     ctx.cwd,
     true,
-    { via: 'environment', proof: 'piped', embeds: embedsPrinter, ignoreDataBodies: true },
+    { via: 'environment', proof: 'piped', embeds, ignoreDataBodies: true },
   );
   return place === null || place.tier === 'seen' ? null : place;
 }
