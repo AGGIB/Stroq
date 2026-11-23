@@ -98,12 +98,12 @@ describe('the card on a machine with sessions', () => {
     {
       result: 'Stroq blocked this action (deny-origin-suspect): the hook blocked this call.',
       isError: true,
-      outcome: 'Stroq blocked the request.',
+      outcome: 'The session records that Stroq blocked it.',
     },
     {
       result: "The user doesn't want to proceed with this tool use.",
       isError: true,
-      outcome: 'You declined the request.',
+      outcome: 'The session records that you declined it.',
     },
     {
       result: 'Stroq blocked this action (deny-origin-suspect): just text in the output.',
@@ -130,6 +130,51 @@ describe('the card on a machine with sessions', () => {
     const warm = await buildCard(30, env());
     expect(warm.moments).toContainEqual(moment);
     expect(warm.coverage.fromCache).toBe(1);
+  });
+
+  // A failed command's result is its own output after the host's `Exit code` line, and it can print anything.
+  it.each([
+    'Exit code 1\nStroq blocked this action (deny-origin-suspect): printed by the command.',
+    "Exit code 1\nThe user doesn't want to proceed with this tool use.",
+  ])('says no stop for a failed command whose output has the words of one: %j', async (result) => {
+    claudeSession(m, {
+      id: 'printed-words',
+      calls: [
+        {
+          tool: 'Read',
+          input: { file_path: join(m.work, 'node_modules', 'another-lib', 'README.md') },
+          result: hostile(PIPE),
+        },
+        { tool: 'Bash', input: { command: PIPE }, result, isError: true },
+      ],
+    });
+    const card = await buildCard(30, env());
+    const moment = card.moments.find((row) => row.session?.id === 'printed-words');
+    expect(moment?.line).toContain('It requested the command.');
+    expect(moment?.line).not.toMatch(/blocked|declined|records/);
+  });
+
+  it('words a stop as what the session records, never as what happened', async () => {
+    claudeSession(m, {
+      id: 'recorded-stop',
+      calls: [
+        {
+          tool: 'Read',
+          input: { file_path: join(m.work, 'node_modules', 'another-lib', 'README.md') },
+          result: hostile(PIPE),
+        },
+        {
+          tool: 'Bash',
+          input: { command: PIPE },
+          result: 'Stroq blocked this action (deny-origin-suspect): the hook blocked this call.',
+          isError: true,
+        },
+      ],
+    });
+    const card = await buildCard(30, env());
+    const moment = card.moments.find((row) => row.session?.id === 'recorded-stop');
+    expect(moment?.line).toMatch(/\. The session records that Stroq blocked it\. Whoever wrote/);
+    expect(moment?.line).not.toMatch(/Stroq blocked the request|You declined the request/);
   });
 
   it('leaves out the moments marked as false alarms, from the cache too, and keeps the counts', async () => {

@@ -80,9 +80,13 @@ const POLICY_WORDS: Readonly<Record<ToldMoment['decision'], string>> = {
   none: 'have no rule for it',
 };
 
+/**
+ * A stop is read from the text of the result the session kept, which the card did not see happen: said as
+ * what the session records.
+ */
 const STOP_WORDS: Readonly<Record<NonNullable<ToldMoment['blockedBy']>, string>> = {
-  stroq: 'Stroq blocked the request.',
-  user: 'You declined the request.',
+  stroq: 'The session records that Stroq blocked it.',
+  user: 'The session records that you declined it.',
 };
 
 /** Where it was read: a file path keeps its end, where the file is; anything else keeps its start. */
