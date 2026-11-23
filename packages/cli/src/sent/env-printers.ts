@@ -91,33 +91,18 @@ const HTTP_CLIENTS: ReadonlySet<string> = new Set([
 /** A program by its plain name, or in a folder a system keeps its programs in: not `./curl`, not `~/bin/curl`. */
 const PLAIN_PROGRAM = /^(?:\/(?:usr\/(?:local\/)?bin|bin|opt\/homebrew\/bin)\/)?([\w.-]+)$/;
 
-/** Whether the first word of a text, its quoting taken out, is an HTTP client by its plain name. */
-function runsHttpClient(text: string): boolean {
-  const word = shellJoined(/^\s*(\S*)/.exec(text)?.[1] ?? '');
-  return HTTP_CLIENTS.has(PLAIN_PROGRAM.exec(word)?.[1] ?? '');
-}
-
-/**
- * Ways a command gives a program's name another meaning: a function (`name()`, `function`), an alias, a
- * remembered path (`hash`), a loaded builtin (`enable`), definitions read from a file (`source`, `.`,
- * `autoload`) or from a text (`eval`), another search path (`PATH=`). Any of them, whatever name it gives.
- */
-const RENAMES =
-  /\b(?:alias(?:es)?|functions?|autoload|hash|enable|source|eval)\b|\bPATH=|\(\s*\)|(?:^|[\s;&|({])\.\s/;
-
-/**
- * Whether a command may give the name of a program in it another meaning (`curl() { ssh "$@"; }`), read
- * in the whole command with its quoting taken out. What an earlier command or a start-up file defined is
- * not in the text and is not seen.
- */
-export const mayRenameProgram = (command: string): boolean => RENAMES.test(shellJoined(command));
-
-const WORD_BREAK = /[\s()<>]/;
-/** Outside quotes: the end of a command, a substitution, a here-document. */
-const ENDS_COMMAND = /^(?:[;&|\n`]|\$\(|[<>]\(|<<)/;
 /** A parameter expansion that is a name and nothing more: no word, pattern or quote of its own inside. */
 const NAME_IN_BRACES = /\$\{[A-Za-z_]\w*\}/y;
 const NOTHING_QUOTED = new Uint8Array(0);
+/**
+ * Outside quotes, what makes a text more than one simple command: the end of a command (`;`, `&`, `|`, a
+ * new line), a group or subshell, a function body, an array (`path=(…)`), a backtick.
+ */
+const NOT_ONE_COMMAND = /[;&|\n\r(){}`]/;
+/** A word that sets a variable for the command (`X=1 curl …`), and the variable's name. */
+const ASSIGNMENT = /^([A-Za-z_]\w*)\+?=/;
+/** The search path, by any spelling of its name: `PATH`, or zsh's array `path`. */
+const SEARCH_PATH = /^path$/i;
 
 /** Where the `${NAME}` that starts at `at` ends, or -1 when what starts there is more than a name. */
 function nameInBracesEnd(text: string, at: number): number {
@@ -126,35 +111,50 @@ function nameInBracesEnd(text: string, at: number): number {
   return found === null ? -1 : at + found[0].length;
 }
 
+/** The words of a simple command as written, and for each character 1 where it stands inside quotes. */
+interface SimpleCommand {
+  readonly words: readonly string[];
+  readonly quoted: Uint8Array;
+}
+
 /**
- * For each character of one command, 1 where it stands inside shell quotes: `'…'`, `"…"` or `$'…'`. The
- * quotes are followed only as far as they are plain to read, and nothing after that counts as quoted: up
- * to the first `;`, `&`, `|`, new line or comment, the first substitution (`$(`, a backtick, `<(`, `>(`) or
- * here-document (`<<`), and the first `${` that is more than `${NAME}`, inside double quotes or outside
- * them. What comes after has a program, a word or quotes of its own that are not read here.
+ * A text read as one simple command: words, with quotes `'…'`, `"…"` and `$'…'`, and `${NAME}` that is a
+ * name and nothing more. Null for anything else, wherever it stands: a second command, a pipe, a group, a
+ * substitution (`$(`, a backtick, `<(`, `>(`, also inside double quotes), arithmetic (`$[`), a
+ * here-document or here-string (`<<`), a comment, a `${` that is more than a name, a new line outside
+ * quotes, quotes left open. Each of those can run a command or set a variable that is not read here.
  */
-function quotedPlaces(text: string): Uint8Array {
+function simpleCommand(text: string): SimpleCommand | null {
   const quoted = new Uint8Array(text.length);
+  const words: string[] = [];
   let quote: '' | "'" | '"' | "$'" = '';
-  let wordStart = true;
+  let start = -1;
   for (let i = 0; i < text.length; i += 1) {
     const c = text[i] as string;
     const pair = c + (text[i + 1] ?? '');
-    if (pair === '${' && (quote === '' || quote === '"')) {
+    if (quote === '' && /\s/.test(c) && !NOT_ONE_COMMAND.test(c)) {
+      if (start >= 0) words.push(text.slice(start, i));
+      start = -1;
+      continue;
+    }
+    if (quote === '' && start < 0) {
+      if (c === '#') return null;
+      start = i;
+    }
+    if (pair === '${' && quote !== "'" && quote !== "$'") {
       const end = nameInBracesEnd(text, i);
-      if (end < 0) break;
+      if (end < 0) return null;
       if (quote !== '') quoted.fill(1, i, end);
       i = end - 1;
-      wordStart = false;
     } else if (quote === '') {
-      if (ENDS_COMMAND.test(pair) || (c === '#' && wordStart)) break;
-      quote = pair === "$'" ? "$'" : c === "'" || c === '"' ? c : '';
-      wordStart = quote === '' && WORD_BREAK.test(c);
+      if (NOT_ONE_COMMAND.test(c) || pair === '<<' || pair === '$[') return null;
       // An escaped character is read with its backslash, and the quote of `$'` with its dollar.
+      if (c === '\\' && /[\n\r]/.test(text[i + 1] ?? '')) return null;
+      quote = pair === "$'" ? "$'" : c === "'" || c === '"' ? c : '';
       if (c === '\\' || quote === "$'") i += 1;
     } else {
       quoted[i] = 1;
-      if (quote === '"' && (c === '`' || pair === '$(')) break;
+      if (quote === '"' && (c === '`' || pair === '$(' || pair === '$[')) return null;
       if (c === '\\' && quote !== "'") {
         i += 1;
         if (i < text.length) quoted[i] = 1;
@@ -163,17 +163,48 @@ function quotedPlaces(text: string): Uint8Array {
       }
     }
   }
-  return quoted;
+  if (quote !== '') return null;
+  if (start >= 0) words.push(text.slice(start));
+  return { words, quoted };
 }
 
 /**
- * `renamed`: the command around the text may give a client's name another meaning; read from the text
- * itself when not given.
+ * Whether the program of a simple command, past the variables it sets for itself, is an HTTP client by its
+ * plain name. Not when one of those variables is the search path (`PATH=/tmp/x curl`), and not behind a
+ * wrapper (`command curl`, `env curl`, `exec curl`): the first word that sets nothing is the program.
  */
-function readsEnvironment(text: string, renamed: boolean | undefined): boolean {
+function runsHttpClient(words: readonly string[]): boolean {
+  let at = 0;
+  for (; at < words.length; at += 1) {
+    const assigned = ASSIGNMENT.exec(words[at] as string);
+    if (assigned === null) break;
+    if (SEARCH_PATH.test(assigned[1] as string)) return false;
+  }
+  const word = shellJoined(words[at] ?? '');
+  return HTTP_CLIENTS.has(PLAIN_PROGRAM.exec(word)?.[1] ?? '');
+}
+
+/** Where a text stands in quotes, when it is one simple command of an HTTP client; null otherwise. */
+function clientQuotes(text: string): Uint8Array | null {
+  const command = simpleCommand(text);
+  return command !== null && runsHttpClient(command.words) ? command.quoted : null;
+}
+
+/**
+ * Whether a whole command is one simple command whose program is an HTTP client by its plain name. Only
+ * there is a quoted word plain to read as an address: anything more (`path=(/tmp/x $path); curl …`, `read
+ * PATH`, a function, an alias, a pipe) may give the client's name another meaning or hand the word to a
+ * shell, and is not told apart here. What an earlier command or a start-up file defined is not seen.
+ */
+export const runsOneClient = (command: string): boolean => clientQuotes(command) !== null;
+
+/**
+ * `oneClient`: whether the whole command around the text is one simple command of an HTTP client
+ * (`runsOneClient`); read from the text itself when not given.
+ */
+function readsEnvironment(text: string, oneClient: boolean | undefined): boolean {
   if (!ENVIRON.test(text)) return false;
-  const followed = runsHttpClient(text) && !(renamed ?? mayRenameProgram(text));
-  const quoted = followed ? quotedPlaces(text) : NOTHING_QUOTED;
+  const quoted = (oneClient ?? true) ? (clientQuotes(text) ?? NOTHING_QUOTED) : NOTHING_QUOTED;
   // One word: the URL begins inside quotes, and the quotes were followed to its last character.
   const oneWord = (at: number, length: number): boolean =>
     quoted[at] === 1 && quoted[at + length - 1] === 1;
@@ -189,10 +220,10 @@ function readsEnvironment(text: string, renamed: boolean | undefined): boolean {
 
 /**
  * Whether a stage prints the environment, or reads a process's (`/proc/self/environ`, `os.environ`).
- * `renamed` is what `mayRenameProgram` says of the whole command the stage is in.
+ * `oneClient` is what `runsOneClient` says of the whole command the stage is in.
  */
-export function printsEnvironment(text: string, renamed?: boolean): boolean {
-  if (readsEnvironment(text, renamed)) return true;
+export function printsEnvironment(text: string, oneClient?: boolean): boolean {
+  if (readsEnvironment(text, oneClient)) return true;
   const words = joinedWords(text);
   const program = (words[0] ?? '').replace(/^.*\//, '');
   return ENV_PRINTERS.has(program) && words.slice(1).every((w) => /^-[pxi0u]*$/.test(w));
@@ -248,8 +279,8 @@ function substitutions(text: string): string[] {
  * @<(printenv)`, `wget --post-data="$(set)"`, a here-string of `$(env)`): what it printed is the
  * request's own data, though no stage before it printed it.
  */
-export const embedsPrinter = (text: string, renamed?: boolean): boolean =>
-  substitutions(text).some((inner) => printsEnvironment(inner, renamed));
+export const embedsPrinter = (text: string, oneClient?: boolean): boolean =>
+  substitutions(text).some((inner) => printsEnvironment(inner, oneClient));
 
 const joinedWords = (text: string): string[] =>
   shellJoined(text)

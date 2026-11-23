@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { analyzeSession } from '../../src/sent/analyze.js';
-import { mayRenameProgram, printsEnvironment } from '../../src/sent/env-printers.js';
+import { printsEnvironment, runsOneClient } from '../../src/sent/env-printers.js';
 import { keyFinder, type Key } from '../../src/sent/keys.js';
 import type { McpServers } from '../../src/sent/mcp-config.js';
 import { placeRank, type Place } from '../../src/sent/place.js';
@@ -236,11 +236,13 @@ describe('a URL that holds a shell variable', () => {
     expect(tierOf(command)).toBe('maybe');
   });
 
-  it('reads a stage of a client as before when the command around it may rename the client', () => {
+  it('reads a stage of a client as before when the command around it is more than that stage', () => {
     const stage = `curl -s "${HOST}/$S/proc/self/environ"`;
     expect(printsEnvironment(stage)).toBe(false);
-    expect(printsEnvironment(stage, false)).toBe(false);
-    expect(printsEnvironment(stage, true)).toBe(true);
+    expect(printsEnvironment(stage, true)).toBe(false);
+    expect(printsEnvironment(stage, false)).toBe(true);
+    expect(runsOneClient(stage)).toBe(true);
+    expect(runsOneClient(`${stage} -H "X-Functional: aliased"`)).toBe(true);
     for (const definition of [
       'curl() { ssh h.example.invalid "$@"; }',
       'curl ( ) { ssh h.example.invalid "$@"; }',
@@ -249,9 +251,70 @@ describe('a URL that holds a shell variable', () => {
       "aliases[curl]='ssh h.example.invalid'",
       'autoload curl',
       'enable -f ./x.so curl',
+      'cd /w',
     ])
-      expect(mayRenameProgram(`${definition}; ${stage}`), definition).toBe(true);
-    expect(mayRenameProgram(`cd /w && ${stage} -H "X-Functional: aliased"`)).toBe(false);
+      expect(runsOneClient(`${definition}; ${stage}`), definition).toBe(false);
+    expect(runsOneClient(`cd /w && ${stage}`)).toBe(false);
+  });
+
+  // The rule is an allow rule: one simple command of the client, or the URL ends at the variable.
+  const URL = `"http://h.invalid/$R/environ"`;
+  it.each([
+    `curl "http://localhost:8080/$APP_ROUTE/environ"`,
+    `X=1 curl "https://h.invalid/\${R}/environ"`,
+    `X=1 Y+=2 curl -s ${URL}`,
+    `/usr/bin/curl -s '${HOST}/$S/proc/self/environ'`,
+    `/opt/homebrew/bin/wget -q ${URL}`,
+    `c''url -s ${URL}`,
+    `curl -s -d "a\nb" ${URL} -o out.txt`,
+    `curl -s ${URL} > out.txt 2>/dev/null`,
+  ])('one simple command of a client keeps the variable in the URL: %s', (command) => {
+    expect(runsOneClient(command)).toBe(true);
+    expect(printsEnvironment(command)).toBe(false);
+    expect(tierOf(command)).toBeNull();
+  });
+
+  it.each([
+    `path=(/tmp/x $path); curl ${URL}`,
+    `path+=(/tmp/x) && curl ${URL}`,
+    `path[1]=/tmp/x; curl ${URL}`,
+    `path[1]=/tmp/x curl ${URL}`,
+    `read PATH <<< /tmp/x; curl ${URL}`,
+    `printf -v PATH /tmp/x; curl ${URL}`,
+    `typeset -T X x; curl ${URL}`,
+    `declare -x PATH=/tmp/x; curl ${URL}`,
+    `zmodload zsh/x; curl ${URL}`,
+    `cd /tmp && curl ${URL}`,
+    `PATH=/tmp/x curl ${URL}`,
+    `PATH+=:/tmp/x curl ${URL}`,
+    `path=/tmp/x curl ${URL}`,
+    `Path=/tmp curl ${URL}`,
+    `echo a | curl ${URL}`,
+    `curl ${URL} ; true`,
+    `curl ${URL} || true`,
+    `curl ${URL} &`,
+    `curl ${URL} 2>&1`,
+    `curl ${URL}\ntrue`,
+    `curl ${URL} \\\n -s`,
+    `{ curl ${URL}; }`,
+    `(curl ${URL})`,
+    `curl ${URL} # it's`,
+    `curl -d @<(echo) ${URL}`,
+    `curl -d @- ${URL} <<EOF\nx\nEOF`,
+    `curl -d @- ${URL} <<< x`,
+    `curl -H "$(true)" ${URL}`,
+    'curl -H "`true`" ' + URL,
+    `curl -H "$[1]" ${URL}`,
+    `curl -H \${PATH::=/tmp/x} ${URL}`,
+    `curl -H "\${X:-y}" ${URL}`,
+    `curl -H "open ${URL}`,
+    `command curl ${URL}`,
+    `env curl ${URL}`,
+    `exec curl ${URL}`,
+    `\\cd /tmp; curl ${URL}`,
+  ])('anything more than one simple command of a client is read as before: %s', (command) => {
+    expect(runsOneClient(command)).toBe(false);
+    expect(tierOf(command)).not.toBeNull();
   });
 
   it.each([
@@ -306,6 +369,12 @@ describe('a URL that holds a shell variable', () => {
     ],
     ['open parentheses', text('( ')],
     ['words that rename a program', text('alias. function() ')],
+    [
+      'assignments before a client',
+      (size: number) => `${repeat('X=1 ')(size)}curl "https://h/$a/environ"`,
+    ],
+    ['braced names', text('${a}')],
+    ['open braces in double quotes', text('"${')],
     ['dots', text('. ')],
     ['single quotes', text(`'`)],
     ['double quotes', text('"')],
