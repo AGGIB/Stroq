@@ -30,7 +30,7 @@ Plain, evidence-first, no hype. Says what it does not catch before a reader find
 
 ## Brand commitments
 
-- The hero headline "Find secrets in past AI coding agent sessions." leads; the session scan is the first thing offered.
+- The hero headline "Let your agent work. Stroq keeps watch over your data." leads; the session scan is the first thing offered.
 - Light and dark themes both ship.
 - The site is English.
 - Verdicts are never colour alone.

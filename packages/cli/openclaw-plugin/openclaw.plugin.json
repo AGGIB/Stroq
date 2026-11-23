@@ -1,7 +1,7 @@
 {
   "id": "stroq",
   "name": "Stroq",
-  "description": "Local action firewall for OpenClaw: scans what the agent reads, taints the session, blocks or asks before dangerous tool calls.",
+  "description": "Let your agent work. Stroq keeps watch over your data. In OpenClaw it scans what the agent reads, taints the session, and blocks or asks before the tool calls it recognises as dangerous.",
   "version": "0.32.0",
   "configSchema": {
     "type": "object",
