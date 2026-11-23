@@ -426,7 +426,7 @@ describe.skipIf(process.platform !== 'darwin')('Claude Code user-scope sandbox q
     expect(squash(screen.out())).toContain('eight home key paths');
     expect(screen.read).toHaveBeenCalledTimes(3);
   });
-  it('keeps --yes from enabling the sandbox or taking the optional AWS paths', async () => {
+  it('writes no sandbox setting with --yes, shows no promise of one, and says how to choose the list', async () => {
     const screen = fakeTerminal({ interactive: true });
     await runInteractiveInit(
       ['--user', '--agent', 'claude-code', '--yes'],
@@ -435,8 +435,62 @@ describe.skipIf(process.platform !== 'darwin')('Claude Code user-scope sandbox q
       { check: async () => null },
     );
     const configured = JSON.parse(readFileSync(join(home, '.claude/settings.json'), 'utf8'));
-    expect(configured.sandbox.enabled).toBeUndefined();
-    expect(configured.sandbox.credentials.files).toHaveLength(8);
+    expect(configured.hooks.PreToolUse).toHaveLength(1);
+    expect(configured.sandbox).toBeUndefined();
+    expect(configured.permissions).toBeUndefined();
     expect(screen.read).not.toHaveBeenCalled();
+    expect(squash(screen.out())).not.toContain('eight home key paths');
+    expect(squash(screen.out())).toContain(
+      'run stroq init --agent claude-code --user in a terminal, without --yes or --no-input',
+    );
+  });
+  it('names all three settings in the question that turns the sandbox on', async () => {
+    const screen = fakeTerminal({ interactive: true, answers: ['y', 'y', 'n'] });
+    await runInteractiveInit(
+      ['--user', '--agent', 'claude-code'],
+      screen.term,
+      { cwd, home },
+      { check: async () => null },
+    );
+    const said = squash(screen.out());
+    expect(said).toContain('This writes three settings');
+    expect(said).toContain('autoAllowBashIfSandboxed off');
+    expect(said).toContain('every Bash command still asks you unless you have allowed it');
+    expect(said).toContain('Claude Code Bash sandbox turned on');
+    const configured = JSON.parse(readFileSync(join(home, '.claude/settings.json'), 'utf8'));
+    expect(configured.sandbox).toMatchObject({ enabled: true, autoAllowBashIfSandboxed: false });
+  });
+  it('asks only for the retry rule when the user’s sandbox is already on, and leaves the rest', async () => {
+    mkdirSync(join(home, '.claude'), { recursive: true });
+    writeFileSync(
+      join(home, '.claude/settings.json'),
+      JSON.stringify({ sandbox: { enabled: true } }),
+    );
+    const screen = fakeTerminal({ interactive: true, answers: ['y', 'y', 'n'] });
+    await runInteractiveInit(
+      ['--user', '--agent', 'claude-code'],
+      screen.term,
+      { cwd, home },
+      { check: async () => null },
+    );
+    const said = squash(screen.out());
+    expect(said).toContain('already on in your user settings');
+    expect(said).not.toContain('This writes three settings');
+    const configured = JSON.parse(readFileSync(join(home, '.claude/settings.json'), 'utf8'));
+    expect(configured.sandbox.autoAllowBashIfSandboxed).toBeUndefined();
+    expect(configured.permissions.ask).toEqual(['Bash(dangerouslyDisableSandbox:true)']);
+  });
+  it('says before the question what the list costs where the sandbox is on, and when to run uninstall', async () => {
+    const screen = fakeTerminal({ interactive: true, answers: ['n'] });
+    await runInteractiveInit(
+      ['--user', '--agent', 'claude-code'],
+      screen.term,
+      { cwd, home },
+      { check: async () => null },
+    );
+    const said = squash(screen.out());
+    expect(said).toContain('gh, kubectl, gcloud, psql and Git over SSH lose their config there');
+    expect(said).toContain('stroq uninstall --user (run it before you delete');
+    expect(existsSync(join(home, '.claude/settings.json'))).toBe(false);
   });
 });

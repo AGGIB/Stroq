@@ -1,11 +1,27 @@
 import { homedir } from 'node:os';
-import { join } from 'node:path';
+import { isAbsolute, join } from 'node:path';
 
 export function claudeUserDir(
   home: string,
   env: Readonly<Record<string, string | undefined>>,
 ): string {
   return env.CLAUDE_CONFIG_DIR || join(home, '.claude');
+}
+
+/**
+ * Why `CLAUDE_CONFIG_DIR` cannot name the folder of Claude Code's user settings, or null when it is
+ * not set or names one. A value that is set must be an absolute path: an empty one names no folder,
+ * and a relative one names a different folder from each place a command is run in. What writes or
+ * judges the user settings asks this first and stops; `claudeUserDir` itself stays as lenient as the
+ * readers of past sessions need.
+ */
+export function claudeConfigDirProblem(
+  env: Readonly<Record<string, string | undefined>>,
+): string | null {
+  const set = env.CLAUDE_CONFIG_DIR;
+  if (set === undefined || (set !== '' && isAbsolute(set))) return null;
+  const what = set === '' ? 'set but empty' : `set to "${set}", which is not an absolute path`;
+  return `CLAUDE_CONFIG_DIR is ${what}. Stroq needs an absolute path there to find Claude Code's user settings folder. Set it to one, or unset it, and run the command again.`;
 }
 
 export function stroqHome(): string {

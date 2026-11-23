@@ -283,7 +283,7 @@ describe('a command, wrapped to the width of the screen', () => {
     const lines = f.fake.out().split('\n');
     expect(lines).toContain('      stroq uninstall --agent cursor');
     expect(lines).toContain('      openclaw plugins disable stroq');
-    expect(lines.some((line) => /^ {4}undo\s+\(the hooks only/.test(line))).toBe(true);
+    expect(lines.some((line) => /^ {4}undo\s+\(run it before you delete/.test(line))).toBe(true);
   });
 
   it('keeps a command in backticks whole inside a note', async () => {
