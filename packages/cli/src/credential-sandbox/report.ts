@@ -84,8 +84,13 @@ function cursorStatus(where: SandboxLocation): string {
   }
 }
 
+/**
+ * A starting point written from the Codex permissions documentation. No Codex release was run with
+ * it, so it is printed as an example to check, never as a setting Stroq vouches for.
+ */
 export const CODEX_EXAMPLE = [
-  '# Example for a new profile. Adapt your current profile if you already use one.',
+  '# Example only: it was not checked against a Codex release. Read the Codex permissions docs before you use it.',
+  '# For a new profile. Adapt your current profile if you already use one.',
   '# Select this at the top level, separately from legacy sandbox_mode or sandbox_workspace_write.',
   'default_permissions = "stroq-keys"',
   '[permissions.stroq-keys]',

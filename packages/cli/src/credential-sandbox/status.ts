@@ -3,10 +3,11 @@ import { dirname, join, resolve, sep } from 'node:path';
 import { z } from 'zod';
 import { linkedGit } from '../exposure/linked-git.js';
 import { LEGACY_SURFACE_IO } from '../exposure/surface-io.js';
-import { claudeUserDir } from '../paths.js';
+import { claudeConfigDirProblem, claudeUserDir } from '../paths.js';
 import { readTargetStrict } from '../harden/read.js';
 import { parseJsonDocument } from '../harden/json-doc.js';
-import { KEY_PATHS, RETRY_RULE } from './rules.js';
+import { linkedPath } from './links.js';
+import { KEY_PATHS, RETRY_RULE, type KeyPath } from './rules.js';
 
 export interface SandboxLocation {
   readonly home: string;
@@ -17,6 +18,8 @@ export interface SandboxLocation {
 }
 
 export function hasClaudeSettings(where: SandboxLocation): boolean {
+  // A settings folder that cannot be named is reported, not passed over.
+  if (claudeConfigDirProblem(where.env) !== null) return true;
   return existsSync(claudeUserDir(where.home, where.env)) || existsSync(join(where.cwd, '.claude'));
 }
 
@@ -59,13 +62,23 @@ const schema = z.object({
 });
 
 type Scope = 'user' | 'project' | 'local' | 'managed';
+/** A listed key path that is a link whose real place is not listed. Null: the link leads nowhere. */
+export interface UnlistedLink {
+  readonly path: KeyPath;
+  readonly target: string | null;
+}
 export type ClaudeSandboxStatus =
   | { readonly state: 'unsupported' }
-  | { readonly state: 'unknown' }
+  | { readonly state: 'unknown'; readonly reason?: string }
   | {
       readonly state: 'on' | 'off' | 'filesystem-off';
+      /** The settings file that decides the state, for the folder this was asked in. */
       readonly source: Scope | 'default';
+      /** Key paths with a deny entry. A link counts only when its target is listed as well. */
       readonly listed: number;
+      /** How many of those are listed by this folder's own settings and by no other file. */
+      readonly folderOnly: number;
+      readonly links: readonly UnlistedLink[];
       readonly overlaps: number;
       readonly retry: 'closed' | 'asks' | 'open';
       readonly excluded: number;
@@ -167,56 +180,106 @@ function possibleOverlap(key: string, path: string, platform: NodeJS.Platform) {
 type Layer = ReturnType<typeof layers>[number];
 const projectLayer = (f: Layer) => f.scope === 'project' || f.scope === 'local';
 
+interface Denied {
+  readonly path: string;
+  /** Listed by the folder's own settings (project or local), which a repository can ship. */
+  readonly folder: boolean;
+}
+
+function deniedPaths(where: SandboxLocation, files: Layer[], permFiles: Layer[]): Denied[] {
+  const fromSandbox = files.flatMap((f) => {
+    const pathOf = (p: string) => ({
+      path: location(p, where.home, f.base),
+      folder: projectLayer(f),
+    });
+    return [
+      ...(f.sandbox?.credentials?.files ?? []).filter((e) => e.mode === 'deny').map((e) => e.path),
+      ...(f.sandbox?.filesystem?.denyRead ?? []),
+    ].map(pathOf);
+  });
+  const fromRules = permFiles.flatMap((f) =>
+    (f.permissions?.deny ?? []).flatMap((rule) => {
+      const path = permissionPath(rule, 'Read', where.cwd, where.home);
+      return path === undefined ? [] : [{ path, folder: projectLayer(f) }];
+    }),
+  );
+  return [...fromSandbox, ...fromRules];
+}
+
+function allowedPaths(
+  where: SandboxLocation,
+  files: Layer[],
+  permFiles: Layer[],
+  adminRequired: boolean,
+): string[] {
+  const managedReadOnly =
+    files.find(
+      (f) =>
+        f.scope === 'managed' && f.sandbox?.filesystem?.allowManagedReadPathsOnly !== undefined,
+    )?.sandbox?.filesystem?.allowManagedReadPathsOnly === true;
+  const ignored = (f: Layer) => adminRequired && projectLayer(f);
+  const fromSandbox = files.flatMap((f) =>
+    [
+      ...(managedReadOnly && f.scope !== 'managed' ? [] : (f.sandbox?.filesystem?.allowRead ?? [])),
+      ...(ignored(f) ? [] : (f.sandbox?.filesystem?.allowWrite ?? [])),
+    ].map((p) => location(p, where.home, f.base)),
+  );
+  const fromRules = permFiles.flatMap((f) => {
+    if (ignored(f)) return [];
+    const edits = (f.permissions?.allow ?? []).flatMap((rule) => {
+      const path = permissionPath(rule, 'Edit', where.cwd, where.home);
+      return path === undefined ? [] : [path];
+    });
+    const dirs = (f.permissions?.additionalDirectories ?? []).map((p) =>
+      location(p, where.home, where.cwd),
+    );
+    return [...dirs, ...edits];
+  });
+  return [...fromSandbox, ...fromRules];
+}
+
+/** Whether the real place behind a linked key path is listed, by itself or by a folder above it. */
+function targetListed(where: SandboxLocation, id: KeyPath, listed: ReadonlySet<string>) {
+  const link = linkedPath(where.home, id);
+  if (link === undefined) return { covered: true as const };
+  if (link.kind === 'unresolved') return { covered: false as const, target: null };
+  const places = [location(link.target, where.home, where.cwd), link.real];
+  const covered = [...listed].some((l) => places.some((p) => p === l || p.startsWith(l + sep)));
+  return covered ? { covered: true as const } : { covered: false as const, target: link.target };
+}
+
 function keyPathCounts(
   where: SandboxLocation,
   files: Layer[],
   permFiles: Layer[],
   adminRequired: boolean,
 ) {
-  const managedReadOnly =
-    files.find(
-      (f) =>
-        f.scope === 'managed' && f.sandbox?.filesystem?.allowManagedReadPathsOnly !== undefined,
-    )?.sandbox?.filesystem?.allowManagedReadPathsOnly === true;
-  const listed = new Set<string>();
-  const allows: string[] = [];
-  for (const f of files) {
-    const pathOf = (p: string) => location(p, where.home, f.base);
-    for (const e of f.sandbox?.credentials?.files ?? [])
-      if (e.mode === 'deny') listed.add(pathOf(e.path));
-    for (const p of f.sandbox?.filesystem?.denyRead ?? []) listed.add(pathOf(p));
-    for (const p of [
-      ...(managedReadOnly && f.scope !== 'managed' ? [] : (f.sandbox?.filesystem?.allowRead ?? [])),
-      ...(adminRequired && projectLayer(f) ? [] : (f.sandbox?.filesystem?.allowWrite ?? [])),
-    ])
-      allows.push(pathOf(p));
+  const denied = deniedPaths(where, files, permFiles);
+  const listed = new Set(denied.map((d) => d.path));
+  const outsideFolder = new Set(denied.filter((d) => !d.folder).map((d) => d.path));
+  const allows = allowedPaths(where, files, permFiles, adminRequired);
+  const keys: string[] = [];
+  const links: UnlistedLink[] = [];
+  for (const id of KEY_PATHS) {
+    const at = location(id, where.home, where.cwd);
+    if (!listed.has(at)) continue;
+    const target = targetListed(where, id, listed);
+    if (target.covered) keys.push(at);
+    else links.push({ path: id, target: target.target });
   }
-  for (const f of permFiles) {
-    for (const p of adminRequired && projectLayer(f)
-      ? []
-      : (f.permissions?.additionalDirectories ?? []))
-      allows.push(location(p, where.home, where.cwd));
-    for (const rule of adminRequired && projectLayer(f) ? [] : (f.permissions?.allow ?? [])) {
-      const path = permissionPath(rule, 'Edit', where.cwd, where.home);
-      if (path) allows.push(path);
-    }
-    for (const rule of f.permissions?.deny ?? []) {
-      const path = permissionPath(rule, 'Read', where.cwd, where.home);
-      if (path) listed.add(path);
-    }
-  }
-  const keys = KEY_PATHS.map((p) => location(p, where.home, where.cwd)).filter((p) =>
-    listed.has(p),
-  );
   // Recent hosts ignore some project allowances for user-denied paths. Show possible conflicts only.
   const overlaps = keys.filter((key) =>
     allows.some((p) => possibleOverlap(key, p, where.platform)),
   ).length;
-  return { listed: keys.length, overlaps };
+  const folderOnly = keys.filter((key) => !outsideFolder.has(key)).length;
+  return { listed: keys.length, folderOnly, links, overlaps };
 }
 
 export function claudeSandboxStatus(where: SandboxLocation): ClaudeSandboxStatus {
   if (where.platform !== 'darwin' && where.platform !== 'linux') return { state: 'unsupported' };
+  // A relative or empty folder name would have another folder's file read as the user's own.
+  const unusable = claudeConfigDirProblem(where.env);
+  if (unusable !== null) return { state: 'unknown', reason: unusable };
   try {
     const files = layers(where).reverse();
     const managed = files.filter((f) => f.scope === 'managed');
@@ -282,10 +345,23 @@ export function claudeSandboxStatus(where: SandboxLocation): ClaudeSandboxStatus
   }
 }
 
+/** Said wherever settings files are read: they are not the session. */
+const LIVE_STATE = '/sandbox inside Claude Code shows the live state.';
+const TOTAL = KEY_PATHS.length;
+const plural = (n: number, one: string, many: string): string => (n === 1 ? one : many);
+
+function linkNotes(links: readonly UnlistedLink[]): string[] {
+  return links.map(({ path, target }) =>
+    target === null
+      ? `${path} is a link that could not be followed, so it is not counted.`
+      : `${path} is a link to ${target}, which is not listed, so it is not counted.`,
+  );
+}
+
 export function sandboxSummary(s: ClaudeSandboxStatus): string {
   if (s.state === 'unsupported') return 'Claude Code has no native Bash sandbox on this platform.';
   if (s.state === 'unknown')
-    return 'Claude Code sandbox settings could not be assessed. Check /sandbox in your session.';
+    return `Claude Code sandbox settings could not be assessed${s.reason === undefined ? '.' : ': ' + s.reason} ${LIVE_STATE}`;
   const mode = s.state === 'filesystem-off' ? 'filesystem isolation off' : s.state;
   const sources = {
     user: 'user settings.json',
@@ -299,35 +375,59 @@ export function sandboxSummary(s: ClaudeSandboxStatus): string {
     asks: 'require approval',
     open: 'may proceed without approval',
   }[s.retry];
+  const folder = s.folderOnly ? ` (${s.folderOnly} only in this folder's settings)` : '';
   const parts = [
     `Claude Code sandbox ${mode} (${sources[s.source]}).`,
-    `${s.listed}/${KEY_PATHS.length} key paths listed for denial.`,
+    `${s.listed}/${TOTAL} key paths listed for denial${folder}.`,
+    ...(s.state !== 'on' && s.listed > 0
+      ? [
+          `The list is not in force while ${s.state === 'off' ? 'the sandbox' : 'filesystem isolation'} is off.`,
+        ]
+      : []),
     `Retries outside the sandbox ${outside}.`,
+    ...linkNotes(s.links),
   ];
   if (s.overlaps)
     parts.push(
-      `Review possible read exceptions for ${s.overlaps} listed ${s.overlaps === 1 ? 'path' : 'paths'}.`,
+      `Review possible read exceptions for ${s.overlaps} listed ${plural(s.overlaps, 'path', 'paths')}.`,
     );
   if (s.excluded)
-    parts.push(`${s.excluded} excluded command ${s.excluded === 1 ? 'pattern' : 'patterns'}.`);
-  return [...parts, 'Check /sandbox in your session.'].join(' ');
+    parts.push(`${s.excluded} excluded command ${plural(s.excluded, 'pattern', 'patterns')}.`);
+  return [
+    ...parts,
+    `This is read from settings files, and a running session can differ. ${LIVE_STATE}`,
+  ].join(' ');
 }
 
-/** One status line on a card about past sessions. These settings are current. */
+/** Which file decides, as the card says it: a repository's own file is named as this folder's. */
+const DECIDED_BY = {
+  user: 'set by your user settings.json',
+  project: "set by this folder's .claude/settings.json",
+  local: "set by this folder's .claude/settings.local.json",
+  managed: 'set by managed settings',
+  default: 'no settings file turns it on',
+} as const;
+
+/** One status line on a card about past sessions. These settings are current, and are this folder's. */
 export function sandboxCardLine(status: ClaudeSandboxStatus): string {
   if (status.state === 'unsupported') return 'Claude Code has no native Bash sandbox here.';
   if (status.state === 'unknown') return 'Claude sandbox settings unknown. See stroq doctor.';
   const mode = status.state === 'filesystem-off' ? 'file isolation off' : status.state;
   const retry = { open: 'open', asks: 'ask', closed: 'off' }[status.retry];
+  const { folderOnly, links, overlaps, excluded } = status;
+  const folder = folderOnly ? ` (${folderOnly} only in this folder's settings)` : '';
   return [
-    `Claude sandbox ${mode} (config)`,
-    `${status.listed}/${KEY_PATHS.length} paths`,
+    `Claude sandbox ${mode} for this folder (${DECIDED_BY[status.source]})`,
+    `${status.listed}/${TOTAL} paths${folder}`,
     `outside retry ${retry}`,
-    ...(status.overlaps
-      ? [`${status.overlaps} possible read ${status.overlaps === 1 ? 'exception' : 'exceptions'}`]
+    ...(links.length
+      ? [`${links.length} link ${plural(links.length, 'target', 'targets')} not listed`]
       : []),
-    ...(status.excluded
-      ? [`${status.excluded} excluded command ${status.excluded === 1 ? 'pattern' : 'patterns'}`]
+    ...(overlaps
+      ? [`${overlaps} possible read ${plural(overlaps, 'exception', 'exceptions')}`]
+      : []),
+    ...(excluded
+      ? [`${excluded} excluded command ${plural(excluded, 'pattern', 'patterns')}`]
       : []),
   ].join(' · ');
 }

@@ -6,7 +6,7 @@ import type { JsonObject } from '../harden/types.js';
 import type { SandboxChoices } from '../credential-sandbox/rules.js';
 import { CURSOR_EVENTS } from '../adapters/cursor.js';
 import { recordInstall } from './install-record.js';
-import { claudeUserDir, cliDirIn, stroqHome } from '../paths.js';
+import { claudeConfigDirProblem, claudeUserDir, cliDirIn, stroqHome } from '../paths.js';
 import { stroqVersion } from '../version.js';
 import { WINDSURF_EVENTS } from '../adapters/windsurf.js';
 import {
@@ -219,42 +219,56 @@ export function installHooks(file: string, command: string): SettingsJson {
   return merged;
 }
 
+/** What a user-scope install does about the sandbox settings: a person's answers, or a reason for none. */
+export type SandboxPlan = SandboxChoices | 'hooks-only' | 'not-asked';
+
+async function initClaudeUser(
+  command: string,
+  dryRun: boolean,
+  sandbox: SandboxPlan,
+  platform: NodeJS.Platform,
+): Promise<void> {
+  const file = settingsPath('user');
+  // Only a person's own answers reach the sandbox settings, and only where Stroq sets them up.
+  const choices = platform === 'darwin' && typeof sandbox === 'object' ? sandbox : null;
+  const { editClaudeSettings } = await import('../credential-sandbox/settings.js');
+  const result = await editClaudeSettings({
+    file,
+    home: stroqHome(),
+    dryRun,
+    choices: choices ?? 'hooks-only',
+    hooks: (doc) => mergeHooks(doc, command) as JsonObject,
+  });
+  if (dryRun) {
+    process.stdout.write(JSON.stringify(result.doc, null, 2) + '\n');
+    return;
+  }
+  const { HOW_TO_ADD_LIST, installLines } = await import('../credential-sandbox/notice.js');
+  if (choices !== null) process.stdout.write(installLines(file, result));
+  else if (platform === 'darwin' && sandbox === 'not-asked') process.stdout.write(HOW_TO_ADD_LIST);
+}
+
 async function initClaudeCode(
   scope: 'project' | 'user',
   command: string,
   dryRun: boolean,
-  sandbox: SandboxChoices | null,
+  sandbox: SandboxPlan,
   platform: NodeJS.Platform,
 ): Promise<number> {
   const file = settingsPath(scope);
   if (scope === 'user') {
-    const choices = platform === 'darwin' ? sandbox : null;
-    const { editClaudeSettings } = await import('../credential-sandbox/settings.js');
-    const result = await editClaudeSettings({
-      file,
-      home: stroqHome(),
-      dryRun,
-      choices: choices ?? 'hooks-only',
-      hooks: (doc) => mergeHooks(doc, command) as JsonObject,
-    });
-    if (dryRun) {
-      process.stdout.write(JSON.stringify(result.doc, null, 2) + '\n');
-      return 0;
-    }
-    if (choices !== null)
-      process.stdout.write(
-        'User key-file rules configured for sandboxed Bash. Run "stroq doctor" to see the settings.\n',
-      );
+    await initClaudeUser(command, dryRun, sandbox, platform);
+    if (dryRun) return 0;
   } else {
     if (dryRun) {
       process.stdout.write(JSON.stringify(mergeHooks(readSettings(file), command), null, 2) + '\n');
       return 0;
     }
     installHooks(file, command);
-    if (platform === 'darwin' && sandbox !== null)
-      process.stdout.write(
-        'To configure user-wide key-file rules, run stroq init --agent claude-code --user.\n',
-      );
+    if (platform === 'darwin' && sandbox !== 'hooks-only') {
+      const { USER_WIDE_LIST } = await import('../credential-sandbox/notice.js');
+      process.stdout.write(USER_WIDE_LIST);
+    }
   }
   process.stdout.write(
     `Stroq hooks installed in ${file}\n  PreToolUse         → ${PRE_MATCHER}\n  PostToolUse        → ${POST_MATCHER}\n  PostToolUseFailure → ${POST_MATCHER}\nRun "stroq doctor" to verify.\n`,
@@ -522,7 +536,7 @@ export const runsFromNpxCache = (entry: string): boolean => NPX_CACHE_ROOT.test(
 
 /** What a test says about the machine `init` runs on; the real one is the default. */
 export interface InitMachine {
-  /** Separate choices made at an interactive user-scope install. */
+  /** What a person answered at an interactive user-scope install. Without it, nobody was asked. */
   readonly sandbox?: SandboxChoices;
   readonly platform?: NodeJS.Platform;
   readonly tools?: WindowsTools;
@@ -555,6 +569,13 @@ export async function runInit(args: readonly string[], machine: InitMachine = {}
   }
   const scope = values.user ? 'user' : 'project';
   const dryRun = values['dry-run'] === true;
+  // Before anything is copied or written: the user settings file must be one place, whatever folder this runs in.
+  const unusable =
+    agent === 'claude-code' && scope === 'user' ? claudeConfigDirProblem(process.env) : null;
+  if (unusable !== null) {
+    process.stdout.write(`${unusable} Nothing was changed.\n`);
+    return 1;
+  }
   const node = process.execPath;
   const launched = resolve(process.argv[1] ?? '');
   const entry = stableEntry(launched, stroqHome(), stroqVersion(), dryRun);
@@ -600,7 +621,7 @@ export async function runInit(args: readonly string[], machine: InitMachine = {}
         s,
         c,
         d,
-        values['hooks-only'] ? null : (machine.sandbox ?? {}),
+        values['hooks-only'] ? 'hooks-only' : (machine.sandbox ?? 'not-asked'),
         machine.platform ?? process.platform,
       ),
     cursor: initCursor,

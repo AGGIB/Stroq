@@ -30,7 +30,7 @@ describe('runInitFlow, the way back', () => {
     await f.run();
 
     expect(squash(f.fake.out())).toContain(
-      'undo stroq uninstall (the hooks only: ~/.stroq is yours to delete)',
+      'undo stroq uninstall (run it before you delete ~/.stroq: the record of what Stroq wrote is kept there. After that, ~/.stroq is yours to delete)',
     );
   });
 
@@ -40,7 +40,7 @@ describe('runInitFlow, the way back', () => {
     await f.run();
 
     expect(squash(f.fake.out())).toContain(
-      'undo stroq uninstall, stroq uninstall --agent cursor (the hooks only',
+      'undo stroq uninstall, stroq uninstall --agent cursor (run it before you delete',
     );
   });
 

@@ -70,6 +70,13 @@ export interface FlowDeps {
   readonly timers?: Timers;
 }
 
+/**
+ * What is said beside the way back. `uninstall` reads the record of what Stroq wrote from Stroq's own
+ * folder, so that folder is deleted after it, never before.
+ */
+const undoNote = (home: string): string =>
+  `(run it before you delete ${outsideLine(home)}: the record of what Stroq wrote is kept there. After that, ${outsideLine(home)} is yours to delete)`;
+
 const INDENT = '  ';
 const LABEL_WIDTH = 9;
 /** What a step's line and the mark before it take: `  ✔ `. */
@@ -334,11 +341,8 @@ async function drawFlow(deps: FlowDeps): Promise<number> {
     // Beside the label where they all fit, and under it, one to a line, where one would not: a command is
     // not broken over two lines.
     undoFits
-      ? [
-          'undo',
-          `${undo.map(unbreakable).join(', ')} (the hooks only: ${outsideLine(deps.home)} is yours to delete)`,
-        ]
-      : ['undo', `(the hooks only: ${outsideLine(deps.home)} is yours to delete)`],
+      ? ['undo', `${undo.map(unbreakable).join(', ')} ${undoNote(deps.home)}`]
+      : ['undo', undoNote(deps.home)],
   ];
   for (const [label, text] of lines) {
     const wrapped = wrapKeeping(text, width - LABEL_WIDTH - 2);

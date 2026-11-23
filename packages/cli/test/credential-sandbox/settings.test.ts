@@ -14,7 +14,9 @@ const save = (file: string, value: unknown) => {
 };
 const read = () => JSON.parse(readFileSync(settings, 'utf8'));
 const entry = (path: string) => ({ path, mode: 'deny' });
-const init = (args: string[] = []) => runInit(['--user', ...args], { platform: 'darwin' });
+/** A user-scope install as an interactive run makes it: a person agreed to the list, and to nothing more. */
+const init = (args: string[] = []) =>
+  runInit(['--user', ...args], { platform: 'darwin', sandbox: {} });
 beforeEach(() => {
   home = mkdtempSync(join(tmpdir(), 'stroq-credentials-'));
   cwd = join(home, 'project');
@@ -23,7 +25,7 @@ beforeEach(() => {
   where = { home, cwd, platform: 'darwin', managedDir: join(home, 'managed'), env: {} };
   vi.stubEnv('HOME', home);
   vi.stubEnv('USERPROFILE', home);
-  vi.stubEnv('CLAUDE_CONFIG_DIR', '');
+  vi.stubEnv('CLAUDE_CONFIG_DIR', undefined);
   vi.stubEnv('STROQ_HOME', join(home, '.stroq'));
   vi.spyOn(process, 'cwd').mockReturnValue(cwd);
   vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
@@ -34,12 +36,12 @@ afterEach(() => {
 });
 
 describe('user-scope Claude credential rules', () => {
-  it('previews the actual list without touching disk, and a script never enables the sandbox', async () => {
+  it('previews the actual list without touching disk, and the list alone never enables the sandbox', async () => {
     await init(['--dry-run']);
     const preview = JSON.parse(vi.mocked(process.stdout.write).mock.calls[0]![0] as string);
     expect(existsSync(settings)).toBe(false);
     expect(existsSync(join(home, '.stroq'))).toBe(false);
-    await init(['--yes', '--no-input']);
+    await init();
     expect(read()).toEqual(preview);
     expect(read().sandbox.credentials.files).toEqual(BASE_PATHS.map(entry));
     expect(read().sandbox.enabled).toBeUndefined();
@@ -80,9 +82,13 @@ describe('user-scope Claude credential rules', () => {
     expect(read()).toEqual(bad);
   });
   it('only installs the hooks on native Windows and for a project install', async () => {
-    await runInit(['--user'], { platform: 'win32', probe: async () => ({ ok: true, detail: '' }) });
+    await runInit(['--user'], {
+      platform: 'win32',
+      sandbox: { enable: true },
+      probe: async () => ({ ok: true, detail: '' }),
+    });
     expect(read().sandbox).toBeUndefined();
-    await runInit([], { platform: 'darwin' });
+    await runInit([], { platform: 'darwin', sandbox: { enable: true } });
     expect(
       JSON.parse(readFileSync(join(cwd, '.claude/settings.json'), 'utf8')).sandbox,
     ).toBeUndefined();
@@ -179,7 +185,7 @@ describe('consent and recovery', () => {
     await runUninstall(['--user']);
     expect(read()).toEqual({});
   });
-  it('retries cleanly after the settings write fails and leaves a malformed receipt untouched', async () => {
+  it('retries cleanly after the settings write fails and does not act on a malformed receipt', async () => {
     const atomic = await import('../../src/harden/atomic.js');
     const write = atomic.writeFileAtomic;
     const spy = vi
@@ -195,10 +201,12 @@ describe('consent and recovery', () => {
     const { readdirSync } = await import('node:fs');
     const dir = join(home, '.stroq', 'sandbox');
     const ledger = join(dir, readdirSync(dir)[0]!);
-    save(ledger, { version: 1, owned: [{ id: 'unknown', created: 0, previous: null }] });
+    const malformed = { version: 1, owned: [{ id: 'unknown', created: 0, previous: null }] };
+    save(ledger, malformed);
     const installed = read();
-    await expect(runUninstall(['--user'])).rejects.toThrow('ownership');
-    expect(read()).toEqual(installed);
+    await runUninstall(['--user']);
+    expect(read()).toEqual({ sandbox: installed.sandbox });
+    expect(JSON.parse(readFileSync(ledger, 'utf8'))).toEqual(malformed);
   });
 });
 
