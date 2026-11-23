@@ -1,5 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, truncateSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildCard, defaultWorkers, sessionFolders, type BuildEnv } from '../../src/card/build.js';
@@ -18,6 +25,7 @@ import {
   AWS_KEY,
   bash,
   claudeSession,
+  codexRollout,
   DAY,
   furnish,
   hostile,
@@ -324,6 +332,65 @@ describe('the card when there is nothing to read', () => {
   it('honours CLAUDE_CONFIG_DIR when it says where it looked', async () => {
     const data = await buildCard(30, env({ env: { CLAUDE_CONFIG_DIR: join(m.root, 'cfg') } }));
     expect(data.coverage.looked[0]).toBe(join(m.root, 'cfg', 'projects'));
+  });
+});
+
+/**
+ * `CODEX_HOME` is set per process: a Codex started without it keeps writing to `~/.codex`. So the card reads
+ * the folder it names and the default one, each once, and says it looked in both.
+ */
+describe('the card and CODEX_HOME', () => {
+  const withCodexHome = (value: string): BuildEnv =>
+    env({ env: { ...process.env, CODEX_HOME: value } });
+  const defaultLooked = (): string[] => [
+    join(m.home, '.claude', 'projects'),
+    join(m.home, '.codex', 'sessions'),
+    cursorStateDb(process.platform, process.env, m.home),
+  ];
+
+  it('reads the folder it names and the default one when both hold a session', async () => {
+    populate(m);
+    const codexHome = join(m.root, 'custom codex');
+    codexRollout(m, { name: 'custom', codexHome, commands: [{ command: 'ls' }] });
+    const data = await buildCard(30, withCodexHome(codexHome));
+    expect(data.coverage.agents.codex).toBe(2);
+    expect(data.counts.commands).toBe(6);
+    const [claude, codex, cursor] = defaultLooked();
+    expect(data.coverage.looked).toEqual([claude, join(codexHome, 'sessions'), cursor, codex]);
+  });
+
+  it('still reads the default folder when the folder it names holds no session', async () => {
+    populate(m);
+    const data = await buildCard(30, withCodexHome(join(m.root, 'empty codex')));
+    expect(data.coverage.agents.codex).toBe(1);
+    expect(data.counts.commands).toBe(5);
+    expect(data.coverage.looked).toContain(join(m.home, '.codex', 'sessions'));
+  });
+
+  it.each(['', 'relative/codex', '.'])('ignores the value %j', async (value) => {
+    populate(m);
+    const data = await buildCard(30, withCodexHome(value));
+    expect(data.coverage.agents.codex).toBe(1);
+    expect(data.coverage.looked).toEqual(defaultLooked());
+  });
+
+  it('reads a folder once when it names the default one by another path', async () => {
+    populate(m);
+    const linked = join(m.root, 'linked codex');
+    symlinkSync(join(m.home, '.codex'), linked, 'junction');
+    const data = await buildCard(30, withCodexHome(linked));
+    expect(data.coverage.agents.codex).toBe(1);
+    expect(data.counts.commands).toBe(5);
+    expect(data.coverage.looked).toHaveLength(3);
+  });
+
+  it('counts a session once when the folder it names is inside the default one', async () => {
+    populate(m);
+    const inside = join(m.home, '.codex', 'sessions', 'nested');
+    codexRollout(m, { name: 'nested', codexHome: inside, commands: [{ command: 'ls' }] });
+    const data = await buildCard(30, withCodexHome(inside));
+    expect(data.coverage.agents.codex).toBe(2);
+    expect(data.counts.commands).toBe(6);
   });
 });
 
