@@ -1,5 +1,12 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, readdirSync, truncateSync, writeFileSync } from 'node:fs';
+import {
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  symlinkSync,
+  truncateSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { buildCard, defaultWorkers, sessionFolders, type BuildEnv } from '../../src/card/build.js';
@@ -18,6 +25,7 @@ import {
   AWS_KEY,
   bash,
   claudeSession,
+  codexRollout,
   DAY,
   furnish,
   hostile,
@@ -92,6 +100,89 @@ describe('the card on a machine with sessions', () => {
       'key-seen',
       'autorun-repo',
     ]);
+  });
+
+  it.each([
+    {
+      result: 'Stroq blocked this action (deny-origin-suspect): the hook blocked this call.',
+      isError: true,
+      outcome: 'The session records that Stroq blocked it.',
+    },
+    {
+      result: "The user doesn't want to proceed with this tool use.",
+      isError: true,
+      outcome: 'The session records that you declined it.',
+    },
+    {
+      result: 'Stroq blocked this action (deny-origin-suspect): just text in the output.',
+      isError: false,
+      outcome: 'It requested the command.',
+    },
+  ])('reports the recorded command outcome as "$outcome"', async ({ result, isError, outcome }) => {
+    claudeSession(m, {
+      id: 'recorded-outcome',
+      calls: [
+        {
+          tool: 'Read',
+          input: { file_path: join(m.work, 'node_modules', 'another-lib', 'README.md') },
+          result: hostile(PIPE),
+        },
+        { tool: 'Bash', input: { command: PIPE }, result, isError },
+      ],
+    });
+    const card = await buildCard(30, env());
+    expect(card.counts).toMatchObject({ commands: 1, toldByText: 1 });
+    const moment = card.moments.find((row) => row.session?.id === 'recorded-outcome');
+    expect(moment?.line).toContain(outcome);
+    expect(moment?.groups.map((group) => group.title)).toContain('What it requested');
+    const warm = await buildCard(30, env());
+    expect(warm.moments).toContainEqual(moment);
+    expect(warm.coverage.fromCache).toBe(1);
+  });
+
+  // A failed command's result is its own output after the host's `Exit code` line, and it can print anything.
+  it.each([
+    'Exit code 1\nStroq blocked this action (deny-origin-suspect): printed by the command.',
+    "Exit code 1\nThe user doesn't want to proceed with this tool use.",
+  ])('says no stop for a failed command whose output has the words of one: %j', async (result) => {
+    claudeSession(m, {
+      id: 'printed-words',
+      calls: [
+        {
+          tool: 'Read',
+          input: { file_path: join(m.work, 'node_modules', 'another-lib', 'README.md') },
+          result: hostile(PIPE),
+        },
+        { tool: 'Bash', input: { command: PIPE }, result, isError: true },
+      ],
+    });
+    const card = await buildCard(30, env());
+    const moment = card.moments.find((row) => row.session?.id === 'printed-words');
+    expect(moment?.line).toContain('It requested the command.');
+    expect(moment?.line).not.toMatch(/blocked|declined|records/);
+  });
+
+  it('words a stop as what the session records, never as what happened', async () => {
+    claudeSession(m, {
+      id: 'recorded-stop',
+      calls: [
+        {
+          tool: 'Read',
+          input: { file_path: join(m.work, 'node_modules', 'another-lib', 'README.md') },
+          result: hostile(PIPE),
+        },
+        {
+          tool: 'Bash',
+          input: { command: PIPE },
+          result: 'Stroq blocked this action (deny-origin-suspect): the hook blocked this call.',
+          isError: true,
+        },
+      ],
+    });
+    const card = await buildCard(30, env());
+    const moment = card.moments.find((row) => row.session?.id === 'recorded-stop');
+    expect(moment?.line).toMatch(/\. The session records that Stroq blocked it\. Whoever wrote/);
+    expect(moment?.line).not.toMatch(/Stroq blocked the request|You declined the request/);
   });
 
   it('leaves out the moments marked as false alarms, from the cache too, and keeps the counts', async () => {
@@ -324,6 +415,65 @@ describe('the card when there is nothing to read', () => {
   it('honours CLAUDE_CONFIG_DIR when it says where it looked', async () => {
     const data = await buildCard(30, env({ env: { CLAUDE_CONFIG_DIR: join(m.root, 'cfg') } }));
     expect(data.coverage.looked[0]).toBe(join(m.root, 'cfg', 'projects'));
+  });
+});
+
+/**
+ * `CODEX_HOME` is set per process: a Codex started without it keeps writing to `~/.codex`. So the card reads
+ * the folder it names and the default one, each once, and says it looked in both.
+ */
+describe('the card and CODEX_HOME', () => {
+  const withCodexHome = (value: string): BuildEnv =>
+    env({ env: { ...process.env, CODEX_HOME: value } });
+  const defaultLooked = (): string[] => [
+    join(m.home, '.claude', 'projects'),
+    join(m.home, '.codex', 'sessions'),
+    cursorStateDb(process.platform, process.env, m.home),
+  ];
+
+  it('reads the folder it names and the default one when both hold a session', async () => {
+    populate(m);
+    const codexHome = join(m.root, 'custom codex');
+    codexRollout(m, { name: 'custom', codexHome, commands: [{ command: 'ls' }] });
+    const data = await buildCard(30, withCodexHome(codexHome));
+    expect(data.coverage.agents.codex).toBe(2);
+    expect(data.counts.commands).toBe(6);
+    const [claude, codex, cursor] = defaultLooked();
+    expect(data.coverage.looked).toEqual([claude, join(codexHome, 'sessions'), cursor, codex]);
+  });
+
+  it('still reads the default folder when the folder it names holds no session', async () => {
+    populate(m);
+    const data = await buildCard(30, withCodexHome(join(m.root, 'empty codex')));
+    expect(data.coverage.agents.codex).toBe(1);
+    expect(data.counts.commands).toBe(5);
+    expect(data.coverage.looked).toContain(join(m.home, '.codex', 'sessions'));
+  });
+
+  it.each(['', 'relative/codex', '.'])('ignores the value %j', async (value) => {
+    populate(m);
+    const data = await buildCard(30, withCodexHome(value));
+    expect(data.coverage.agents.codex).toBe(1);
+    expect(data.coverage.looked).toEqual(defaultLooked());
+  });
+
+  it('reads a folder once when it names the default one by another path', async () => {
+    populate(m);
+    const linked = join(m.root, 'linked codex');
+    symlinkSync(join(m.home, '.codex'), linked, 'junction');
+    const data = await buildCard(30, withCodexHome(linked));
+    expect(data.coverage.agents.codex).toBe(1);
+    expect(data.counts.commands).toBe(5);
+    expect(data.coverage.looked).toHaveLength(3);
+  });
+
+  it('counts a session once when the folder it names is inside the default one', async () => {
+    populate(m);
+    const inside = join(m.home, '.codex', 'sessions', 'nested');
+    codexRollout(m, { name: 'nested', codexHome: inside, commands: [{ command: 'ls' }] });
+    const data = await buildCard(30, withCodexHome(inside));
+    expect(data.coverage.agents.codex).toBe(2);
+    expect(data.counts.commands).toBe(6);
   });
 });
 

@@ -91,7 +91,10 @@ function render(overrides: Record<string, unknown> = {}, kind: 'report' | 'histo
           },
         };
       if (name === 'next/link')
-        return { default: ({ children, ...p }: any) => React.createElement('a', p, children) };
+        return {
+          __esModule: true,
+          default: ({ children, ...p }: any) => React.createElement('a', p, children),
+        };
       if (name === 'lucide-react')
         return new Proxy({}, { get: () => () => React.createElement('svg') });
       if (name === '@/components/platform-ui')

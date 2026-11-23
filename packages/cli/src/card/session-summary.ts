@@ -1,5 +1,5 @@
-// One session, summed up for the card: how many shell commands the agent ran and which of them a text
-// it had read told it to run (the strict rule, `strict-link.ts`).
+// One session, summed up for the card. Count the shell commands the agent requested and find which
+// ones a text told it to run (the strict rule in `strict-link.ts`).
 //
 // The recorded calls are judged in a throwaway engine, exactly as `stroq replay --all` does, and the
 // audit entries that engine wrote are what the rule reads. The user's own `~/.stroq` is not touched, no
@@ -9,6 +9,7 @@ import { isShellTool, type AuditEntry } from '@stroq/core';
 import { findRead, replayTranscript } from '../commands/replay.js';
 import { readCodexRollout } from '../sent/codex.js';
 import { readCursorSession } from '../sent/cursor.js';
+import { blockedBy } from '../sent/where.js';
 import { readTranscript, type Transcript } from '../replay/transcript.js';
 import { declaredPackages } from './declared-packages.js';
 import { leanTranscript } from './lean.js';
@@ -75,7 +76,12 @@ function readOf(link: Link, entries: readonly AuditEntry[]): ToldMoment['read'] 
   };
 }
 
-function momentOf(entry: AuditEntry, link: Link, entries: readonly AuditEntry[]): ToldMoment {
+function momentOf(
+  entry: AuditEntry,
+  link: Link,
+  entries: readonly AuditEntry[],
+  stop: ToldMoment['blockedBy'],
+): ToldMoment {
   const effect = entry.decision?.effect;
   return {
     shape: link.shape,
@@ -84,6 +90,7 @@ function momentOf(entry: AuditEntry, link: Link, entries: readonly AuditEntry[])
     command: entry.summary,
     at: entry.ts,
     decision: effect === 'allow' || effect === 'ask' || effect === 'deny' ? effect : 'none',
+    ...(stop === undefined ? {} : { blockedBy: stop }),
     read: readOf(link, entries),
   };
 }
@@ -130,8 +137,19 @@ export async function summarizeTranscript(
     kept.push({ entry, link });
     if (kept.length > MAX_TOLD_PER_SESSION) kept.shift();
   }
+  const stops = new Map<string, NonNullable<ToldMoment['blockedBy']>>();
+  if (agent === 'claude-code' && kept.length > 0) {
+    const keptIds = new Set(kept.map(({ entry }) => entry.callId));
+    for (const event of transcript.events) {
+      if (event.kind !== 'post' || !keptIds.has(event.id)) continue;
+      const stop = blockedBy(event, agent);
+      if (stop !== null) stops.set(event.id, stop);
+    }
+  }
   // Only the kept ones are looked up in the log: a session can have a great many told commands.
-  const moments = kept.map(({ entry, link }) => momentOf(entry, link, entries));
+  const moments = kept.map(({ entry, link }) =>
+    momentOf(entry, link, entries, stops.get(entry.callId ?? '')),
+  );
   return {
     ...base,
     told: toldHours.length,

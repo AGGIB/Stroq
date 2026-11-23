@@ -38,10 +38,13 @@ const agentNames = (data: CardData): string => {
 
 /** The sentences for a machine with no agent session in the window. */
 function nothingToReadView(data: CardData, home: string): CardView {
-  const [claude, codex, cursor] = data.coverage.looked.map((path) => shortPath(path, home, 50));
+  // By position: Claude Code's folder, Codex's, Cursor's store, then any further folder read for Codex.
+  const [claude, codex, cursor, ...moreCodex] = data.coverage.looked.map((path) =>
+    shortPath(path, home, 50),
+  );
   const places = [
     `Claude Code in ${claude ?? '~/.claude/projects'}`,
-    `Codex in ${codex ?? '~/.codex/sessions'}`,
+    `Codex in ${listed([codex ?? '~/.codex/sessions', ...moreCodex])}`,
   ];
   if (cursor !== undefined) places.push(`Cursor in ${cursor}`);
   const note = [data.coverage.cursorNote, data.coverage.sandboxNote].filter(Boolean).join(' ');
@@ -70,7 +73,7 @@ function rowsOf(data: CardData): CountRow[] {
     {
       id: 'commands',
       count: c.commands,
-      text: c.commands === 1 ? 'command your agent ran' : 'commands your agent ran',
+      text: c.commands === 1 ? 'command your agent requested' : 'commands your agent requested',
     },
     {
       id: 'told',
@@ -229,7 +232,7 @@ export function shareLine(data: CardData): string {
   const c = data.counts;
   return (
     `Hoo checked ${days(data.days)} of my agent sessions: ` +
-    `${plural(c.commands, 'command', 'commands')}, ${num(c.toldByText)} came from text the agent read, ` +
+    `${plural(c.commands, 'command request', 'command requests')}, ${num(c.toldByText)} came from text the agent read, ` +
     `${plural(c.keysSent, 'key', 'keys')} left this machine, ` +
     `${plural(c.autorunRepos, 'repo runs', 'repos run')} code as soon as an agent opens ${c.autorunRepos === 1 ? 'it' : 'them'}. ` +
     SHARE_TAIL

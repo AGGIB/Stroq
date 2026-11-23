@@ -50,7 +50,7 @@ describe('the card: something was found', () => {
         'Hoo checked 30 days of your agent sessions',
         '1,756 sessions · Claude Code and Codex · this machine',
         '',
-        '  31,785  commands your agent ran',
+        '  31,785  commands your agent requested',
         '       3  came from text it read: a README, page, issue',
         '          or tool result',
         '       1  key that left this machine (2 more were',
@@ -101,7 +101,7 @@ describe('the card: something was found', () => {
       moments: [moment(1)],
     });
     const out = text(renderCard(one, HOME));
-    expect(out).toContain('1  command your agent ran');
+    expect(out).toContain('1  command your agent requested');
     expect(out).toContain('1  key that left this machine');
     expect(out).toContain('1  repo runs code as soon as an agent opens it');
   });
@@ -114,7 +114,7 @@ describe('the card: nothing was found', () => {
         'Hoo checked 30 days of your agent sessions',
         '1,756 sessions · Claude Code and Codex · this machine',
         '',
-        '  31,785  commands your agent ran',
+        '  31,785  commands your agent requested',
         '       0  came from text it read: a README, page, issue',
         '          or tool result',
         '       0  keys that left this machine',
@@ -158,6 +158,28 @@ describe('the card: no sessions at all', () => {
       },
     };
     expect(renderCard(windows, 'C:\\Users\\Dev')).toEqual(renderCard(none, HOME));
+  });
+});
+
+describe('the card: no sessions, and a second Codex folder', () => {
+  it('names both folders it looked for Codex sessions in', () => {
+    const none = card({
+      coverage: {
+        ...card().coverage,
+        found: 0,
+        checked: 0,
+        agents: { claudeCode: 0, codex: 0 },
+        looked: [
+          '/Users/dev/.claude/projects',
+          '/srv/codex/sessions',
+          '/Users/dev/cursor/state.vscdb',
+          '/Users/dev/.codex/sessions',
+        ],
+      },
+    });
+    expect(renderCard(none, HOME).join(' ')).toContain(
+      'Looked for Claude Code in ~/.claude/projects, Codex in /srv/codex/sessions and ~/.codex/sessions, and Cursor in ~/cursor/state.vscdb.',
+    );
   });
 });
 
@@ -248,7 +270,7 @@ describe('the share line', () => {
       }),
     );
     expect(line).toBe(
-      'Hoo checked 30 days of my agent sessions: 31,785 commands, 3 came from text the agent read, ' +
+      'Hoo checked 30 days of my agent sessions: 31,785 command requests, 3 came from text the agent read, ' +
         '1 key left this machine, 2 repos run code as soon as an agent opens them. npx @stroq/cli',
     );
     expect(line).not.toContain('\n');
