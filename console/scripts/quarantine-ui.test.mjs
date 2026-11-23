@@ -130,7 +130,10 @@ function harness() {
           },
         };
       if (name === 'next/link')
-        return { default: ({ children, ...props }) => React.createElement('a', props, children) };
+        return {
+          __esModule: true,
+          default: ({ children, ...props }) => React.createElement('a', props, children),
+        };
       if (name === 'next/navigation') return { useSearchParams: () => new URLSearchParams() };
       if (name === 'lucide-react')
         return new Proxy({}, { get: () => () => React.createElement('svg') });
