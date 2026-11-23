@@ -406,3 +406,37 @@ describe('runInteractiveInit, what it reads', () => {
     );
   });
 });
+
+describe.skipIf(process.platform !== 'darwin')('Claude Code user-scope sandbox questions', () => {
+  it.each([
+    [['y', 'y', 'y'], true, 13],
+    [['y', '', ''], undefined, 8],
+    [['y', 'n', 'y'], undefined, 13],
+  ] as const)('honours each answer independently (%j)', async (answers, enabled, count) => {
+    const screen = fakeTerminal({ interactive: true, answers: [...answers] });
+    await runInteractiveInit(
+      ['--user', '--agent', 'claude-code'],
+      screen.term,
+      { cwd, home },
+      { check: async () => null },
+    );
+    const configured = JSON.parse(readFileSync(join(home, '.claude/settings.json'), 'utf8'));
+    expect(configured.sandbox.enabled).toBe(enabled);
+    expect(configured.sandbox.credentials.files).toHaveLength(count);
+    expect(squash(screen.out())).toContain('eight home key paths');
+    expect(screen.read).toHaveBeenCalledTimes(3);
+  });
+  it('keeps --yes from enabling the sandbox or taking the optional AWS paths', async () => {
+    const screen = fakeTerminal({ interactive: true });
+    await runInteractiveInit(
+      ['--user', '--agent', 'claude-code', '--yes'],
+      screen.term,
+      { cwd, home },
+      { check: async () => null },
+    );
+    const configured = JSON.parse(readFileSync(join(home, '.claude/settings.json'), 'utf8'));
+    expect(configured.sandbox.enabled).toBeUndefined();
+    expect(configured.sandbox.credentials.files).toHaveLength(8);
+    expect(screen.read).not.toHaveBeenCalled();
+  });
+});

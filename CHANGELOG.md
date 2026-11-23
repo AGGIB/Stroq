@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **One pitch in every place: "Let your agent work. Stroq keeps watch over your data."** The README, the npm page, the site's headline and link previews, and the package, plugin and marketplace descriptions now say the same thing: Stroq watches what your AI coding agent does with your keys and files, blocks the sends it recognises as a leak, and shows where your keys have already gone. The question "Who is really in charge of your agent?" stays on the line above the card picture. The first screen of `stroq init` says "Keeps watch over your data" where it said "Action firewall for AI coding agents", and the console is called the local console where it was called a security platform: in its pages, its start-up line and `stroq help`. No command, rule or decision changed.
+
 ## [0.32.0] - 2026-11-11
 
 ### Added

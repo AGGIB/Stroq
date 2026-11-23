@@ -21,6 +21,24 @@ updates:
       # can compile against an API that 22 does not have and fail for its users.
       - dependency-name: '@types/node'
         update-types: [version-update:semver-major]
+  # The console has its own lockfile and is deliberately outside the root workspace.
+  - package-ecosystem: npm
+    directory: /console
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      dev-dependencies:
+        dependency-type: development
+        update-types: [minor, patch]
+    ignore:
+      - dependency-name: '@types/node'
+        update-types: [version-update:semver-major]
+  - package-ecosystem: npm
+    directory: /.github/tools/mcp-probe
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 1
   - package-ecosystem: github-actions
     directory: /
     schedule:

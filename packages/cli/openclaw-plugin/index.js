@@ -8,7 +8,7 @@ import { createRequire } from 'node:module';
 import { clip, runStroq, text } from './run-stroq.js';
 
 const DESCRIPTION =
-  'Local action firewall for OpenClaw: scans what the agent reads, taints the session, blocks or asks before dangerous tool calls.';
+  'Let your agent work. Stroq keeps watch over your data. In OpenClaw it scans what the agent reads, taints the session, and blocks or asks before the tool calls it recognises as dangerous.';
 const DEFAULT_ASK_TIMEOUT_MS = 120000;
 // OpenClaw's own documented bounds for an approval prompt. A `timeoutMs` past the
 // maximum is not a longer prompt, it is a `requireApproval` the Gateway may reject

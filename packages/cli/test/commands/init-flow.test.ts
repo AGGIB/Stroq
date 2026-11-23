@@ -14,7 +14,7 @@ describe('runInitFlow, answered yes', () => {
     await f.run();
 
     expect(f.fake.out()).toContain('  stroq 0.22.0\n');
-    expect(f.fake.out()).toContain('Action firewall for AI coding agents');
+    expect(f.fake.out()).toContain('Keeps watch over your data');
     expect(squash(f.fake.out())).toContain('Nothing is sent anywhere.');
   });
 

@@ -1,0 +1,9 @@
+{
+  "name": "@stroq/mcp-probe-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Locked sandbox runtime for the native MCP probe CI job.",
+  "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.79"
+  }
+}

@@ -92,7 +92,7 @@ const SECTIONS: readonly Section[] = [
     job: 'guard',
     title: 'Guard your agent',
     commands: [
-      more('console', 'console', 'Open the local security platform'),
+      more('console', 'console', 'Open the local console'),
       more('doctor', 'doctor', 'Is the guard installed and being called?'),
       more('untaint', 'untaint --session <id>', 'Clear a flagged session after a false alarm'),
       more('trust', 'trust <file>', 'Mark a file as fine until it changes'),
