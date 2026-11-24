@@ -95,9 +95,14 @@ describe.each(PAGES)('the first screen of $name', ({ firstScreen, pictureBase })
     expect(block).toMatch(/^npx @stroq\/cli {12}a card of your own sessions/m);
   });
 
-  it('keeps the attack badge at the number of attacks the CLI replays, none passing through', () => {
+  it('keeps the attack badge at how the replayed attacks end: denied, asked, none passing through', () => {
+    // The outcome of each scenario is pinned in test/attack/run.test.ts. The badge says
+    // how many were asked, because in an unattended run nobody answers those questions.
+    const denied = 15;
+    const asked = 21;
+    expect(denied + asked).toBe(ATTACK_COUNT);
     expect(firstScreen).toContain(
-      `[![stroq attack: 0 of ${ATTACK_COUNT} passed through](https://img.shields.io/badge/stroq%20attack-0%20of%20${ATTACK_COUNT}%20passed%20through-`,
+      `[![stroq attack, ${ATTACK_COUNT} scenarios: ${denied} denied, ${asked} asked, 0 passed through](https://img.shields.io/badge/stroq%20attack-${denied}%20denied%2C%20${asked}%20asked%2C%200%20passed%20through-`,
     );
   });
 

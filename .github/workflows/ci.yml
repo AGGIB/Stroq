@@ -352,7 +352,44 @@ jobs:
           node packages/cli/dist/index.js inspect --changed-from HEAD^1 --format sarif . > stroq-inspect.sarif || [ $? -eq 1 ]
           node packages/cli/dist/index.js inspect --changed-from HEAD^1 --format github . >> "$GITHUB_STEP_SUMMARY" || [ $? -eq 1 ]
 
-      - uses: github/codeql-action/upload-sarif@33d7b85da1a04171e211befe2c739303b9a4c066 # v4.39.3
+      - uses: github/codeql-action/upload-sarif@1bd86f2fdb4b86187fa4059f16f31a3202acc9ea # v4.39.4
         with:
           sarif_file: stroq-inspect.sarif
           category: stroq-inspect
+
+  # A pull request that adds a dependency with a known high or critical advisory, or
+  # moves one to such a version, fails here. GitHub compares the pull request's
+  # dependency graph with its base's, so it covers every lockfile the graph reads (the
+  # root, console/ and tools/ci/mcp-probe) and needs no checkout. There is no base to
+  # compare on a push, so it runs on pull requests only.
+  dependency-review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/dependency-review-action@bbc44d14a204704ccc493733616cd1e93a0321ec # v5.0.1
+        with:
+          fail-on-severity: high
+
+  # zanadir (github.com/MustacheCase/zanadir) reads this repository's CI and reports
+  # which kinds of checks it runs and whether each one can fail the build. It reports
+  # and does not gate: without `fail-on-weakened` or `enforce` it exits 0. The action
+  # runs a container pinned by digest and gets this job's read-only token. Agent Skill
+  # Security is left out because the inspect job above reads the repository's skill and
+  # zanadir does not know that job yet; Performance Testing does not apply.
+  zanadir:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - uses: MustacheCase/zanadir-action@059d8ee8b790fb5a3d70716ca5cb79fda35c67cf # v1.41
+        with:
+          dir: .
+          excluded-categories: Performance Testing,Agent Skill Security
