@@ -5,5 +5,8 @@
   "description": "Locked sandbox runtime for the native MCP probe CI job.",
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.83"
+  },
+  "overrides": {
+    "zod": "4.6.6"
   }
 }
